@@ -1,5 +1,9 @@
 add_library(pulsar_domain
   src/build_info.cpp
+  src/time/frame_number.cpp
+  src/time/frame_rate.cpp
+  src/time/media_time.cpp
+  src/time/rational.cpp
 )
 
 add_library(pulsar::domain ALIAS pulsar_domain)
