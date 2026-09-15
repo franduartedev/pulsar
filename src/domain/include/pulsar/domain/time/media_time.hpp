@@ -39,6 +39,9 @@ private:
 
 [[nodiscard]] FrameNumber frame_at(MediaTime time, FrameRate rate, RoundingMode rounding);
 
+[[nodiscard]] MediaTime operator+(MediaTime lhs, MediaTime rhs);
+[[nodiscard]] MediaTime operator-(MediaTime lhs, MediaTime rhs);
+
 [[nodiscard]] bool operator==(MediaTime lhs, MediaTime rhs);
 [[nodiscard]] bool operator!=(MediaTime lhs, MediaTime rhs);
 [[nodiscard]] bool operator<(MediaTime lhs, MediaTime rhs);

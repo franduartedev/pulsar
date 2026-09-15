@@ -4,6 +4,10 @@ add_library(pulsar_domain
   src/time/frame_rate.cpp
   src/time/media_time.cpp
   src/time/rational.cpp
+  src/time/time_range.cpp
+  src/timeline/clip.cpp
+  src/timeline/timeline.cpp
+  src/timeline/track.cpp
 )
 
 add_library(pulsar::domain ALIAS pulsar_domain)

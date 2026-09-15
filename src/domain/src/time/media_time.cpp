@@ -69,6 +69,35 @@ using WideInt = __int128_t;
   return lhs * rhs;
 }
 
+[[nodiscard]] WideInt checked_add(WideInt lhs, WideInt rhs) {
+  constexpr WideInt wide_max =
+      (static_cast<WideInt>(1) << 126) + ((static_cast<WideInt>(1) << 126) - 1);
+  constexpr WideInt wide_min = -wide_max - 1;
+
+  if ((rhs > 0 && lhs > wide_max - rhs) || (rhs < 0 && lhs < wide_min - rhs)) {
+    throw std::overflow_error{"media-time addition exceeds supported range"};
+  }
+
+  return lhs + rhs;
+}
+
+[[nodiscard]] Rational combine_seconds(MediaTime lhs, MediaTime rhs, bool subtract_rhs) {
+  const Rational left = lhs.seconds();
+  const Rational right = rhs.seconds();
+
+  const WideInt left_numerator = left.numerator();
+  const WideInt right_numerator = subtract_rhs ? -static_cast<WideInt>(right.numerator())
+                                               : static_cast<WideInt>(right.numerator());
+
+  const WideInt numerator =
+      checked_add(checked_multiply(left_numerator, right.denominator()),
+                  checked_multiply(right_numerator, left.denominator()));
+  const WideInt denominator = checked_multiply(left.denominator(), right.denominator());
+  const WideInt divisor = gcd_wide(numerator, denominator);
+
+  return Rational{checked_to_int64(numerator / divisor), checked_to_int64(denominator / divisor)};
+}
+
 [[nodiscard]] FrameNumber rounded_frame(WideInt numerator, WideInt denominator,
                                         RoundingMode rounding) {
   if (denominator <= 0) {
@@ -145,6 +174,16 @@ FrameNumber frame_at(MediaTime time, FrameRate rate, RoundingMode rounding) {
       checked_multiply(time_base.denominator(), frames_per_second.denominator());
 
   return rounded_frame(numerator, denominator, rounding);
+}
+
+MediaTime operator+(MediaTime lhs, MediaTime rhs) {
+  const Rational seconds = combine_seconds(lhs, rhs, false);
+  return MediaTime{seconds.numerator(), Rational{1, seconds.denominator()}};
+}
+
+MediaTime operator-(MediaTime lhs, MediaTime rhs) {
+  const Rational seconds = combine_seconds(lhs, rhs, true);
+  return MediaTime{seconds.numerator(), Rational{1, seconds.denominator()}};
 }
 
 bool operator==(MediaTime lhs, MediaTime rhs) {
