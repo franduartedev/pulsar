@@ -6,4 +6,6 @@ function(pulsar_apply_project_options target_name)
       CXX_EXTENSIONS OFF
       CXX_STANDARD_REQUIRED ON
   )
+
+  pulsar_apply_sanitizers(${target_name})
 endfunction()
