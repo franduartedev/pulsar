@@ -13,6 +13,7 @@ target_link_libraries(pulsar_engine_lab
   PRIVATE
     pulsar::application
     pulsar::domain
+    pulsar::media_ffmpeg
 )
 
 pulsar_apply_project_options(pulsar_engine_lab)

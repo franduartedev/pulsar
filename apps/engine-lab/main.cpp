@@ -8,10 +8,99 @@
 #include <pulsar/domain/timeline/timeline.hpp>
 #include <pulsar/domain/timeline/track.hpp>
 #include <pulsar/domain/timeline/track_kind.hpp>
+#include <pulsar/application/media/media_probe_error.hpp>
+#include <pulsar/media/ffmpeg/ffmpeg_media_probe.hpp>
 
+#include <filesystem>
 #include <iostream>
+#include <optional>
+#include <string_view>
 
-int main() {
+namespace {
+
+void print_seconds(const std::optional<pulsar::domain::MediaTime>& time) {
+  if (!time.has_value()) {
+    std::cout << "unknown";
+    return;
+  }
+
+  const auto seconds = time->seconds();
+  std::cout << seconds.numerator();
+  if (seconds.denominator() != 1) {
+    std::cout << '/' << seconds.denominator();
+  }
+  std::cout << " s";
+}
+
+void print_probe_result(const pulsar::application::MediaProbeResult& result) {
+  std::cout << "PULSAR Engine Lab\n";
+  std::cout << "Media Probe\n";
+  std::cout << "File: " << result.path.filename().string() << '\n';
+  std::cout << "Container: "
+            << (result.container_name.has_value() ? *result.container_name : "unknown") << '\n';
+  std::cout << "Duration: ";
+  print_seconds(result.duration);
+  std::cout << "\n";
+
+  for (const auto& stream : result.video_streams) {
+    std::cout << "Video stream #" << stream.stream_index << '\n';
+    std::cout << "Codec: " << stream.codec_name << '\n';
+    std::cout << "Resolution: " << stream.width << 'x' << stream.height << '\n';
+    std::cout << "Time base: " << stream.time_base.numerator() << '/'
+              << stream.time_base.denominator() << '\n';
+    std::cout << "Duration: ";
+    print_seconds(stream.duration);
+    std::cout << "\n";
+    std::cout << "Nominal FPS: ";
+    if (stream.nominal_frame_rate.has_value()) {
+      const auto rate = stream.nominal_frame_rate->rational();
+      std::cout << rate.numerator() << '/' << rate.denominator();
+    } else {
+      std::cout << "unknown";
+    }
+    std::cout << "\n";
+  }
+
+  for (const auto& stream : result.audio_streams) {
+    std::cout << "Audio stream #" << stream.stream_index << '\n';
+    std::cout << "Codec: " << stream.codec_name << '\n';
+    std::cout << "Sample rate: " << stream.sample_rate << '\n';
+    std::cout << "Channels: " << stream.channel_count << '\n';
+    std::cout << "Time base: " << stream.time_base.numerator() << '/'
+              << stream.time_base.denominator() << '\n';
+    std::cout << "Duration: ";
+    print_seconds(stream.duration);
+    std::cout << "\n";
+  }
+}
+
+int run_probe(const std::filesystem::path& path) {
+  const auto probe = pulsar::media::ffmpeg::FFmpegMediaProbe{};
+  const auto result = probe.probe(path);
+  print_probe_result(result);
+  return 0;
+}
+
+} // namespace
+
+int main(int argc, char** argv) {
+  if (argc == 3 && std::string_view{argv[1]} == "--probe") {
+    try {
+      return run_probe(std::filesystem::path{argv[2]});
+    } catch (const pulsar::application::MediaProbeError& error) {
+      std::cerr << "Media probe failed: " << error.what() << '\n';
+      return 2;
+    } catch (const std::exception& error) {
+      std::cerr << "Media probe failed: " << error.what() << '\n';
+      return 2;
+    }
+  }
+
+  if (argc != 1) {
+    std::cerr << "Usage: pulsar-engine-lab [--probe <local-media-file>]\n";
+    return 2;
+  }
+
   using namespace pulsar::domain;
 
   const auto rate = pulsar::domain::FrameRate{30000, 1001};

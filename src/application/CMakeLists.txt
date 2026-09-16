@@ -1,6 +1,7 @@
 add_library(pulsar_application
   src/bootstrap.cpp
   src/commands/command_processor.cpp
+  src/media/media_probe_error.cpp
 )
 
 add_library(pulsar::application ALIAS pulsar_application)

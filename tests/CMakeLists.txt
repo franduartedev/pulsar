@@ -55,3 +55,19 @@ pulsar_apply_project_options(pulsar_command_history_tests)
 pulsar_apply_compiler_warnings(pulsar_command_history_tests)
 
 add_test(NAME pulsar.application.command_history COMMAND pulsar_command_history_tests)
+
+add_executable(pulsar_ffmpeg_probe_tests
+  media/ffmpeg_probe_test.cpp
+)
+
+target_link_libraries(pulsar_ffmpeg_probe_tests
+  PRIVATE
+    pulsar::media_ffmpeg
+    pulsar::application
+    pulsar::domain
+)
+
+pulsar_apply_project_options(pulsar_ffmpeg_probe_tests)
+pulsar_apply_compiler_warnings(pulsar_ffmpeg_probe_tests)
+
+add_test(NAME pulsar.media.ffmpeg_probe COMMAND pulsar_ffmpeg_probe_tests)
