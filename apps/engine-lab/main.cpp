@@ -9,11 +9,16 @@
 #include <pulsar/domain/timeline/track.hpp>
 #include <pulsar/domain/timeline/track_kind.hpp>
 #include <pulsar/application/media/media_probe_error.hpp>
+#include <pulsar/media/ffmpeg/ffmpeg_video_decode_session.hpp>
 #include <pulsar/media/ffmpeg/ffmpeg_media_probe.hpp>
+#include <pulsar/media/ffmpeg/media_decode_error.hpp>
 
+#include <chrono>
+#include <iomanip>
 #include <filesystem>
 #include <iostream>
 #include <optional>
+#include <string>
 #include <string_view>
 
 namespace {
@@ -30,6 +35,10 @@ void print_seconds(const std::optional<pulsar::domain::MediaTime>& time) {
     std::cout << '/' << seconds.denominator();
   }
   std::cout << " s";
+}
+
+void print_timestamp(const std::optional<pulsar::domain::MediaTime>& time) {
+  print_seconds(time);
 }
 
 void print_probe_result(const pulsar::application::MediaProbeResult& result) {
@@ -81,6 +90,102 @@ int run_probe(const std::filesystem::path& path) {
   return 0;
 }
 
+int run_decode(const std::filesystem::path& path) {
+  const auto probe = pulsar::media::ffmpeg::FFmpegMediaProbe{};
+  const auto probe_result = probe.probe(path);
+  if (probe_result.video_streams.empty()) {
+    std::cerr << "Video decode failed: media file contains no video stream\n";
+    return 2;
+  }
+
+  const int stream_index = probe_result.video_streams.front().stream_index;
+  auto session = pulsar::media::ffmpeg::FFmpegVideoDecodeSession{path, stream_index};
+
+  std::size_t frame_count = 0;
+  std::size_t frames_without_timestamp = 0;
+  bool resolution_changed = false;
+  bool pixel_format_changed = false;
+  int first_width = 0;
+  int first_height = 0;
+  std::optional<std::string> first_pixel_format;
+  std::optional<pulsar::domain::MediaTime> first_timestamp;
+  std::optional<pulsar::domain::MediaTime> last_timestamp;
+  std::optional<pulsar::domain::MediaTime> previous_timestamp;
+  bool observed_timestamp_order = false;
+  bool timestamps_monotonic = true;
+
+  const auto started_at = std::chrono::steady_clock::now();
+  while (auto frame = session.decode_next()) {
+    if (frame_count == 0) {
+      first_width = frame->width;
+      first_height = frame->height;
+      first_pixel_format = frame->pixel_format_name;
+      first_timestamp = frame->presentation_timestamp;
+    } else {
+      resolution_changed =
+          resolution_changed || frame->width != first_width || frame->height != first_height;
+      pixel_format_changed =
+          pixel_format_changed || frame->pixel_format_name != first_pixel_format;
+    }
+
+    if (!frame->presentation_timestamp.has_value()) {
+      ++frames_without_timestamp;
+    } else {
+      if (previous_timestamp.has_value()) {
+        observed_timestamp_order = true;
+        timestamps_monotonic =
+            timestamps_monotonic && *previous_timestamp <= *frame->presentation_timestamp;
+      }
+      previous_timestamp = frame->presentation_timestamp;
+      last_timestamp = frame->presentation_timestamp;
+    }
+
+    ++frame_count;
+  }
+  const auto finished_at = std::chrono::steady_clock::now();
+  const bool eof_stable = !session.decode_next().has_value();
+  const auto elapsed = std::chrono::duration<double>(finished_at - started_at).count();
+  const double frames_per_second =
+      elapsed > 0.0 ? static_cast<double>(frame_count) / elapsed : 0.0;
+
+  std::cout << "PULSAR Engine Lab\n";
+  std::cout << "Video Decode\n";
+  std::cout << "File: " << path.filename().string() << '\n';
+  std::cout << "Stream: #" << session.stream_index() << '\n';
+  std::cout << "Codec: " << session.codec_name() << '\n';
+  std::cout << "Frames decoded: " << frame_count << '\n';
+  std::cout << "Resolution: ";
+  if (frame_count == 0) {
+    std::cout << "unknown\n";
+  } else {
+    std::cout << first_width << 'x' << first_height << '\n';
+  }
+  std::cout << "Pixel format: "
+            << (first_pixel_format.has_value() ? *first_pixel_format : "unknown") << '\n';
+  std::cout << "First timestamp: ";
+  print_timestamp(first_timestamp);
+  std::cout << "\n";
+  std::cout << "Last timestamp: ";
+  print_timestamp(last_timestamp);
+  std::cout << "\n";
+  std::cout << "Frames without timestamp: " << frames_without_timestamp << '\n';
+  std::cout << "Timestamps monotonic: ";
+  if (!observed_timestamp_order) {
+    std::cout << "n/a\n";
+  } else {
+    std::cout << (timestamps_monotonic ? "yes" : "no") << '\n';
+  }
+  std::cout << "Resolution changed: " << (resolution_changed ? "yes" : "no") << '\n';
+  std::cout << "Pixel format changed: " << (pixel_format_changed ? "yes" : "no") << '\n';
+  std::cout << "EOF drain: " << (eof_stable ? "OK" : "FAILED") << '\n';
+  std::cout << "Decode time: " << std::fixed << std::setprecision(3) << (elapsed * 1000.0)
+            << " ms\n";
+  std::cout << "Approx throughput: " << std::fixed << std::setprecision(1) << frames_per_second
+            << " fps\n";
+
+  return eof_stable ? 0 : 2;
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -96,8 +201,24 @@ int main(int argc, char** argv) {
     }
   }
 
+  if (argc == 3 && std::string_view{argv[1]} == "--decode") {
+    try {
+      return run_decode(std::filesystem::path{argv[2]});
+    } catch (const pulsar::application::MediaProbeError& error) {
+      std::cerr << "Video decode failed: " << error.what() << '\n';
+      return 2;
+    } catch (const pulsar::media::ffmpeg::MediaDecodeError& error) {
+      std::cerr << "Video decode failed: " << error.what() << '\n';
+      return 2;
+    } catch (const std::exception& error) {
+      std::cerr << "Video decode failed: " << error.what() << '\n';
+      return 2;
+    }
+  }
+
   if (argc != 1) {
-    std::cerr << "Usage: pulsar-engine-lab [--probe <local-media-file>]\n";
+    std::cerr << "Usage: pulsar-engine-lab [--probe <local-media-file> | "
+                 "--decode <local-media-file>]\n";
     return 2;
   }
 

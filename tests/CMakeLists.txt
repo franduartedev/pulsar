@@ -71,3 +71,19 @@ pulsar_apply_project_options(pulsar_ffmpeg_probe_tests)
 pulsar_apply_compiler_warnings(pulsar_ffmpeg_probe_tests)
 
 add_test(NAME pulsar.media.ffmpeg_probe COMMAND pulsar_ffmpeg_probe_tests)
+
+add_executable(pulsar_ffmpeg_video_decode_session_tests
+  media/ffmpeg_video_decode_session_test.cpp
+)
+
+target_link_libraries(pulsar_ffmpeg_video_decode_session_tests
+  PRIVATE
+    pulsar::media_ffmpeg
+    pulsar::domain
+)
+
+pulsar_apply_project_options(pulsar_ffmpeg_video_decode_session_tests)
+pulsar_apply_compiler_warnings(pulsar_ffmpeg_video_decode_session_tests)
+
+add_test(NAME pulsar.media.ffmpeg_video_decode_session
+         COMMAND pulsar_ffmpeg_video_decode_session_tests)

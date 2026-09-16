@@ -1,0 +1,318 @@
+#include <pulsar/media/ffmpeg/ffmpeg_video_decode_session.hpp>
+
+#include <pulsar/media/ffmpeg/media_decode_error.hpp>
+
+#include "internal/ffmpeg_common.hpp"
+
+extern "C" {
+#include <libavcodec/avcodec.h>
+#include <libavcodec/codec.h>
+#include <libavcodec/codec_par.h>
+#include <libavformat/avformat.h>
+#include <libavutil/error.h>
+#include <libavutil/pixdesc.h>
+}
+
+#include <cerrno>
+#include <filesystem>
+#include <memory>
+#include <optional>
+#include <string>
+
+namespace pulsar::media::ffmpeg {
+namespace {
+
+using internal::ffmpeg_error_text;
+
+struct CodecContextDeleter {
+  void operator()(AVCodecContext* context) const noexcept {
+    if (context != nullptr) {
+      avcodec_free_context(&context);
+    }
+  }
+};
+
+struct PacketDeleter {
+  void operator()(AVPacket* packet) const noexcept {
+    if (packet != nullptr) {
+      av_packet_free(&packet);
+    }
+  }
+};
+
+struct FrameDeleter {
+  void operator()(AVFrame* frame) const noexcept {
+    if (frame != nullptr) {
+      av_frame_free(&frame);
+    }
+  }
+};
+
+using CodecContextPtr = std::unique_ptr<AVCodecContext, CodecContextDeleter>;
+using PacketPtr = std::unique_ptr<AVPacket, PacketDeleter>;
+using FramePtr = std::unique_ptr<AVFrame, FrameDeleter>;
+
+[[nodiscard]] CodecContextPtr allocate_decoder_context(const AVCodec& decoder,
+                                                       const AVCodecParameters& parameters) {
+  AVCodecContext* raw_context = avcodec_alloc_context3(&decoder);
+  if (raw_context == nullptr) {
+    throw MediaDecodeError{MediaDecodeErrorCode::DecoderInitializationFailed,
+                           "FFmpeg could not allocate video decoder context"};
+  }
+
+  CodecContextPtr context{raw_context};
+  const int parameters_result = avcodec_parameters_to_context(context.get(), &parameters);
+  if (parameters_result < 0) {
+    throw MediaDecodeError{MediaDecodeErrorCode::DecoderInitializationFailed,
+                           "FFmpeg could not copy video decoder parameters: " +
+                               ffmpeg_error_text(parameters_result)};
+  }
+
+  const int open_result = avcodec_open2(context.get(), &decoder, nullptr);
+  if (open_result < 0) {
+    throw MediaDecodeError{MediaDecodeErrorCode::DecoderInitializationFailed,
+                           "FFmpeg could not open video decoder: " +
+                               ffmpeg_error_text(open_result)};
+  }
+
+  return context;
+}
+
+[[nodiscard]] PacketPtr allocate_packet() {
+  AVPacket* packet = av_packet_alloc();
+  if (packet == nullptr) {
+    throw MediaDecodeError{MediaDecodeErrorCode::DecodeFailed,
+                           "FFmpeg could not allocate decode packet"};
+  }
+
+  return PacketPtr{packet};
+}
+
+[[nodiscard]] FramePtr allocate_frame() {
+  AVFrame* frame = av_frame_alloc();
+  if (frame == nullptr) {
+    throw MediaDecodeError{MediaDecodeErrorCode::DecodeFailed,
+                           "FFmpeg could not allocate decode frame"};
+  }
+
+  return FramePtr{frame};
+}
+
+[[nodiscard]] std::optional<std::string> pixel_format_name(int format) {
+  if (format < 0) {
+    return std::nullopt;
+  }
+
+  const char* name = av_get_pix_fmt_name(static_cast<AVPixelFormat>(format));
+  if (name == nullptr) {
+    return std::nullopt;
+  }
+
+  return std::string{name};
+}
+
+} // namespace
+
+class FFmpegVideoDecodeSession::Impl {
+public:
+  Impl(const std::filesystem::path& path, int video_stream_index)
+      : context_{internal::open_input_with_stream_info(
+            internal::canonical_local_regular_file(path))},
+        stream_index_{video_stream_index} {
+    if (stream_index_ < 0 ||
+        static_cast<unsigned int>(stream_index_) >= context_->nb_streams) {
+      throw MediaDecodeError{MediaDecodeErrorCode::InvalidStreamIndex,
+                             "selected video stream index is out of range"};
+    }
+
+    AVStream& stream = *context_->streams[static_cast<unsigned int>(stream_index_)];
+    if (stream.codecpar == nullptr) {
+      throw MediaDecodeError{MediaDecodeErrorCode::DecoderInitializationFailed,
+                             "selected video stream has no codec parameters"};
+    }
+    if (stream.codecpar->codec_type != AVMEDIA_TYPE_VIDEO) {
+      throw MediaDecodeError{MediaDecodeErrorCode::SelectedStreamIsNotVideo,
+                             "selected stream is not a video stream"};
+    }
+
+    const AVCodec* decoder = avcodec_find_decoder(stream.codecpar->codec_id);
+    if (decoder == nullptr) {
+      throw MediaDecodeError{MediaDecodeErrorCode::DecoderUnavailable,
+                             "no FFmpeg decoder is available for selected video stream"};
+    }
+
+    codec_name_ = internal::codec_name(*stream.codecpar);
+    stream_time_base_ = internal::convert_required_time_base(stream.time_base);
+    codec_context_ = allocate_decoder_context(*decoder, *stream.codecpar);
+    packet_ = allocate_packet();
+    frame_ = allocate_frame();
+  }
+
+  [[nodiscard]] std::optional<DecodedVideoFrameInfo> decode_next() {
+    if (state_ == State::Finished) {
+      return std::nullopt;
+    }
+
+    while (true) {
+      if (auto frame = receive_pending_frame()) {
+        return frame;
+      }
+
+      if (state_ == State::Finished) {
+        return std::nullopt;
+      }
+
+      if (state_ == State::Draining) {
+        continue;
+      }
+
+      send_or_read_next_packet();
+    }
+  }
+
+  [[nodiscard]] int stream_index() const noexcept {
+    return stream_index_;
+  }
+
+  [[nodiscard]] const std::string& codec_name() const noexcept {
+    return codec_name_;
+  }
+
+private:
+  enum class State {
+    Reading,
+    Draining,
+    Finished,
+  };
+
+  [[nodiscard]] std::optional<DecodedVideoFrameInfo> receive_pending_frame() {
+    const int receive_result = avcodec_receive_frame(codec_context_.get(), frame_.get());
+    if (receive_result == 0) {
+      pending_send_was_blocked_ = false;
+      DecodedVideoFrameInfo info{
+          stream_index_,
+          frame_->width,
+          frame_->height,
+          pixel_format_name(frame_->format),
+          internal::convert_timestamp(frame_->best_effort_timestamp, stream_time_base_),
+      };
+      av_frame_unref(frame_.get());
+      return info;
+    }
+
+    if (receive_result == AVERROR(EAGAIN)) {
+      if (pending_send_was_blocked_) {
+        throw MediaDecodeError{
+            MediaDecodeErrorCode::DecodeFailed,
+            "FFmpeg video decoder could neither receive a frame nor accept the pending packet"};
+      }
+      return std::nullopt;
+    }
+
+    if (receive_result == AVERROR_EOF) {
+      state_ = State::Finished;
+      return std::nullopt;
+    }
+
+    throw MediaDecodeError{MediaDecodeErrorCode::DecodeFailed,
+                           "FFmpeg video decoder failed while receiving frame: " +
+                               ffmpeg_error_text(receive_result)};
+  }
+
+  void send_or_read_next_packet() {
+    if (has_pending_packet_) {
+      (void)send_pending_packet();
+      return;
+    }
+
+    while (true) {
+      const int read_result = av_read_frame(context_.get(), packet_.get());
+      if (read_result == AVERROR_EOF) {
+        send_drain_signal();
+        return;
+      }
+      if (read_result < 0) {
+        throw MediaDecodeError{MediaDecodeErrorCode::DemuxReadFailed,
+                               "FFmpeg failed while reading media packet: " +
+                                   ffmpeg_error_text(read_result)};
+      }
+
+      if (packet_->stream_index != stream_index_) {
+        av_packet_unref(packet_.get());
+        continue;
+      }
+
+      has_pending_packet_ = true;
+      (void)send_pending_packet();
+      return;
+    }
+  }
+
+  [[nodiscard]] bool send_pending_packet() {
+    const int send_result = avcodec_send_packet(codec_context_.get(), packet_.get());
+    if (send_result == AVERROR(EAGAIN)) {
+      pending_send_was_blocked_ = true;
+      return false;
+    }
+    if (send_result < 0) {
+      av_packet_unref(packet_.get());
+      has_pending_packet_ = false;
+      pending_send_was_blocked_ = false;
+      throw MediaDecodeError{MediaDecodeErrorCode::DecodeFailed,
+                             "FFmpeg video decoder failed while sending packet: " +
+                                 ffmpeg_error_text(send_result)};
+    }
+
+    av_packet_unref(packet_.get());
+    has_pending_packet_ = false;
+    pending_send_was_blocked_ = false;
+    return true;
+  }
+
+  void send_drain_signal() {
+    const int send_result = avcodec_send_packet(codec_context_.get(), nullptr);
+    if (send_result < 0 && send_result != AVERROR_EOF) {
+      throw MediaDecodeError{MediaDecodeErrorCode::DecodeFailed,
+                             "FFmpeg video decoder failed while entering drain mode: " +
+                                 ffmpeg_error_text(send_result)};
+    }
+
+    state_ = State::Draining;
+  }
+
+  internal::FormatContextPtr context_;
+  CodecContextPtr codec_context_;
+  PacketPtr packet_;
+  FramePtr frame_;
+  int stream_index_;
+  domain::Rational stream_time_base_{1, 1};
+  std::string codec_name_{"unknown"};
+  State state_{State::Reading};
+  bool has_pending_packet_{false};
+  bool pending_send_was_blocked_{false};
+};
+
+FFmpegVideoDecodeSession::FFmpegVideoDecodeSession(const std::filesystem::path& path,
+                                                   int video_stream_index)
+    : impl_{std::make_unique<Impl>(path, video_stream_index)} {}
+
+FFmpegVideoDecodeSession::~FFmpegVideoDecodeSession() = default;
+
+FFmpegVideoDecodeSession::FFmpegVideoDecodeSession(FFmpegVideoDecodeSession&&) noexcept = default;
+
+FFmpegVideoDecodeSession& FFmpegVideoDecodeSession::operator=(
+    FFmpegVideoDecodeSession&&) noexcept = default;
+
+std::optional<DecodedVideoFrameInfo> FFmpegVideoDecodeSession::decode_next() {
+  return impl_->decode_next();
+}
+
+int FFmpegVideoDecodeSession::stream_index() const noexcept {
+  return impl_->stream_index();
+}
+
+const std::string& FFmpegVideoDecodeSession::codec_name() const noexcept {
+  return impl_->codec_name();
+}
+
+} // namespace pulsar::media::ffmpeg
