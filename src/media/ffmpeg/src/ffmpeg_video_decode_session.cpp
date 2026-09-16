@@ -9,14 +9,18 @@ extern "C" {
 #include <libavcodec/codec.h>
 #include <libavcodec/codec_par.h>
 #include <libavformat/avformat.h>
+#include <libavutil/avutil.h>
 #include <libavutil/error.h>
 #include <libavutil/pixdesc.h>
 }
 
 #include <cerrno>
+#include <cstdint>
 #include <filesystem>
+#include <limits>
 #include <memory>
 #include <optional>
+#include <stdexcept>
 #include <string>
 
 namespace pulsar::media::ffmpeg {
@@ -51,6 +55,12 @@ struct FrameDeleter {
 using CodecContextPtr = std::unique_ptr<AVCodecContext, CodecContextDeleter>;
 using PacketPtr = std::unique_ptr<AVPacket, PacketDeleter>;
 using FramePtr = std::unique_ptr<AVFrame, FrameDeleter>;
+
+#if defined(__SIZEOF_INT128__)
+using WideInt = __int128_t;
+#else
+#error "PULSAR requires signed __int128 support for exact seek timestamp conversion."
+#endif
 
 [[nodiscard]] CodecContextPtr allocate_decoder_context(const AVCodec& decoder,
                                                        const AVCodecParameters& parameters) {
@@ -111,6 +121,77 @@ using FramePtr = std::unique_ptr<AVFrame, FrameDeleter>;
   return std::string{name};
 }
 
+[[nodiscard]] std::int64_t checked_to_int64(WideInt value) {
+  if (value < static_cast<WideInt>(std::numeric_limits<std::int64_t>::min()) ||
+      value > static_cast<WideInt>(std::numeric_limits<std::int64_t>::max())) {
+    throw MediaDecodeError{MediaDecodeErrorCode::InvalidSeekTarget,
+                           "seek target is outside FFmpeg timestamp range"};
+  }
+
+  return static_cast<std::int64_t>(value);
+}
+
+[[nodiscard]] WideInt checked_multiply(WideInt lhs, WideInt rhs) {
+  constexpr WideInt wide_max =
+      (static_cast<WideInt>(1) << 126) + ((static_cast<WideInt>(1) << 126) - 1);
+  constexpr WideInt wide_min = -wide_max - 1;
+
+  if (lhs == 0 || rhs == 0) {
+    return 0;
+  }
+
+  if (lhs > 0) {
+    if (rhs > 0) {
+      if (lhs > wide_max / rhs) {
+        throw MediaDecodeError{MediaDecodeErrorCode::InvalidSeekTarget,
+                               "seek target conversion overflowed"};
+      }
+    } else if (rhs < wide_min / lhs) {
+      throw MediaDecodeError{MediaDecodeErrorCode::InvalidSeekTarget,
+                             "seek target conversion overflowed"};
+    }
+  } else {
+    if (rhs > 0) {
+      if (lhs < wide_min / rhs) {
+        throw MediaDecodeError{MediaDecodeErrorCode::InvalidSeekTarget,
+                               "seek target conversion overflowed"};
+      }
+    } else if (lhs < wide_max / rhs) {
+      throw MediaDecodeError{MediaDecodeErrorCode::InvalidSeekTarget,
+                             "seek target conversion overflowed"};
+    }
+  }
+
+  return lhs * rhs;
+}
+
+[[nodiscard]] WideInt floor_divide(WideInt numerator, WideInt denominator) {
+  if (denominator <= 0) {
+    throw MediaDecodeError{MediaDecodeErrorCode::InvalidSeekTarget,
+                           "seek target conversion had invalid denominator"};
+  }
+
+  WideInt quotient = numerator / denominator;
+  const WideInt remainder = numerator % denominator;
+  if (remainder != 0 && numerator < 0) {
+    --quotient;
+  }
+
+  return quotient;
+}
+
+[[nodiscard]] std::int64_t floor_media_time_to_stream_timestamp(
+    domain::MediaTime target,
+    domain::Rational stream_time_base) {
+  const domain::Rational target_time_base = target.time_base();
+  const WideInt numerator = checked_multiply(
+      checked_multiply(static_cast<WideInt>(target.value()), target_time_base.numerator()),
+      stream_time_base.denominator());
+  const WideInt denominator = checked_multiply(target_time_base.denominator(),
+                                               stream_time_base.numerator());
+  return checked_to_int64(floor_divide(numerator, denominator));
+}
+
 } // namespace
 
 class FFmpegVideoDecodeSession::Impl {
@@ -143,6 +224,7 @@ public:
 
     codec_name_ = internal::codec_name(*stream.codecpar);
     stream_time_base_ = internal::convert_required_time_base(stream.time_base);
+    stream_start_timestamp_ = internal::convert_timestamp(stream.start_time, stream_time_base_);
     codec_context_ = allocate_decoder_context(*decoder, *stream.codecpar);
     packet_ = allocate_packet();
     frame_ = allocate_frame();
@@ -176,6 +258,47 @@ public:
 
   [[nodiscard]] const std::string& codec_name() const noexcept {
     return codec_name_;
+  }
+
+  [[nodiscard]] std::optional<domain::MediaTime> stream_start_timestamp() const {
+    return stream_start_timestamp_;
+  }
+
+  [[nodiscard]] VideoSeekResult seek_to_stream_timestamp(domain::MediaTime target) {
+    const std::int64_t seek_timestamp =
+        floor_media_time_to_stream_timestamp(target, stream_time_base_);
+
+    reset_reusable_objects_before_seek();
+
+    const int seek_result =
+        av_seek_frame(context_.get(), stream_index_, seek_timestamp, AVSEEK_FLAG_BACKWARD);
+    if (seek_result == AVERROR(ENOSYS) || seek_result == AVERROR(EPIPE)) {
+      mark_after_failed_seek();
+      throw MediaDecodeError{MediaDecodeErrorCode::SeekUnsupported,
+                             "FFmpeg demuxer does not support seeking for this stream"};
+    }
+    if (seek_result < 0) {
+      mark_after_failed_seek();
+      throw MediaDecodeError{MediaDecodeErrorCode::SeekFailed,
+                             "FFmpeg failed while seeking video stream: " +
+                                 ffmpeg_error_text(seek_result)};
+    }
+
+    avcodec_flush_buffers(codec_context_.get());
+    reset_logical_decode_state();
+
+    std::size_t decoded_after_seek = 0;
+    while (auto frame = decode_next()) {
+      ++decoded_after_seek;
+      if (!frame->presentation_timestamp.has_value()) {
+        continue;
+      }
+      if (*frame->presentation_timestamp >= target) {
+        return VideoSeekResult{target, std::move(frame), decoded_after_seek};
+      }
+    }
+
+    return VideoSeekResult{target, std::nullopt, decoded_after_seek};
   }
 
 private:
@@ -280,12 +403,33 @@ private:
     state_ = State::Draining;
   }
 
+  void reset_reusable_objects_before_seek() noexcept {
+    if (has_pending_packet_) {
+      av_packet_unref(packet_.get());
+    }
+    av_frame_unref(frame_.get());
+  }
+
+  void reset_logical_decode_state() noexcept {
+    state_ = State::Reading;
+    has_pending_packet_ = false;
+    pending_send_was_blocked_ = false;
+  }
+
+  void mark_after_failed_seek() noexcept {
+    avcodec_flush_buffers(codec_context_.get());
+    has_pending_packet_ = false;
+    pending_send_was_blocked_ = false;
+    state_ = State::Finished;
+  }
+
   internal::FormatContextPtr context_;
   CodecContextPtr codec_context_;
   PacketPtr packet_;
   FramePtr frame_;
   int stream_index_;
   domain::Rational stream_time_base_{1, 1};
+  std::optional<domain::MediaTime> stream_start_timestamp_;
   std::string codec_name_{"unknown"};
   State state_{State::Reading};
   bool has_pending_packet_{false};
@@ -307,12 +451,20 @@ std::optional<DecodedVideoFrameInfo> FFmpegVideoDecodeSession::decode_next() {
   return impl_->decode_next();
 }
 
+VideoSeekResult FFmpegVideoDecodeSession::seek_to_stream_timestamp(domain::MediaTime target) {
+  return impl_->seek_to_stream_timestamp(target);
+}
+
 int FFmpegVideoDecodeSession::stream_index() const noexcept {
   return impl_->stream_index();
 }
 
 const std::string& FFmpegVideoDecodeSession::codec_name() const noexcept {
   return impl_->codec_name();
+}
+
+std::optional<domain::MediaTime> FFmpegVideoDecodeSession::stream_start_timestamp() const {
+  return impl_->stream_start_timestamp();
 }
 
 } // namespace pulsar::media::ffmpeg

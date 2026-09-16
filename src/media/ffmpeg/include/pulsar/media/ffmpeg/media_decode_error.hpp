@@ -12,6 +12,9 @@ enum class MediaDecodeErrorCode {
   DecoderInitializationFailed,
   DemuxReadFailed,
   DecodeFailed,
+  InvalidSeekTarget,
+  SeekUnsupported,
+  SeekFailed,
 };
 
 class MediaDecodeError : public std::runtime_error {

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <pulsar/media/ffmpeg/decoded_video_frame_info.hpp>
+#include <pulsar/media/ffmpeg/video_seek_result.hpp>
 
 #include <filesystem>
 #include <memory>
@@ -21,8 +22,10 @@ public:
   FFmpegVideoDecodeSession& operator=(FFmpegVideoDecodeSession&&) noexcept;
 
   [[nodiscard]] std::optional<DecodedVideoFrameInfo> decode_next();
+  [[nodiscard]] VideoSeekResult seek_to_stream_timestamp(domain::MediaTime target);
   [[nodiscard]] int stream_index() const noexcept;
   [[nodiscard]] const std::string& codec_name() const noexcept;
+  [[nodiscard]] std::optional<domain::MediaTime> stream_start_timestamp() const;
 
 private:
   class Impl;

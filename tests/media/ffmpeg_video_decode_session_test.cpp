@@ -1,4 +1,5 @@
 #include <pulsar/application/media/media_probe_error.hpp>
+#include <pulsar/domain/time/media_time.hpp>
 #include <pulsar/domain/time/rational.hpp>
 #include <pulsar/media/ffmpeg/ffmpeg_video_decode_session.hpp>
 #include <pulsar/media/ffmpeg/media_decode_error.hpp>
@@ -7,6 +8,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <optional>
 #include <string_view>
 
@@ -189,6 +191,98 @@ bool partial_destruction_test(const std::filesystem::path& root) {
   return true;
 }
 
+bool basic_seek_test(const std::filesystem::path& root) {
+  const auto ppm_path = root / "seek fixture.ppm";
+  write_ppm_fixture(ppm_path);
+
+  auto session = FFmpegVideoDecodeSession{ppm_path, 0};
+  const auto result =
+      session.seek_to_stream_timestamp(pulsar::domain::MediaTime{0, pulsar::domain::Rational{1, 1}});
+  if (!result.frame.has_value()) {
+    return false;
+  }
+  if (result.frames_decoded_after_seek != 1) {
+    return false;
+  }
+  return result.frame->width == 16 && result.frame->height == 16;
+}
+
+bool eof_then_seek_test(const std::filesystem::path& root) {
+  const auto ppm_path = root / "eof seek fixture.ppm";
+  write_ppm_fixture(ppm_path);
+
+  auto session = FFmpegVideoDecodeSession{ppm_path, 0};
+  while (session.decode_next().has_value()) {
+  }
+  if (session.decode_next().has_value()) {
+    return false;
+  }
+
+  const auto result =
+      session.seek_to_stream_timestamp(pulsar::domain::MediaTime{0, pulsar::domain::Rational{1, 1}});
+  return result.frame.has_value() && !session.decode_next().has_value();
+}
+
+bool multiple_seek_test(const std::filesystem::path& root) {
+  const auto ppm_path = root / "multiple seek fixture.ppm";
+  write_ppm_fixture(ppm_path);
+
+  auto session = FFmpegVideoDecodeSession{ppm_path, 0};
+  for (int index = 0; index < 3; ++index) {
+    const auto result = session.seek_to_stream_timestamp(
+        pulsar::domain::MediaTime{0, pulsar::domain::Rational{1, 1}});
+    if (!result.frame.has_value()) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+bool target_after_final_frame_test(const std::filesystem::path& root) {
+  const auto ppm_path = root / "after final seek fixture.ppm";
+  write_ppm_fixture(ppm_path);
+
+  auto session = FFmpegVideoDecodeSession{ppm_path, 0};
+  try {
+    const auto result = session.seek_to_stream_timestamp(
+        pulsar::domain::MediaTime{1, pulsar::domain::Rational{1, 1}});
+    return !result.frame.has_value() && !session.decode_next().has_value();
+  } catch (const MediaDecodeError& error) {
+    return error.code() == MediaDecodeErrorCode::SeekFailed ||
+           error.code() == MediaDecodeErrorCode::SeekUnsupported;
+  }
+}
+
+bool negative_target_test(const std::filesystem::path& root) {
+  const auto ppm_path = root / "negative seek fixture.ppm";
+  write_ppm_fixture(ppm_path);
+
+  auto session = FFmpegVideoDecodeSession{ppm_path, 0};
+  try {
+    const auto result = session.seek_to_stream_timestamp(
+        pulsar::domain::MediaTime{-1, pulsar::domain::Rational{1, 1}});
+    return result.frame.has_value();
+  } catch (const MediaDecodeError& error) {
+    return error.code() == MediaDecodeErrorCode::SeekFailed ||
+           error.code() == MediaDecodeErrorCode::SeekUnsupported;
+  }
+}
+
+bool invalid_seek_target_test(const std::filesystem::path& root) {
+  const auto ppm_path = root / "invalid seek target fixture.ppm";
+  write_ppm_fixture(ppm_path);
+
+  auto session = FFmpegVideoDecodeSession{ppm_path, 0};
+  return throws_decode_error(
+      [&] {
+        (void)session.seek_to_stream_timestamp(pulsar::domain::MediaTime{
+            std::numeric_limits<std::int64_t>::max(),
+            pulsar::domain::Rational{std::numeric_limits<std::int64_t>::max(), 1}});
+      },
+      MediaDecodeErrorCode::InvalidSeekTarget);
+}
+
 } // namespace
 
 int main() {
@@ -205,6 +299,24 @@ int main() {
   }
   if (!partial_destruction_test(root)) {
     return fail("partial destruction test");
+  }
+  if (!basic_seek_test(root)) {
+    return fail("basic seek test");
+  }
+  if (!eof_then_seek_test(root)) {
+    return fail("eof then seek test");
+  }
+  if (!multiple_seek_test(root)) {
+    return fail("multiple seek test");
+  }
+  if (!target_after_final_frame_test(root)) {
+    return fail("target after final frame test");
+  }
+  if (!negative_target_test(root)) {
+    return fail("negative target test");
+  }
+  if (!invalid_seek_target_test(root)) {
+    return fail("invalid seek target test");
   }
 
   return 0;

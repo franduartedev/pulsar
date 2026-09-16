@@ -14,10 +14,11 @@
 #include <pulsar/media/ffmpeg/media_decode_error.hpp>
 
 #include <chrono>
-#include <iomanip>
 #include <filesystem>
+#include <iomanip>
 #include <iostream>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 
@@ -39,6 +40,29 @@ void print_seconds(const std::optional<pulsar::domain::MediaTime>& time) {
 
 void print_timestamp(const std::optional<pulsar::domain::MediaTime>& time) {
   print_seconds(time);
+}
+
+void print_media_time(pulsar::domain::MediaTime time) {
+  const auto seconds = time.seconds();
+  std::cout << seconds.numerator();
+  if (seconds.denominator() != 1) {
+    std::cout << '/' << seconds.denominator();
+  }
+  std::cout << " s";
+}
+
+pulsar::domain::MediaTime parse_exact_seconds(std::string_view text) {
+  const auto slash = text.find('/');
+  if (slash == std::string_view::npos || slash == 0 || slash + 1 == text.size()) {
+    throw std::invalid_argument{"expected exact rational seconds as numerator/denominator"};
+  }
+
+  const auto numerator = std::stoll(std::string{text.substr(0, slash)});
+  const auto denominator = std::stoll(std::string{text.substr(slash + 1)});
+  return pulsar::domain::MediaTime{
+      numerator,
+      pulsar::domain::Rational{1, denominator},
+  };
 }
 
 void print_probe_result(const pulsar::application::MediaProbeResult& result) {
@@ -186,6 +210,143 @@ int run_decode(const std::filesystem::path& path) {
   return eof_stable ? 0 : 2;
 }
 
+int run_seek(const std::filesystem::path& path, pulsar::domain::MediaTime target) {
+  const auto probe = pulsar::media::ffmpeg::FFmpegMediaProbe{};
+  const auto probe_result = probe.probe(path);
+  if (probe_result.video_streams.empty()) {
+    std::cerr << "Video seek failed: media file contains no video stream\n";
+    return 2;
+  }
+
+  const int stream_index = probe_result.video_streams.front().stream_index;
+  auto session = pulsar::media::ffmpeg::FFmpegVideoDecodeSession{path, stream_index};
+
+  const auto started_at = std::chrono::steady_clock::now();
+  const auto result = session.seek_to_stream_timestamp(target);
+  const auto finished_at = std::chrono::steady_clock::now();
+  const auto elapsed = std::chrono::duration<double>(finished_at - started_at).count();
+
+  std::cout << "PULSAR Engine Lab\n";
+  std::cout << "Video Seek\n";
+  std::cout << "File: " << path.filename().string() << '\n';
+  std::cout << "Stream: #" << session.stream_index() << '\n';
+  std::cout << "Codec: " << session.codec_name() << '\n';
+  std::cout << "Stream start: ";
+  print_timestamp(session.stream_start_timestamp());
+  std::cout << "\n";
+  std::cout << "Requested: ";
+  print_media_time(result.requested_timestamp);
+  std::cout << "\n";
+  std::cout << "Reached: ";
+  if (result.frame.has_value()) {
+    print_timestamp(result.frame->presentation_timestamp);
+  } else {
+    std::cout << "not found";
+  }
+  std::cout << "\n";
+  std::cout << "Frames decoded after seek: " << result.frames_decoded_after_seek << '\n';
+  if (result.frame.has_value()) {
+    std::cout << "Resolution: " << result.frame->width << 'x' << result.frame->height << '\n';
+    std::cout << "Pixel format: "
+              << (result.frame->pixel_format_name.has_value() ? *result.frame->pixel_format_name
+                                                               : "unknown")
+              << '\n';
+  }
+  std::cout << "Seek: " << (result.frame.has_value() ? "OK" : "EOF") << '\n';
+  std::cout << "Seek time: " << std::fixed << std::setprecision(3) << (elapsed * 1000.0)
+            << " ms\n";
+
+  return 0;
+}
+
+int run_seek_series(const std::filesystem::path& path, const char* const* targets,
+                    int target_count) {
+  const auto probe = pulsar::media::ffmpeg::FFmpegMediaProbe{};
+  const auto probe_result = probe.probe(path);
+  if (probe_result.video_streams.empty()) {
+    std::cerr << "Video seek failed: media file contains no video stream\n";
+    return 2;
+  }
+
+  const int stream_index = probe_result.video_streams.front().stream_index;
+  auto session = pulsar::media::ffmpeg::FFmpegVideoDecodeSession{path, stream_index};
+
+  std::cout << "PULSAR Engine Lab\n";
+  std::cout << "Video Seek Series\n";
+  std::cout << "File: " << path.filename().string() << '\n';
+  std::cout << "Stream: #" << session.stream_index() << '\n';
+  std::cout << "Codec: " << session.codec_name() << '\n';
+  std::cout << "Stream start: ";
+  print_timestamp(session.stream_start_timestamp());
+  std::cout << "\n";
+
+  for (int index = 0; index < target_count; ++index) {
+    const auto target = parse_exact_seconds(targets[index]);
+    const auto started_at = std::chrono::steady_clock::now();
+    const auto result = session.seek_to_stream_timestamp(target);
+    const auto finished_at = std::chrono::steady_clock::now();
+    const auto elapsed = std::chrono::duration<double>(finished_at - started_at).count();
+
+    std::cout << "Seek #" << (index + 1) << ": requested ";
+    print_media_time(result.requested_timestamp);
+    std::cout << ", reached ";
+    if (result.frame.has_value()) {
+      print_timestamp(result.frame->presentation_timestamp);
+    } else {
+      std::cout << "not found";
+    }
+    std::cout << ", frames " << result.frames_decoded_after_seek;
+    std::cout << ", time " << std::fixed << std::setprecision(3) << (elapsed * 1000.0)
+              << " ms\n";
+  }
+
+  return 0;
+}
+
+int run_seek_after_eof(const std::filesystem::path& path, pulsar::domain::MediaTime target) {
+  const auto probe = pulsar::media::ffmpeg::FFmpegMediaProbe{};
+  const auto probe_result = probe.probe(path);
+  if (probe_result.video_streams.empty()) {
+    std::cerr << "Video seek failed: media file contains no video stream\n";
+    return 2;
+  }
+
+  const int stream_index = probe_result.video_streams.front().stream_index;
+  auto session = pulsar::media::ffmpeg::FFmpegVideoDecodeSession{path, stream_index};
+
+  std::size_t frames_before_eof = 0;
+  while (session.decode_next().has_value()) {
+    ++frames_before_eof;
+  }
+
+  const auto started_at = std::chrono::steady_clock::now();
+  const auto result = session.seek_to_stream_timestamp(target);
+  const auto finished_at = std::chrono::steady_clock::now();
+  const auto elapsed = std::chrono::duration<double>(finished_at - started_at).count();
+
+  std::cout << "PULSAR Engine Lab\n";
+  std::cout << "Video Seek After EOF\n";
+  std::cout << "File: " << path.filename().string() << '\n';
+  std::cout << "Stream: #" << session.stream_index() << '\n';
+  std::cout << "Frames before EOF: " << frames_before_eof << '\n';
+  std::cout << "Requested: ";
+  print_media_time(result.requested_timestamp);
+  std::cout << "\n";
+  std::cout << "Reached: ";
+  if (result.frame.has_value()) {
+    print_timestamp(result.frame->presentation_timestamp);
+  } else {
+    std::cout << "not found";
+  }
+  std::cout << "\n";
+  std::cout << "Frames decoded after seek: " << result.frames_decoded_after_seek << '\n';
+  std::cout << "Seek: " << (result.frame.has_value() ? "OK" : "EOF") << '\n';
+  std::cout << "Seek time: " << std::fixed << std::setprecision(3) << (elapsed * 1000.0)
+            << " ms\n";
+
+  return result.frame.has_value() ? 0 : 2;
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -216,9 +377,57 @@ int main(int argc, char** argv) {
     }
   }
 
+  if (argc == 4 && std::string_view{argv[1]} == "--seek") {
+    try {
+      return run_seek(std::filesystem::path{argv[2]}, parse_exact_seconds(argv[3]));
+    } catch (const pulsar::application::MediaProbeError& error) {
+      std::cerr << "Video seek failed: " << error.what() << '\n';
+      return 2;
+    } catch (const pulsar::media::ffmpeg::MediaDecodeError& error) {
+      std::cerr << "Video seek failed: " << error.what() << '\n';
+      return 2;
+    } catch (const std::exception& error) {
+      std::cerr << "Video seek failed: " << error.what() << '\n';
+      return 2;
+    }
+  }
+
+  if (argc >= 4 && std::string_view{argv[1]} == "--seek-series") {
+    try {
+      return run_seek_series(std::filesystem::path{argv[2]}, argv + 3, argc - 3);
+    } catch (const pulsar::application::MediaProbeError& error) {
+      std::cerr << "Video seek failed: " << error.what() << '\n';
+      return 2;
+    } catch (const pulsar::media::ffmpeg::MediaDecodeError& error) {
+      std::cerr << "Video seek failed: " << error.what() << '\n';
+      return 2;
+    } catch (const std::exception& error) {
+      std::cerr << "Video seek failed: " << error.what() << '\n';
+      return 2;
+    }
+  }
+
+  if (argc == 4 && std::string_view{argv[1]} == "--seek-after-eof") {
+    try {
+      return run_seek_after_eof(std::filesystem::path{argv[2]}, parse_exact_seconds(argv[3]));
+    } catch (const pulsar::application::MediaProbeError& error) {
+      std::cerr << "Video seek failed: " << error.what() << '\n';
+      return 2;
+    } catch (const pulsar::media::ffmpeg::MediaDecodeError& error) {
+      std::cerr << "Video seek failed: " << error.what() << '\n';
+      return 2;
+    } catch (const std::exception& error) {
+      std::cerr << "Video seek failed: " << error.what() << '\n';
+      return 2;
+    }
+  }
+
   if (argc != 1) {
     std::cerr << "Usage: pulsar-engine-lab [--probe <local-media-file> | "
-                 "--decode <local-media-file>]\n";
+                 "--decode <local-media-file> | "
+                 "--seek <local-media-file> <seconds-num/seconds-den> | "
+                 "--seek-series <local-media-file> <target>... | "
+                 "--seek-after-eof <local-media-file> <target>]\n";
     return 2;
   }
 
