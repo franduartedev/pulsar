@@ -9,6 +9,7 @@ set_target_properties(pulsar_benchmarks
 
 target_link_libraries(pulsar_benchmarks
   PRIVATE
+    pulsar::application
     pulsar::domain
 )
 

@@ -40,3 +40,18 @@ pulsar_apply_project_options(pulsar_timeline_tests)
 pulsar_apply_compiler_warnings(pulsar_timeline_tests)
 
 add_test(NAME pulsar.domain.timeline_model COMMAND pulsar_timeline_tests)
+
+add_executable(pulsar_command_history_tests
+  application/command_history_test.cpp
+)
+
+target_link_libraries(pulsar_command_history_tests
+  PRIVATE
+    pulsar::application
+    pulsar::domain
+)
+
+pulsar_apply_project_options(pulsar_command_history_tests)
+pulsar_apply_compiler_warnings(pulsar_command_history_tests)
+
+add_test(NAME pulsar.application.command_history COMMAND pulsar_command_history_tests)

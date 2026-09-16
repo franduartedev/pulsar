@@ -1,3 +1,4 @@
+#include <pulsar/application/commands/command_processor.hpp>
 #include <pulsar/domain/ids/ids.hpp>
 #include <pulsar/domain/time/media_time.hpp>
 #include <pulsar/domain/time/rational.hpp>
@@ -31,6 +32,10 @@ using pulsar::domain::TimelineId;
 using pulsar::domain::Track;
 using pulsar::domain::TrackId;
 using pulsar::domain::TrackKind;
+using pulsar::application::AddClipCommand;
+using pulsar::application::CommandProcessor;
+using pulsar::application::MoveClipCommand;
+using pulsar::application::RemoveClipCommand;
 
 void consume(std::uint64_t value) {
   const std::uint64_t current = benchmark_sink;
@@ -52,8 +57,21 @@ template <typename Callable> Duration measure(Callable callable) {
   return std::chrono::duration_cast<Duration>(Clock::now() - start);
 }
 
+template <typename Callable> Duration measure_repeated(int repetitions, Callable callable) {
+  Duration total{0};
+  for (int iteration = 0; iteration < repetitions; ++iteration) {
+    total += callable();
+  }
+  return total;
+}
+
 void print_result(std::string_view label, Duration elapsed) {
   std::cout << label << ": " << elapsed.count() << " ms\n";
+}
+
+void print_average(std::string_view label, Duration elapsed, std::uint64_t operations) {
+  std::cout << label << ": total " << elapsed.count() << " ms, avg "
+            << (elapsed.count() / static_cast<double>(operations)) << " ms/op\n";
 }
 
 void benchmark_media_time() {
@@ -128,6 +146,158 @@ void benchmark_timeline_lookup(std::uint64_t clip_count) {
   print_result(std::to_string(clip_count) + " clips", elapsed);
 }
 
+void benchmark_command_history(std::uint64_t clip_count) {
+  Timeline timeline{TimelineId{1}};
+  const std::uint64_t track_count = clip_count >= 1'000 ? 10 : 1;
+  for (std::uint64_t track_index = 0; track_index < track_count; ++track_index) {
+    timeline.add_track(Track{TrackId{track_index + 1}, TrackKind::Video});
+  }
+  CommandProcessor processor{timeline, clip_count};
+
+  const Duration execute_elapsed = measure([&] {
+    for (std::uint64_t index = 0; index < clip_count; ++index) {
+      const TrackId track_id{(index % track_count) + 1};
+      const auto local_start = static_cast<std::int64_t>(index / track_count);
+      processor.execute(AddClipCommand{track_id, make_clip(index + 1, local_start)});
+    }
+    consume(processor.undo_size());
+  });
+
+  std::uint64_t undone = 0;
+  const Duration undo_elapsed = measure([&] {
+    while (processor.undo()) {
+      ++undone;
+      consume(processor.undo_size());
+    }
+  });
+
+  std::uint64_t redone = 0;
+  const Duration redo_elapsed = measure([&] {
+    while (processor.redo()) {
+      ++redone;
+      consume(processor.redo_size());
+    }
+  });
+
+  std::cout << clip_count << " commands requested\n";
+  std::cout << "executed: " << clip_count << '\n';
+  std::cout << "undone: " << undone << '\n';
+  std::cout << "redone: " << redone << '\n';
+  print_result("execute", execute_elapsed);
+  print_result("undo", undo_elapsed);
+  print_result("redo", redo_elapsed);
+}
+
+Duration measure_add_latency(const Timeline& base_timeline, std::uint64_t clip_count,
+                             std::uint64_t track_count, int repetitions) {
+  return measure_repeated(repetitions, [&] {
+    Timeline timeline = base_timeline;
+    CommandProcessor processor{timeline, 1};
+    const TrackId track_id{1};
+    const auto start = static_cast<std::int64_t>((clip_count / track_count) + 1);
+    const Duration elapsed = measure(
+        [&] { processor.execute(AddClipCommand{track_id, make_clip(clip_count + 1, start)}); });
+    consume(timeline.find_clip(ClipId{clip_count + 1}) != nullptr ? 1U : 0U);
+    return elapsed;
+  });
+}
+
+Duration measure_remove_latency(const Timeline& base_timeline, ClipId clip_id, int repetitions) {
+  return measure_repeated(repetitions, [&] {
+    Timeline timeline = base_timeline;
+    CommandProcessor processor{timeline, 1};
+    const Duration elapsed = measure([&] { processor.execute(RemoveClipCommand{clip_id}); });
+    consume(timeline.find_clip(clip_id) == nullptr ? 1U : 0U);
+    return elapsed;
+  });
+}
+
+Duration measure_move_latency(const Timeline& base_timeline, ClipId clip_id, TrackId destination,
+                              MediaTime start, int repetitions) {
+  return measure_repeated(repetitions, [&] {
+    Timeline timeline = base_timeline;
+    CommandProcessor processor{timeline, 1};
+    const Duration elapsed =
+        measure([&] { processor.execute(MoveClipCommand{clip_id, destination, start}); });
+    consume(timeline.find_clip(clip_id) != nullptr ? 1U : 0U);
+    return elapsed;
+  });
+}
+
+Duration measure_single_undo_latency(const Timeline& base_timeline, std::uint64_t clip_count,
+                                     std::uint64_t track_count, int repetitions) {
+  return measure_repeated(repetitions, [&] {
+    Timeline timeline = base_timeline;
+    CommandProcessor processor{timeline, 1};
+    processor.execute(AddClipCommand{
+        TrackId{1}, make_clip(clip_count + 1, static_cast<std::int64_t>((clip_count / track_count) + 1))});
+    const Duration elapsed = measure([&] { consume(processor.undo() ? 1U : 0U); });
+    return elapsed;
+  });
+}
+
+Duration measure_single_redo_latency(const Timeline& base_timeline, std::uint64_t clip_count,
+                                     std::uint64_t track_count, int repetitions) {
+  return measure_repeated(repetitions, [&] {
+    Timeline timeline = base_timeline;
+    CommandProcessor processor{timeline, 1};
+    processor.execute(AddClipCommand{
+        TrackId{1}, make_clip(clip_count + 1, static_cast<std::int64_t>((clip_count / track_count) + 1))});
+    (void)processor.undo();
+    const Duration elapsed = measure([&] { consume(processor.redo() ? 1U : 0U); });
+    return elapsed;
+  });
+}
+
+void benchmark_interactive_latency(std::uint64_t clip_count) {
+  const int repetitions = clip_count >= 10'000 ? 1 : (clip_count >= 1'000 ? 10 : 50);
+  const std::uint64_t track_count = clip_count >= 10'000 ? 10 : 2;
+  const Timeline base_timeline = make_timeline(clip_count, track_count);
+  const ClipId first{1};
+  const ClipId middle{(clip_count / 2U) + 1U};
+  const ClipId last{clip_count};
+
+  std::cout << clip_count << " clips, repetitions: " << repetitions << '\n';
+  print_average("add valid clip",
+                measure_add_latency(base_timeline, clip_count, track_count, repetitions),
+                repetitions);
+  print_average("remove first", measure_remove_latency(base_timeline, first, repetitions),
+                repetitions);
+  print_average("remove middle", measure_remove_latency(base_timeline, middle, repetitions),
+                repetitions);
+  print_average("remove last", measure_remove_latency(base_timeline, last, repetitions),
+                repetitions);
+
+  if (clip_count >= 10'000) {
+    print_average("move same track late",
+                  measure_move_latency(base_timeline, first, TrackId{1}, seconds(1'001),
+                                       repetitions),
+                  repetitions);
+    print_average("move other track late",
+                  measure_move_latency(base_timeline, first, TrackId{2}, seconds(1'001),
+                                       repetitions),
+                  repetitions);
+  } else {
+    print_average("move same track late",
+                  measure_move_latency(base_timeline, first, TrackId{1},
+                                       seconds(static_cast<std::int64_t>(clip_count + 1)),
+                                       repetitions),
+                  repetitions);
+    print_average("move other track late",
+                  measure_move_latency(base_timeline, first, TrackId{2},
+                                       seconds(static_cast<std::int64_t>(clip_count + 1)),
+                                       repetitions),
+                  repetitions);
+  }
+
+  print_average("single undo",
+                measure_single_undo_latency(base_timeline, clip_count, track_count, repetitions),
+                repetitions);
+  print_average("single redo",
+                measure_single_redo_latency(base_timeline, clip_count, track_count, repetitions),
+                repetitions);
+}
+
 } // namespace
 
 int main() {
@@ -147,6 +317,15 @@ int main() {
   benchmark_timeline_lookup(100);
   benchmark_timeline_lookup(1'000);
   benchmark_timeline_lookup(10'000);
+
+  std::cout << "\nCommand history\n";
+  benchmark_command_history(100);
+  benchmark_command_history(1'000);
+
+  std::cout << "\nInteractive command latency\n";
+  benchmark_interactive_latency(100);
+  benchmark_interactive_latency(1'000);
+  benchmark_interactive_latency(10'000);
 
   consume(benchmark_sink);
   return 0;

@@ -1,4 +1,5 @@
 #include <pulsar/application/bootstrap.hpp>
+#include <pulsar/application/commands/command_processor.hpp>
 #include <pulsar/domain/time/frame_number.hpp>
 #include <pulsar/domain/time/frame_rate.hpp>
 #include <pulsar/domain/time/media_time.hpp>
@@ -57,5 +58,22 @@ int main() {
     std::cout << '/' << timeline_duration.denominator();
   }
   std::cout << " s\n";
+
+  auto command_timeline = Timeline{TimelineId{10}};
+  command_timeline.add_track(Track{TrackId{10}, TrackKind::Video});
+  auto processor = pulsar::application::CommandProcessor{command_timeline};
+  processor.execute(pulsar::application::AddClipCommand{
+      TrackId{10},
+      Clip{ClipId{10}, MediaId{10},
+           TimeRange{MediaTime{0, Rational{1, 1}}, MediaTime{1, Rational{1, 1}}},
+           MediaTime{0, Rational{1, 1}}}});
+  const bool add_ok = command_timeline.find_clip(ClipId{10}) != nullptr;
+  const bool undo_ok = processor.undo() && command_timeline.find_clip(ClipId{10}) == nullptr;
+  const bool redo_ok = processor.redo() && command_timeline.find_clip(ClipId{10}) != nullptr;
+
+  std::cout << "Command model\n";
+  std::cout << "Add clip: " << (add_ok ? "OK" : "FAILED") << '\n';
+  std::cout << "Undo: " << (undo_ok ? "OK" : "FAILED") << '\n';
+  std::cout << "Redo: " << (redo_ok ? "OK" : "FAILED") << '\n';
   return 0;
 }

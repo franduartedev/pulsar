@@ -23,6 +23,8 @@ public:
 
   void add_track(Track track);
   void insert_clip(TrackId track_id, Clip clip);
+  void remove_clip(ClipId clip_id);
+  void move_clip(ClipId clip_id, TrackId destination_track_id, MediaTime timeline_start);
 
   [[nodiscard]] const Track* find_track(TrackId id) const noexcept;
   [[nodiscard]] const Clip* find_clip(ClipId id) const noexcept;
@@ -30,6 +32,7 @@ public:
 
 private:
   [[nodiscard]] Track* find_track_mutable(TrackId id) noexcept;
+  [[nodiscard]] std::size_t find_track_index(TrackId id) const;
 
   TimelineId id_;
   std::vector<Track> tracks_;

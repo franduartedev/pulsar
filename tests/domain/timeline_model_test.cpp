@@ -306,6 +306,99 @@ bool timeline_tests() {
   return true;
 }
 
+bool timeline_remove_tests() {
+  Timeline timeline{TimelineId{10}};
+  timeline.add_track(Track{TrackId{10}, TrackKind::Video});
+  timeline.insert_clip(TrackId{10}, clip(ClipId{10}, MediaId{10}, seconds(0), seconds(5)));
+  timeline.insert_clip(TrackId{10}, clip(ClipId{11}, MediaId{11}, seconds(5), seconds(5)));
+
+  timeline.remove_clip(ClipId{10});
+  if (timeline.find_clip(ClipId{10}) != nullptr || timeline.find_clip(ClipId{11}) == nullptr) {
+    return false;
+  }
+  if (timeline.find_track(TrackId{10})->clips()[0].id() != ClipId{11}) {
+    return false;
+  }
+  if (!throws<std::invalid_argument>([&timeline] { timeline.remove_clip(ClipId{99}); })) {
+    return false;
+  }
+  if (timeline.find_track(TrackId{10})->clips().size() != 1) {
+    return false;
+  }
+
+  timeline.remove_clip(ClipId{11});
+  if (timeline.duration() != MediaTime::zero()) {
+    return false;
+  }
+
+  return true;
+}
+
+bool timeline_move_tests() {
+  Timeline timeline{TimelineId{20}};
+  timeline.add_track(Track{TrackId{20}, TrackKind::Video});
+  timeline.add_track(Track{TrackId{21}, TrackKind::Audio});
+  timeline.insert_clip(TrackId{20}, clip(ClipId{20}, MediaId{20}, seconds(0), seconds(5)));
+  timeline.insert_clip(TrackId{20}, clip(ClipId{21}, MediaId{21}, seconds(10), seconds(5)));
+  timeline.insert_clip(TrackId{21}, clip(ClipId{22}, MediaId{22}, seconds(0), seconds(5)));
+
+  timeline.move_clip(ClipId{20}, TrackId{20}, millis(5000));
+  if (timeline.find_clip(ClipId{20})->timeline_start() != seconds(5)) {
+    return false;
+  }
+  if (timeline.find_track(TrackId{20})->clips()[0].id() != ClipId{20}) {
+    return false;
+  }
+
+  if (!throws<std::invalid_argument>(
+          [&timeline] { timeline.move_clip(ClipId{20}, TrackId{20}, seconds(9)); })) {
+    return false;
+  }
+  if (timeline.find_clip(ClipId{20})->timeline_start() != seconds(5)) {
+    return false;
+  }
+
+  if (!throws<std::invalid_argument>(
+          [&timeline] { timeline.move_clip(ClipId{20}, TrackId{20}, seconds(-1)); })) {
+    return false;
+  }
+  if (timeline.find_clip(ClipId{20})->timeline_start() != seconds(5)) {
+    return false;
+  }
+
+  timeline.move_clip(ClipId{20}, TrackId{21}, seconds(5));
+  if (timeline.find_track(TrackId{20})->find_clip(ClipId{20}) != nullptr) {
+    return false;
+  }
+  if (timeline.find_track(TrackId{21})->find_clip(ClipId{20}) == nullptr) {
+    return false;
+  }
+
+  if (!throws<std::invalid_argument>(
+          [&timeline] { timeline.move_clip(ClipId{21}, TrackId{99}, seconds(0)); })) {
+    return false;
+  }
+  if (timeline.find_track(TrackId{20})->find_clip(ClipId{21}) == nullptr) {
+    return false;
+  }
+
+  if (!throws<std::invalid_argument>(
+          [&timeline] { timeline.move_clip(ClipId{21}, TrackId{21}, seconds(2)); })) {
+    return false;
+  }
+  if (timeline.find_track(TrackId{20})->find_clip(ClipId{21}) == nullptr ||
+      timeline.find_track(TrackId{21})->find_clip(ClipId{21}) != nullptr) {
+    return false;
+  }
+
+  timeline.move_clip(ClipId{21}, TrackId{21}, millis(10'000));
+  if (timeline.find_track(TrackId{21})->find_clip(ClipId{21}) == nullptr) {
+    return false;
+  }
+
+  return true;
+}
+
 } // namespace
 
 int main() {
@@ -326,6 +419,12 @@ int main() {
   }
   if (!timeline_tests()) {
     return fail("timeline tests");
+  }
+  if (!timeline_remove_tests()) {
+    return fail("timeline remove tests");
+  }
+  if (!timeline_move_tests()) {
+    return fail("timeline move tests");
   }
 
   return 0;

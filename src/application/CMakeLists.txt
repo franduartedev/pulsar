@@ -1,5 +1,6 @@
 add_library(pulsar_application
   src/bootstrap.cpp
+  src/commands/command_processor.cpp
 )
 
 add_library(pulsar::application ALIAS pulsar_application)

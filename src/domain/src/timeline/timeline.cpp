@@ -1,6 +1,8 @@
 #include <pulsar/domain/timeline/timeline.hpp>
 
+#include <cstddef>
 #include <stdexcept>
+#include <utility>
 
 namespace pulsar::domain {
 
@@ -33,6 +35,63 @@ void Timeline::insert_clip(TrackId track_id, Clip clip) {
   track->insert_clip(clip);
 }
 
+void Timeline::remove_clip(ClipId clip_id) {
+  for (std::size_t track_index = 0; track_index < tracks_.size(); ++track_index) {
+    const Track& track = tracks_[track_index];
+    if (track.find_clip(clip_id) == nullptr) {
+      continue;
+    }
+
+    Track replacement = track;
+    replacement.remove_clip(clip_id);
+
+    tracks_[track_index] = std::move(replacement);
+    return;
+  }
+
+  throw std::invalid_argument{"clip id does not exist in timeline"};
+}
+
+void Timeline::move_clip(ClipId clip_id, TrackId destination_track_id, MediaTime timeline_start) {
+  if (timeline_start < MediaTime::zero()) {
+    throw std::invalid_argument{"clip timeline start cannot be negative"};
+  }
+
+  const std::size_t destination_index = find_track_index(destination_track_id);
+
+  std::size_t source_index = tracks_.size();
+  const Clip* original_clip = nullptr;
+  for (std::size_t index = 0; index < tracks_.size(); ++index) {
+    original_clip = tracks_[index].find_clip(clip_id);
+    if (original_clip != nullptr) {
+      source_index = index;
+      break;
+    }
+  }
+
+  if (original_clip == nullptr) {
+    throw std::invalid_argument{"clip id does not exist in timeline"};
+  }
+
+  const Clip moved_clip{original_clip->id(), original_clip->media_id(),
+                        original_clip->source_range(), timeline_start};
+
+  Track replacement_source = tracks_[source_index];
+  replacement_source.remove_clip(clip_id);
+
+  if (source_index == destination_index) {
+    replacement_source.insert_clip(moved_clip);
+    tracks_[source_index] = std::move(replacement_source);
+    return;
+  }
+
+  Track replacement_destination = tracks_[destination_index];
+  replacement_destination.insert_clip(moved_clip);
+
+  tracks_[source_index] = std::move(replacement_source);
+  tracks_[destination_index] = std::move(replacement_destination);
+}
+
 const Track* Timeline::find_track(TrackId id) const noexcept {
   for (const auto& track : tracks_) {
     if (track.id() == id) {
@@ -51,6 +110,16 @@ Track* Timeline::find_track_mutable(TrackId id) noexcept {
   }
 
   return nullptr;
+}
+
+std::size_t Timeline::find_track_index(TrackId id) const {
+  for (std::size_t index = 0; index < tracks_.size(); ++index) {
+    if (tracks_[index].id() == id) {
+      return index;
+    }
+  }
+
+  throw std::invalid_argument{"track id does not exist in timeline"};
 }
 
 const Clip* Timeline::find_clip(ClipId id) const noexcept {

@@ -36,6 +36,17 @@ const Clip* Track::find_clip(ClipId id) const noexcept {
   return nullptr;
 }
 
+void Track::remove_clip(ClipId id) {
+  const auto clip =
+      std::find_if(clips_.begin(), clips_.end(), [id](const Clip& item) { return item.id() == id; });
+
+  if (clip == clips_.end()) {
+    throw std::invalid_argument{"clip id does not exist in track"};
+  }
+
+  clips_.erase(clip);
+}
+
 MediaTime Track::duration() const {
   MediaTime result = MediaTime::zero();
 

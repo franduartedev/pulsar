@@ -31,6 +31,10 @@ public:
   [[nodiscard]] MediaTime duration() const;
 
 private:
+  friend class Timeline;
+
+  void remove_clip(ClipId id);
+
   TrackId id_;
   TrackKind kind_;
   std::vector<Clip> clips_;
