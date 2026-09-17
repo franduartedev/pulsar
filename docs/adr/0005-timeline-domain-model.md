@@ -26,6 +26,16 @@ Los punteros, referencias y referencias a vectores devueltos por `Timeline` o `T
 
 `TrackKind` distingue inicialmente `Video` y `Audio`, pero no valida compatibilidad con streams multimedia porque todavía no existe probing ni catálogo de media.
 
+## Extensiones M9.0
+
+El lookup de clips por posición temporal usa la semántica half-open: una posición `T` pertenece a un clip si y solo si `start <= T < end`. Una posición fuera de todos los clips representa naturalmente un gap; no se introduce un objeto `Gap` en el dominio. El lookup devuelve una copia de `Clip` para que una observación no pueda retener referencias a almacenamiento mutable a través de una edición.
+
+M9 usa edición no-ripple. Mover un clip conserva su `ClipId`, `MediaId` y rango fuente, rechaza posiciones negativas y solapamientos en la pista destino, y no desplaza vecinos. Los gaps son válidos.
+
+El trim M9 es únicamente hacia adentro. Para un clip `[A, B)` con fuente `[S0, S1)`, un trim de inicio a `T`, con `A < T < B`, produce timeline `[T, B)` y fuente `[S0 + (T - A), S1)`. Un trim de fin produce timeline `[A, T)` y fuente `[S0, S0 + (T - A))`. Los límites y duraciones cero se rechazan.
+
+El split solo acepta `A < T < B`. Produce dos clips contiguos: el clip original conserva su `ClipId` a la izquierda y el lado derecho recibe un `ClipId` suministrado por la capa superior. La fuente se divide con el mismo offset exacto, sin gap ni solapamiento. El dominio asigna ningún ID y valida/construye el estado resultante antes de mutar la pista, por lo que un fallo deja la timeline intacta.
+
 ## Consecuencias
 
 El modelo es testeable, exacto y libre de dependencias multimedia. Las operaciones relevantes son simples y lineales, adecuadas para M2. La duración de una timeline se calcula como el mayor final temporal de sus clips y no se almacena de forma redundante.

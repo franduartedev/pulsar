@@ -5,6 +5,7 @@
 #include <pulsar/domain/timeline/track.hpp>
 #include <pulsar/domain/time/media_time.hpp>
 
+#include <optional>
 #include <vector>
 
 namespace pulsar::domain {
@@ -25,11 +26,17 @@ public:
   void insert_clip(TrackId track_id, Clip clip);
   void remove_clip(ClipId clip_id);
   void move_clip(ClipId clip_id, TrackId destination_track_id, MediaTime timeline_start);
+  void trim_clip_start(ClipId clip_id, MediaTime timeline_start);
+  void trim_clip_end(ClipId clip_id, MediaTime timeline_end);
+  void split_clip(ClipId clip_id, MediaTime split_timeline_position, ClipId right_clip_id);
 
   // Returned pointers/references are observations only. Do not retain them across
   // Timeline or Track mutation; vector storage and copied replacement tracks may invalidate them.
   [[nodiscard]] const Track* find_track(TrackId id) const noexcept;
   [[nodiscard]] const Clip* find_clip(ClipId id) const noexcept;
+  // Returns a value copy so callers cannot retain a domain reference across mutation.
+  [[nodiscard]] std::optional<Clip> find_clip_at(TrackId track_id,
+                                                  MediaTime timeline_position) const;
   [[nodiscard]] MediaTime duration() const;
 
 private:

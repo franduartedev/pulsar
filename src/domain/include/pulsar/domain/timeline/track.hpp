@@ -5,6 +5,7 @@
 #include <pulsar/domain/timeline/track_kind.hpp>
 #include <pulsar/domain/time/media_time.hpp>
 
+#include <optional>
 #include <vector>
 
 namespace pulsar::domain {
@@ -29,12 +30,17 @@ public:
 
   // Returned pointers/references are observations only. Do not retain them across mutation.
   [[nodiscard]] const Clip* find_clip(ClipId id) const noexcept;
+  // Returns a value copy so callers cannot retain a domain reference across mutation.
+  [[nodiscard]] std::optional<Clip> find_clip_at(MediaTime timeline_position) const;
   [[nodiscard]] MediaTime duration() const;
 
 private:
   friend class Timeline;
 
   void remove_clip(ClipId id);
+  void trim_clip_start(ClipId id, MediaTime timeline_start);
+  void trim_clip_end(ClipId id, MediaTime timeline_end);
+  void split_clip(ClipId id, MediaTime split_timeline_position, ClipId right_clip_id);
 
   TrackId id_;
   TrackKind kind_;

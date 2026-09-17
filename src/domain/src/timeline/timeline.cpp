@@ -92,6 +92,48 @@ void Timeline::move_clip(ClipId clip_id, TrackId destination_track_id, MediaTime
   tracks_[destination_index] = std::move(replacement_destination);
 }
 
+void Timeline::trim_clip_start(ClipId clip_id, MediaTime timeline_start) {
+  for (std::size_t i = 0; i < tracks_.size(); ++i) {
+    if (tracks_[i].find_clip(clip_id) == nullptr) continue;
+    Track replacement = tracks_[i];
+    replacement.trim_clip_start(clip_id, timeline_start);
+    tracks_[i] = std::move(replacement);
+    return;
+  }
+  throw std::invalid_argument{"clip id does not exist in timeline"};
+}
+
+void Timeline::trim_clip_end(ClipId clip_id, MediaTime timeline_end) {
+  for (std::size_t i = 0; i < tracks_.size(); ++i) {
+    if (tracks_[i].find_clip(clip_id) == nullptr) continue;
+    Track replacement = tracks_[i];
+    replacement.trim_clip_end(clip_id, timeline_end);
+    tracks_[i] = std::move(replacement);
+    return;
+  }
+  throw std::invalid_argument{"clip id does not exist in timeline"};
+}
+
+void Timeline::split_clip(ClipId clip_id, MediaTime split_timeline_position, ClipId right_clip_id) {
+  if (find_clip(right_clip_id) != nullptr) {
+    throw std::invalid_argument{"right split clip id already exists in timeline"};
+  }
+  for (std::size_t i = 0; i < tracks_.size(); ++i) {
+    if (tracks_[i].find_clip(clip_id) == nullptr) continue;
+    Track replacement = tracks_[i];
+    replacement.split_clip(clip_id, split_timeline_position, right_clip_id);
+    tracks_[i] = std::move(replacement);
+    return;
+  }
+  throw std::invalid_argument{"clip id does not exist in timeline"};
+}
+
+std::optional<Clip> Timeline::find_clip_at(TrackId track_id, MediaTime timeline_position) const {
+  const Track* track = find_track(track_id);
+  if (track == nullptr) return std::nullopt;
+  return track->find_clip_at(timeline_position);
+}
+
 const Track* Timeline::find_track(TrackId id) const noexcept {
   for (const auto& track : tracks_) {
     if (track.id() == id) {
