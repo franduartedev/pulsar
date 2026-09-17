@@ -10,6 +10,7 @@ Item {
     Rectangle { anchors.horizontalCenter: parent.horizontalCenter; width: 1; height: parent.height; color: Theme.accentHover }
     Rectangle { anchors.top: parent.top; anchors.horizontalCenter: parent.horizontalCenter; width: 9; height: 9; color: Theme.accentHover; rotation: 45 }
     MouseArea {
+        id: hit
         anchors.fill: parent
         drag.target: null
         onPressed: { head.dragging = true; seekAt(mouse) }
