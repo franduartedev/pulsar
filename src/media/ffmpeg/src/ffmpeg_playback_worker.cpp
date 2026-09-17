@@ -227,7 +227,7 @@ void FFmpegPlaybackWorker::run() {
       }
     }
   } catch (const std::exception& error) {
-    enqueue_event(application::PlaybackWorkerError{0, to_error(error)});
+    enqueue_event(application::PlaybackWorkerFatalError{to_error(error)});
   }
 }
 

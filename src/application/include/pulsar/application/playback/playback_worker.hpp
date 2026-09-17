@@ -34,9 +34,13 @@ struct PlaybackWorkerError {
   VideoSourceError error;
 };
 
+struct PlaybackWorkerFatalError {
+  VideoSourceError error;
+};
+
 using PlaybackWorkerEvent = std::variant<PlaybackWorkerSample, PlaybackWorkerSeekComplete,
                                          PlaybackWorkerEndOfStream, PlaybackWorkerCancelled,
-                                         PlaybackWorkerError>;
+                                         PlaybackWorkerError, PlaybackWorkerFatalError>;
 
 class PlaybackMediaWorker {
 public:

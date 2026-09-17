@@ -32,6 +32,7 @@ PlaybackSession::~PlaybackSession() {
 
 void PlaybackSession::open() {
   ++stats_.control_accept_count;
+  if (worker_terminal_) return;
   intent_ = PlaybackIntent::Paused;
   request_seek_for_position(PlaybackPosition::zero(), PlaybackAvailability::Preparing);
 }
@@ -52,6 +53,7 @@ void PlaybackSession::pause() {
 
 void PlaybackSession::seek(PlaybackPosition position) {
   ++stats_.control_accept_count;
+  if (worker_terminal_) return;
   request_seek_for_position(position, PlaybackAvailability::Seeking);
 }
 
@@ -104,7 +106,12 @@ void PlaybackSession::handle_event(PlaybackWorkerEvent event) {
   std::visit(
       [this](auto&& value) {
         using Value = std::decay_t<decltype(value)>;
-        if constexpr (std::is_same_v<Value, PlaybackWorkerSeekComplete>) {
+        if constexpr (std::is_same_v<Value, PlaybackWorkerFatalError>) {
+          worker_terminal_ = true;
+          read_in_flight_ = false;
+          pending_seek_position_.reset();
+          set_error(value.error.message);
+        } else if constexpr (std::is_same_v<Value, PlaybackWorkerSeekComplete>) {
           if (value.generation != generation_) {
             ++stats_.stale_event_count;
             return;
@@ -207,6 +214,7 @@ void PlaybackSession::request_read_if_needed(const PresentationDecision& decisio
 
 void PlaybackSession::request_seek_for_position(PlaybackPosition position,
                                                 PlaybackAvailability availability) {
+  if (worker_terminal_) return;
   ++generation_;
   pending_seek_position_ = position;
   read_in_flight_ = false;

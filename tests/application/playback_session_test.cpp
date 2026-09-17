@@ -23,6 +23,8 @@ using pulsar::application::PlaybackMediaWorker;
 using pulsar::application::PlaybackPosition;
 using pulsar::application::PlaybackSession;
 using pulsar::application::PlaybackWorkerCancelled;
+using pulsar::application::PlaybackWorkerError;
+using pulsar::application::PlaybackWorkerFatalError;
 using pulsar::application::PlaybackWorkerEndOfStream;
 using pulsar::application::PlaybackWorkerEvent;
 using pulsar::application::PlaybackWorkerSample;
@@ -339,6 +341,49 @@ bool stale_cancelled_keeps_read_tests() {
   return true;
 }
 
+
+bool fatal_worker_error_tests() {
+  FakeMonotonicClock clock;
+  auto [session, worker] = make_session(clock);
+  session->open();
+  if (*worker->last_seek_generation == 0) return false;
+  const auto seek_count = worker->seek_request_count;
+  worker->push(PlaybackWorkerFatalError{pulsar::application::VideoSourceError{"fatal worker failure"}});
+  const auto decision = session->update();
+  const auto* error = std::get_if<pulsar::application::PresentationTemporalError>(&decision);
+  if (error == nullptr || error->message != "fatal worker failure" ||
+      session->availability() != PlaybackAvailability::Error || session->stats().stale_event_count != 0) {
+    return false;
+  }
+  session->seek(playback(millis(20)));
+  session->open();
+  if (session->availability() != PlaybackAvailability::Error ||
+      worker->seek_request_count != seek_count) {
+    return false;
+  }
+  const auto still_error = session->update();
+  const auto* persistent = std::get_if<pulsar::application::PresentationTemporalError>(&still_error);
+  return persistent != nullptr && persistent->message == "fatal worker failure";
+}
+
+bool request_error_generation_tests() {
+  FakeMonotonicClock clock;
+  auto [session, worker] = make_session(clock);
+  session->open();
+  const auto old_generation = *worker->last_seek_generation;
+  session->seek(playback(millis(40)));
+  const auto current_generation = *worker->last_seek_generation;
+  if (current_generation == old_generation) return false;
+  worker->push(PlaybackWorkerError{old_generation, pulsar::application::VideoSourceError{"old request"}});
+  if (!is_starved(session->update()) || session->stats().stale_event_count != 1 ||
+      session->availability() == PlaybackAvailability::Error) return false;
+  worker->push(PlaybackWorkerError{current_generation, pulsar::application::VideoSourceError{"current request"}});
+  const auto decision = session->update();
+  const auto* error = std::get_if<pulsar::application::PresentationTemporalError>(&decision);
+  return error != nullptr && error->message == "current request" &&
+         session->availability() == PlaybackAvailability::Error;
+}
+
 } // namespace
 
 int main() {
@@ -359,6 +404,12 @@ int main() {
   }
   if (!stale_cancelled_keeps_read_tests()) {
     return fail("stale cancelled keeps read tests");
+  }
+  if (!fatal_worker_error_tests()) {
+    return fail("fatal worker error tests");
+  }
+  if (!request_error_generation_tests()) {
+    return fail("request error generation tests");
   }
 
   return 0;

@@ -16,6 +16,7 @@ using namespace pulsar;
 using application::PlaybackGeneration;
 using application::PlaybackWorkerEvent;
 using application::PlaybackWorkerSeekComplete;
+using application::PlaybackWorkerFatalError;
 using application::PlaybackWorkerSample;
 using application::PlaybackWorkerFactory;
 using application::ProjectDocument;
@@ -63,6 +64,7 @@ struct WorkerConfig {
   bool emit_seek{true};
   bool emit_end_on_seek{false};
   bool emit_error_on_seek{false};
+  bool emit_fatal_on_seek{false};
 };
 
 class FakeWorker final : public application::PlaybackMediaWorker {
@@ -88,6 +90,10 @@ public:
     requested_targets_->push_back(target.value());
     last_target_ = target.value();
     if (!config_->emit_seek) return;
+    if (config_->emit_fatal_on_seek) {
+      events_.push_back(application::PlaybackWorkerFatalError{application::VideoSourceError{"fatal worker failure"}});
+      return;
+    }
     if (config_->emit_error_on_seek) {
       events_.push_back(application::PlaybackWorkerSeekComplete{
           generation, application::VideoSourceError{"fake source error"}});
@@ -383,6 +389,19 @@ void snapshot_change_resets_active_clip_identity() {
   assert(fixture.factory_calls == 2);
 }
 
+
+void fatal_worker_error_propagates() {
+  Fixture fixture;
+  (void)fixture.processor.add_clip(fixture.media_one, TimeRange{time(0), time(5)}, time(0));
+  fixture.config->emit_fatal_on_seek = true;
+  FakeClock clock;
+  TimelinePlaybackCoordinator coordinator{clock, fixture.factory()};
+  coordinator.set_snapshot(fixture.document.snapshot());
+  const auto presentation = coordinator.update();
+  assert(std::holds_alternative<TimelineSourceErrorPresentation>(presentation));
+  assert(!std::holds_alternative<TimelineStarvedPresentation>(presentation));
+}
+
 } // namespace
 
 int main() {
@@ -396,4 +415,5 @@ int main() {
   canonical_end_position_and_snapshot_shrink();
   rapid_same_source_seek_uses_latest_completion();
   snapshot_change_resets_active_clip_identity();
+  fatal_worker_error_propagates();
 }

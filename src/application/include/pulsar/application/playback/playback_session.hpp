@@ -86,6 +86,7 @@ private:
   PlaybackAvailability availability_{PlaybackAvailability::Empty};
   PlaybackGeneration generation_{0};
   bool read_in_flight_{false};
+  bool worker_terminal_{false};
   bool source_exhausted_{false};
   std::optional<PlaybackPosition> pending_seek_position_;
   std::optional<std::string> error_message_;
