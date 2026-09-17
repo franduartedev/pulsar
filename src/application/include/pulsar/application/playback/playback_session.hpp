@@ -66,6 +66,12 @@ public:
     return stats_;
   }
 
+  // Narrow diagnostics accessor so measurement harnesses can observe the
+  // current seek-epoch scheduler counters without touching playback state.
+  [[nodiscard]] PresentationSchedulerStats scheduler_stats() const noexcept {
+    return scheduler_.stats();
+  }
+
 private:
   void poll_worker_events();
   void handle_event(PlaybackWorkerEvent event);

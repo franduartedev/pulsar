@@ -34,8 +34,13 @@ void FFmpegPlaybackVisualMailbox::publish(SourceEpoch epoch, std::uint64_t ordin
   }
   while (entries_.size() >= capacity_) {
     entries_.pop_front();
+    ++evicted_;
   }
   entries_.push_back(Entry{epoch, ordinal, std::move(frame)});
+  ++published_;
+  if (entries_.size() > high_water_mark_) {
+    high_water_mark_ = entries_.size();
+  }
 }
 
 std::optional<DecodedVisualVideoFrame> FFmpegPlaybackVisualMailbox::take(SourceEpoch epoch,
@@ -67,6 +72,11 @@ std::size_t FFmpegPlaybackVisualMailbox::size() const noexcept {
 FFmpegPlaybackVisualMailbox::SourceEpoch FFmpegPlaybackVisualMailbox::active_epoch() const noexcept {
   std::lock_guard lock{mutex_};
   return active_epoch_;
+}
+
+FFmpegPlaybackVisualMailbox::Stats FFmpegPlaybackVisualMailbox::stats() const noexcept {
+  std::lock_guard lock{mutex_};
+  return Stats{published_, evicted_, high_water_mark_, entries_.size()};
 }
 
 } // namespace pulsar::media::ffmpeg

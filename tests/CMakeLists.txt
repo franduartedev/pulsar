@@ -219,3 +219,19 @@ pulsar_apply_compiler_warnings(pulsar_ffmpeg_video_decode_session_tests)
 
 add_test(NAME pulsar.media.ffmpeg_video_decode_session
          COMMAND pulsar_ffmpeg_video_decode_session_tests)
+
+add_executable(pulsar_playback_diagnostics_tests
+  media/playback_diagnostics_test.cpp
+)
+
+target_link_libraries(pulsar_playback_diagnostics_tests
+  PRIVATE
+    pulsar::media_ffmpeg
+    pulsar::domain
+)
+
+pulsar_apply_project_options(pulsar_playback_diagnostics_tests)
+pulsar_apply_compiler_warnings(pulsar_playback_diagnostics_tests)
+
+add_test(NAME pulsar.media.playback_diagnostics
+         COMMAND pulsar_playback_diagnostics_tests)

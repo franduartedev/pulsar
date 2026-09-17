@@ -3,6 +3,7 @@
 #include <pulsar/media/ffmpeg/media_decode_error.hpp>
 
 #include <chrono>
+#include <cstddef>
 #include <exception>
 #include <stdexcept>
 #include <utility>
@@ -121,6 +122,11 @@ FFmpegPlaybackWorkerStats FFmpegPlaybackWorker::stats() const noexcept {
   const auto queue_stats = events_.stats();
   std::lock_guard lock{mutex_};
   auto result = stats_;
+  const auto ring = read_latencies_.snapshot();
+  result.read_latency_count = ring.size();
+  for (std::size_t i = 0; i < ring.size(); ++i) {
+    result.read_latency_ring[i] = ring[i];
+  }
   result.events_dropped_due_to_capacity = queue_stats.events_dropped;
   result.samples_dropped_due_to_capacity = queue_stats.samples_dropped;
   result.control_wait_count = queue_stats.control_wait_count;
@@ -211,12 +217,14 @@ void FFmpegPlaybackWorker::run() {
             {
               std::lock_guard lock{mutex_};
               stats_.last_read_latency = std::chrono::steady_clock::now() - read_start;
+              read_latencies_.push(stats_.last_read_latency);
             }
             enqueue_event(application::PlaybackWorkerSample{read->generation, to_sample(*frame)});
           } else {
             {
               std::lock_guard lock{mutex_};
               stats_.last_read_latency = std::chrono::steady_clock::now() - read_start;
+              read_latencies_.push(stats_.last_read_latency);
             }
             enqueue_event(application::PlaybackWorkerEndOfStream{
                 read->generation, application::VideoSourceEndOfStream{std::nullopt, false}});

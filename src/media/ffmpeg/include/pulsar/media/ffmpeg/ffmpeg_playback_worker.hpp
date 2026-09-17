@@ -3,9 +3,11 @@
 #include <pulsar/application/playback/playback_worker.hpp>
 #include <pulsar/media/ffmpeg/ffmpeg_video_decode_session.hpp>
 #include <pulsar/media/ffmpeg/ffmpeg_playback_visual_mailbox.hpp>
+#include <pulsar/media/ffmpeg/detail/latency_sample_ring.hpp>
 #include <pulsar/media/ffmpeg/detail/playback_worker_event_queue.hpp>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <condition_variable>
 #include <cstddef>
@@ -29,6 +31,10 @@ struct FFmpegPlaybackWorkerStats {
   std::chrono::nanoseconds open_latency{0};
   std::chrono::nanoseconds last_read_latency{0};
   std::chrono::nanoseconds last_seek_latency{0};
+  // Bounded recent read-latency observations (oldest-first snapshot) for
+  // p50/p95/max reporting outside decode hot paths.
+  std::array<std::chrono::nanoseconds, detail::LatencySampleRing::capacity> read_latency_ring{};
+  std::size_t read_latency_count{0};
 };
 
 class FFmpegPlaybackWorker final : public application::PlaybackMediaWorker {
@@ -84,6 +90,8 @@ private:
   std::optional<SeekRequest> pending_seek_;
   detail::PlaybackWorkerEventQueue events_;
   FFmpegPlaybackWorkerStats stats_;
+  // Guarded by mutex_; recorded alongside last_read_latency.
+  detail::LatencySampleRing read_latencies_;
   std::uint64_t next_ordinal_{1};
   std::shared_ptr<FFmpegPlaybackVisualMailbox> visual_mailbox_;
   FFmpegPlaybackVisualMailbox::SourceEpoch source_epoch_{0};
