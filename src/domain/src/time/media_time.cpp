@@ -69,6 +69,56 @@ using WideInt = __int128_t;
   return lhs * rhs;
 }
 
+[[nodiscard]] int compare_positive_fractions(WideInt lhs_numerator, WideInt lhs_denominator,
+                                             WideInt rhs_numerator, WideInt rhs_denominator) noexcept {
+  bool reversed = false;
+  while (true) {
+    const WideInt lhs_quotient = lhs_numerator / lhs_denominator;
+    const WideInt rhs_quotient = rhs_numerator / rhs_denominator;
+    if (lhs_quotient != rhs_quotient) {
+      const bool lhs_is_less = lhs_quotient < rhs_quotient;
+      return reversed ? (lhs_is_less ? 1 : -1) : (lhs_is_less ? -1 : 1);
+    }
+
+    const WideInt lhs_remainder = lhs_numerator % lhs_denominator;
+    const WideInt rhs_remainder = rhs_numerator % rhs_denominator;
+    if (lhs_remainder == 0 || rhs_remainder == 0) {
+      if (lhs_remainder == 0 && rhs_remainder == 0) {
+        return 0;
+      }
+      const bool lhs_is_less = lhs_remainder == 0;
+      return reversed ? (lhs_is_less ? 1 : -1) : (lhs_is_less ? -1 : 1);
+    }
+
+    lhs_numerator = lhs_denominator;
+    lhs_denominator = lhs_remainder;
+    rhs_numerator = rhs_denominator;
+    rhs_denominator = rhs_remainder;
+    reversed = !reversed;
+  }
+}
+
+[[nodiscard]] WideInt media_time_numerator(MediaTime time) noexcept {
+  return static_cast<WideInt>(time.value()) * time.time_base().numerator();
+}
+
+[[nodiscard]] int compare_media_times(MediaTime lhs, MediaTime rhs) noexcept {
+  const WideInt lhs_numerator = media_time_numerator(lhs);
+  const WideInt rhs_numerator = media_time_numerator(rhs);
+  if ((lhs_numerator < 0) != (rhs_numerator < 0)) {
+    return lhs_numerator < 0 ? -1 : 1;
+  }
+  if (lhs_numerator == 0 && rhs_numerator == 0) {
+    return 0;
+  }
+
+  const bool negative = lhs_numerator < 0;
+  const int result = compare_positive_fractions(
+      abs_wide(lhs_numerator), lhs.time_base().denominator(), abs_wide(rhs_numerator),
+      rhs.time_base().denominator());
+  return negative ? -result : result;
+}
+
 [[nodiscard]] WideInt checked_add(WideInt lhs, WideInt rhs) {
   constexpr WideInt wide_max =
       (static_cast<WideInt>(1) << 126) + ((static_cast<WideInt>(1) << 126) - 1);
@@ -187,27 +237,27 @@ MediaTime operator-(MediaTime lhs, MediaTime rhs) {
 }
 
 bool operator==(MediaTime lhs, MediaTime rhs) {
-  return lhs.seconds() == rhs.seconds();
+  return compare_media_times(lhs, rhs) == 0;
 }
 
 bool operator!=(MediaTime lhs, MediaTime rhs) {
-  return !(lhs == rhs);
+  return compare_media_times(lhs, rhs) != 0;
 }
 
 bool operator<(MediaTime lhs, MediaTime rhs) {
-  return lhs.seconds() < rhs.seconds();
+  return compare_media_times(lhs, rhs) < 0;
 }
 
 bool operator>(MediaTime lhs, MediaTime rhs) {
-  return rhs < lhs;
+  return compare_media_times(lhs, rhs) > 0;
 }
 
 bool operator<=(MediaTime lhs, MediaTime rhs) {
-  return !(rhs < lhs);
+  return compare_media_times(lhs, rhs) <= 0;
 }
 
 bool operator>=(MediaTime lhs, MediaTime rhs) {
-  return !(lhs < rhs);
+  return compare_media_times(lhs, rhs) >= 0;
 }
 
 } // namespace pulsar::domain

@@ -237,6 +237,9 @@ bool time_to_frame_tests() {
 }
 
 bool comparison_tests() {
+  constexpr auto int64_max = std::numeric_limits<std::int64_t>::max();
+  constexpr auto int64_min = std::numeric_limits<std::int64_t>::min();
+
   if (MediaTime{1, Rational{1, 2}} != MediaTime{500, Rational{1, 1000}}) {
     return false;
   }
@@ -244,6 +247,50 @@ bool comparison_tests() {
     return false;
   }
   if (!(MediaTime{2000, Rational{1, 1000}} > MediaTime{1, Rational{1, 1}})) {
+    return false;
+  }
+
+  const MediaTime huge{int64_max, Rational{2, 1}};
+  const MediaTime huge_nearby{int64_max - 1, Rational{2, 1}};
+  if (!(huge > huge_nearby) || huge == huge_nearby || huge < huge_nearby) {
+    return false;
+  }
+
+  const MediaTime huge_cross_base{int64_max, Rational{int64_max, 1}};
+  const MediaTime huge_cross_base_smaller{int64_max - 1, Rational{int64_max, 1}};
+  if (!(huge_cross_base > huge_cross_base_smaller)) {
+    return false;
+  }
+
+  const MediaTime huge_negative{int64_min, Rational{int64_max, 1}};
+  const MediaTime less_negative{int64_min + 1, Rational{int64_max, 1}};
+  if (!(huge_negative < less_negative)) {
+    return false;
+  }
+
+  if (!(MediaTime{-1, Rational{1, 1}} < MediaTime{0, Rational{1, 1}}) ||
+      !(MediaTime{0, Rational{1, 1}} < MediaTime{1, Rational{1, 1}})) {
+    return false;
+  }
+
+  const MediaTime equal_a{int64_max / 2, Rational{2, 1}};
+  const MediaTime equal_b{int64_max - 1, Rational{1, 1}};
+  if (!(equal_a == equal_b) || equal_a < equal_b || equal_b < equal_a ||
+      equal_a != equal_b || !(equal_a <= equal_b) || !(equal_a >= equal_b)) {
+    return false;
+  }
+
+  const MediaTime awkward_a{1001, Rational{1001, 30000}};
+  const MediaTime awkward_b{1002001, Rational{1, 30000}};
+  if (!(awkward_a == awkward_b)) {
+    return false;
+  }
+
+  const MediaTime transitive_a{int64_max - 2, Rational{int64_max, 1}};
+  const MediaTime transitive_b{int64_max - 1, Rational{int64_max, 1}};
+  const MediaTime transitive_c{int64_max, Rational{int64_max, 1}};
+  if (!(transitive_a < transitive_b) || !(transitive_b < transitive_c) ||
+      !(transitive_a < transitive_c)) {
     return false;
   }
 
