@@ -2,6 +2,7 @@
 
 #include <pulsar/media/ffmpeg/media_decode_error.hpp>
 
+#include <chrono>
 #include <exception>
 #include <stdexcept>
 #include <utility>
@@ -59,6 +60,7 @@ void FFmpegPlaybackWorker::request_read(application::PlaybackGeneration generati
   {
     std::lock_guard lock{mutex_};
     pending_read_ = ReadRequest{generation};
+    ++stats_.read_request_count;
   }
   wake_.notify_one();
 }
@@ -69,6 +71,7 @@ void FFmpegPlaybackWorker::request_seek_for_presentation(application::PlaybackGe
     std::lock_guard lock{mutex_};
     pending_seek_ = SeekRequest{generation, target};
     pending_read_.reset();
+    ++stats_.seek_request_count;
   }
   wake_.notify_one();
 }
@@ -96,16 +99,27 @@ std::optional<application::PlaybackWorkerEvent> FFmpegPlaybackWorker::poll_event
 
 std::size_t FFmpegPlaybackWorker::event_queue_high_water_mark() const noexcept {
   std::lock_guard lock{mutex_};
-  return event_queue_high_water_mark_;
+  return stats_.event_queue_high_water_mark;
+}
+
+FFmpegPlaybackWorkerStats FFmpegPlaybackWorker::stats() const noexcept {
+  std::lock_guard lock{mutex_};
+  return stats_;
 }
 
 void FFmpegPlaybackWorker::run() {
   try {
+    const auto open_start = std::chrono::steady_clock::now();
     auto session = FFmpegVideoDecodeSession{path_, video_stream_index_};
+    {
+      std::lock_guard lock{mutex_};
+      stats_.open_latency = std::chrono::steady_clock::now() - open_start;
+    }
 
     while (true) {
       std::optional<SeekRequest> seek;
       std::optional<ReadRequest> read;
+      std::optional<application::PlaybackWorkerCancelled> cancelled;
       {
         std::unique_lock lock{mutex_};
         wake_.wait(lock, [this] {
@@ -119,16 +133,13 @@ void FFmpegPlaybackWorker::run() {
         if (cancel_requested_) {
           cancel_requested_ = false;
           if (pending_seek_.has_value()) {
-            enqueue_event(application::PlaybackWorkerCancelled{pending_seek_->generation});
+            cancelled = application::PlaybackWorkerCancelled{pending_seek_->generation};
           } else if (pending_read_.has_value()) {
-            enqueue_event(application::PlaybackWorkerCancelled{pending_read_->generation});
+            cancelled = application::PlaybackWorkerCancelled{pending_read_->generation};
           }
           pending_seek_.reset();
           pending_read_.reset();
-          continue;
-        }
-
-        if (pending_seek_.has_value()) {
+        } else if (pending_seek_.has_value()) {
           seek = pending_seek_;
           pending_seek_.reset();
           pending_read_.reset();
@@ -138,9 +149,20 @@ void FFmpegPlaybackWorker::run() {
         }
       }
 
+      if (cancelled.has_value()) {
+        enqueue_event(*cancelled);
+        continue;
+      }
+
       if (seek.has_value()) {
         try {
+          const auto seek_start = std::chrono::steady_clock::now();
           const auto result = session.seek_to_presentation_timestamp(seek->target.value());
+          {
+            std::lock_guard lock{mutex_};
+            stats_.last_seek_latency = std::chrono::steady_clock::now() - seek_start;
+            stats_.last_seek_decoded_frames = result.frames_decoded_after_seek;
+          }
           if (result.frame.has_value()) {
             application::VideoSeekHit hit{to_sample(*result.frame), std::nullopt};
             if (result.lookahead.has_value()) {
@@ -163,9 +185,18 @@ void FFmpegPlaybackWorker::run() {
 
       if (read.has_value()) {
         try {
+          const auto read_start = std::chrono::steady_clock::now();
           if (auto frame = session.decode_next()) {
+            {
+              std::lock_guard lock{mutex_};
+              stats_.last_read_latency = std::chrono::steady_clock::now() - read_start;
+            }
             enqueue_event(application::PlaybackWorkerSample{read->generation, to_sample(*frame)});
           } else {
+            {
+              std::lock_guard lock{mutex_};
+              stats_.last_read_latency = std::chrono::steady_clock::now() - read_start;
+            }
             enqueue_event(application::PlaybackWorkerEndOfStream{
                 read->generation, application::VideoSourceEndOfStream{std::nullopt, false}});
           }
@@ -183,10 +214,11 @@ void FFmpegPlaybackWorker::enqueue_event(application::PlaybackWorkerEvent event)
   std::lock_guard lock{mutex_};
   while (events_.size() >= limits_.event_queue_capacity) {
     events_.pop_front();
+    ++stats_.events_dropped_due_to_capacity;
   }
   events_.push_back(std::move(event));
-  if (events_.size() > event_queue_high_water_mark_) {
-    event_queue_high_water_mark_ = events_.size();
+  if (events_.size() > stats_.event_queue_high_water_mark) {
+    stats_.event_queue_high_water_mark = events_.size();
   }
 }
 

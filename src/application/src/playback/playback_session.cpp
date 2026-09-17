@@ -198,7 +198,6 @@ void PlaybackSession::request_seek_for_position(PlaybackPosition position,
   availability_ = availability;
   scheduler_.reset();
   transport_.pause();
-  worker_->cancel_pending();
   worker_->request_seek_for_presentation(generation_, stream_target_for(position));
 }
 

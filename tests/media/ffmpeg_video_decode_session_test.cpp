@@ -1,4 +1,6 @@
 #include <pulsar/application/media/media_probe_error.hpp>
+#include <pulsar/application/playback/monotonic_clock.hpp>
+#include <pulsar/application/playback/playback_session.hpp>
 #include <pulsar/domain/time/media_time.hpp>
 #include <pulsar/domain/time/rational.hpp>
 #include <pulsar/media/ffmpeg/ffmpeg_playback_worker.hpp>
@@ -18,6 +20,7 @@ extern "C" {
 #include <iostream>
 #include <limits>
 #include <memory>
+#include <utility>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -30,6 +33,14 @@ namespace {
 
 using pulsar::application::MediaProbeError;
 using pulsar::application::MediaProbeErrorCode;
+using pulsar::application::MonotonicClock;
+using pulsar::application::MonotonicInstant;
+using pulsar::application::PlaybackAvailability;
+using pulsar::application::PlaybackPosition;
+using pulsar::application::PlaybackSession;
+using pulsar::application::PresentSample;
+using pulsar::application::PresentationDecision;
+using pulsar::application::StreamTimestamp;
 using pulsar::media::ffmpeg::FFmpegPlaybackWorker;
 using pulsar::media::ffmpeg::FFmpegVideoDecodeSession;
 using pulsar::media::ffmpeg::MediaDecodeError;
@@ -53,6 +64,20 @@ struct TestFormatContextDeleter {
       avformat_close_input(&context);
     }
   }
+};
+
+class FakeMonotonicClock final : public MonotonicClock {
+public:
+  [[nodiscard]] MonotonicInstant now() const override {
+    return now_;
+  }
+
+  void advance(pulsar::domain::MediaTime delta) {
+    now_ = MonotonicInstant{now_.value() + delta};
+  }
+
+private:
+  MonotonicInstant now_{MonotonicInstant::zero()};
 };
 
 int fail(std::string_view message) {
@@ -299,6 +324,24 @@ std::optional<EventType> wait_for_worker_event(FFmpegPlaybackWorker& worker) {
   return std::nullopt;
 }
 
+std::optional<pulsar::domain::MediaTime> wait_for_session_presentation(
+    PlaybackSession& session) {
+  for (int attempt = 0; attempt < 100000; ++attempt) {
+    const PresentationDecision decision = session.update();
+    if (const auto* present = std::get_if<PresentSample>(&decision); present != nullptr &&
+        present->sample.presentation_timestamp.has_value()) {
+      return present->sample.presentation_timestamp->value();
+    }
+    std::this_thread::yield();
+  }
+  return std::nullopt;
+}
+
+pulsar::domain::MediaTime playback_position_for_stream_time(pulsar::domain::MediaTime origin,
+                                                            pulsar::domain::MediaTime stream_time) {
+  return stream_time - origin;
+}
+
 bool ppm_decode_test(const std::filesystem::path& root) {
   const auto ppm_path = root / "tiny visual fixture.ppm";
   write_ppm_fixture(ppm_path);
@@ -522,7 +565,42 @@ bool non_zero_start_time_seek_test(const std::filesystem::path& root) {
         sample->sample.presentation_timestamp->value() != upper_timestamp) {
       return false;
     }
-    if (worker.event_queue_high_water_mark() > 4) {
+    const auto stats = worker.stats();
+    if (worker.event_queue_high_water_mark() > 4 || stats.event_queue_high_water_mark > 4 ||
+        stats.seek_request_count != 1 || stats.read_request_count != 1 ||
+        stats.last_seek_decoded_frames == 0 || stats.open_latency.count() <= 0 ||
+        stats.last_seek_latency.count() <= 0 || stats.last_read_latency.count() <= 0) {
+      return false;
+    }
+  }
+  {
+    FakeMonotonicClock clock;
+    auto worker = std::make_unique<FFmpegPlaybackWorker>(fixture.path, 0,
+                                                         FFmpegPlaybackWorker::Limits{8});
+    PlaybackSession session{clock, std::move(worker)};
+    session.open();
+    const auto opened = wait_for_session_presentation(session);
+    if (!opened.has_value() || *opened != first_timestamp ||
+        session.availability() != PlaybackAvailability::Ready) {
+      return false;
+    }
+
+    session.play();
+    clock.advance(upper_timestamp - first_timestamp);
+    const auto played = wait_for_session_presentation(session);
+    if (!played.has_value() || *played != upper_timestamp) {
+      return false;
+    }
+
+    session.seek(PlaybackPosition{playback_position_for_stream_time(first_timestamp, between_frames)});
+    clock.advance(pulsar::domain::MediaTime{10, pulsar::domain::Rational{1, 1}});
+    const auto sought = wait_for_session_presentation(session);
+    if (!sought.has_value() || *sought != lower_timestamp) {
+      return false;
+    }
+    clock.advance(one_stream_tick_after(lower_timestamp) - lower_timestamp);
+    if (session.position().value() !=
+        playback_position_for_stream_time(first_timestamp, one_stream_tick_after(between_frames))) {
       return false;
     }
   }

@@ -3,6 +3,7 @@
 #include <pulsar/application/playback/playback_worker.hpp>
 #include <pulsar/media/ffmpeg/ffmpeg_video_decode_session.hpp>
 
+#include <chrono>
 #include <condition_variable>
 #include <cstddef>
 #include <deque>
@@ -12,6 +13,17 @@
 #include <thread>
 
 namespace pulsar::media::ffmpeg {
+
+struct FFmpegPlaybackWorkerStats {
+  std::size_t read_request_count{0};
+  std::size_t seek_request_count{0};
+  std::size_t events_dropped_due_to_capacity{0};
+  std::size_t event_queue_high_water_mark{0};
+  std::size_t last_seek_decoded_frames{0};
+  std::chrono::nanoseconds open_latency{0};
+  std::chrono::nanoseconds last_read_latency{0};
+  std::chrono::nanoseconds last_seek_latency{0};
+};
 
 class FFmpegPlaybackWorker final : public application::PlaybackMediaWorker {
 public:
@@ -34,6 +46,7 @@ public:
   [[nodiscard]] std::optional<application::PlaybackWorkerEvent> poll_event() override;
 
   [[nodiscard]] std::size_t event_queue_high_water_mark() const noexcept;
+  [[nodiscard]] FFmpegPlaybackWorkerStats stats() const noexcept;
 
 private:
   struct ReadRequest {
@@ -68,7 +81,7 @@ private:
   std::optional<SeekRequest> active_seek_;
   std::optional<SeekRequest> pending_seek_;
   std::deque<application::PlaybackWorkerEvent> events_;
-  std::size_t event_queue_high_water_mark_{0};
+  FFmpegPlaybackWorkerStats stats_;
   std::uint64_t next_ordinal_{1};
   std::thread worker_;
 };
