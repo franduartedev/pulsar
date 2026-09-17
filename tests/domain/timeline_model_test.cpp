@@ -524,6 +524,55 @@ bool split_tests() {
          same_range(unchanged_right->source_range(), before_right.source_range());
 }
 
+bool restore_clip_tests() {
+  Timeline timeline{TimelineId{40}};
+  timeline.add_track(Track{TrackId{40}, TrackKind::Video});
+  timeline.add_track(Track{TrackId{41}, TrackKind::Video});
+  timeline.insert_clip(TrackId{41}, clip(ClipId{40}, MediaId{40}, seconds(0), seconds(5)));
+
+  if (!throws<std::invalid_argument>([&timeline] {
+        timeline.restore_clip(TrackId{40}, clip(ClipId{40}, MediaId{41}, seconds(10), seconds(2)));
+      })) {
+    return false;
+  }
+  // Strong guarantee: the failed cross-track restore changed nothing.
+  if (timeline.tracks().size() != 2) {
+    return false;
+  }
+  if (timeline.find_track(TrackId{40})->clips().size() != 0) {
+    return false;
+  }
+  const Clip* survivor = timeline.find_track(TrackId{41})->find_clip(ClipId{40});
+  if (survivor == nullptr) {
+    return false;
+  }
+  if (survivor->media_id() != MediaId{40} || survivor->timeline_start() != seconds(0) ||
+      survivor->source_range().start() != MediaTime::zero() ||
+      survivor->source_range().end() != seconds(5)) {
+    return false;
+  }
+  if (timeline.find_clip(ClipId{40}) == nullptr) {
+    return false;
+  }
+
+  // Valid path: replacing the same ClipId on its own track still succeeds (trim undo).
+  timeline.restore_clip(
+      TrackId{41}, Clip{ClipId{40}, MediaId{40}, TimeRange{seconds(1), seconds(5)}, seconds(2)});
+  const Clip* restored = timeline.find_track(TrackId{41})->find_clip(ClipId{40});
+  if (restored == nullptr) {
+    return false;
+  }
+  if (restored->timeline_start() != seconds(2) || restored->source_range().start() != seconds(1) ||
+      restored->duration() != seconds(4)) {
+    return false;
+  }
+  if (timeline.find_track(TrackId{40})->clips().size() != 0) {
+    return false;
+  }
+
+  return true;
+}
+
 } // namespace
 
 int main() {
@@ -559,6 +608,9 @@ int main() {
   }
   if (!split_tests()) {
     return fail("timeline split tests");
+  }
+  if (!restore_clip_tests()) {
+    return fail("timeline restore clip tests");
   }
 
   return 0;

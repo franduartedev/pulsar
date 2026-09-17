@@ -130,6 +130,11 @@ void Timeline::split_clip(ClipId clip_id, MediaTime split_timeline_position, Cli
 
 void Timeline::restore_clip(TrackId track_id, Clip clip) {
   const std::size_t track_index = find_track_index(track_id);
+  for (std::size_t index = 0; index < tracks_.size(); ++index) {
+    if (index != track_index && tracks_[index].find_clip(clip.id()) != nullptr) {
+      throw std::invalid_argument{"clip id already exists on another track in timeline"};
+    }
+  }
   Track replacement = tracks_[track_index];
   if (replacement.find_clip(clip.id()) != nullptr) {
     replacement.remove_clip(clip.id());
