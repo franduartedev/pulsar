@@ -13,7 +13,7 @@ Panel {
         anchors.leftMargin: 12
         anchors.topMargin: 9
         spacing: 10
-        Text { anchors.verticalCenter: parent.verticalCenter; text: "SOURCE"; color: Theme.muted; font.pixelSize: Theme.fontSizeS; font.letterSpacing: 1.5 }
+        Text { anchors.verticalCenter: parent.verticalCenter; text: "TIMELINE"; color: Theme.muted; font.pixelSize: Theme.fontSizeS; font.letterSpacing: 1.5 }
         Text { anchors.verticalCenter: parent.verticalCenter; text: controller.positionText; color: controller.hasMedia ? Theme.text : Theme.faint; font.family: "monospace"; font.pixelSize: Theme.fontSizeM }
     }
     Text { anchors.right: parent.right; anchors.top: parent.top; anchors.rightMargin: 12; anchors.topMargin: 9; text: controller.durationText; color: Theme.faint; font.family: "monospace"; font.pixelSize: Theme.fontSizeM }

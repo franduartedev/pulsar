@@ -41,9 +41,9 @@ class DesktopController final : public QObject {
   Q_PROPERTY(QString debugMetrics READ debugMetrics NOTIFY diagnosticsChanged)
   Q_PROPERTY(QVariantList timelineClips READ timelineClips NOTIFY timelineChanged)
   Q_PROPERTY(QString timelineDurationText READ timelineDurationText NOTIFY timelineChanged)
-  Q_PROPERTY(double timelinePlayheadProgress READ timelinePlayheadProgress NOTIFY timelineChanged)
+  Q_PROPERTY(double timelinePlayheadProgress READ timelinePlayheadProgress NOTIFY timelinePlayheadChanged)
   Q_PROPERTY(QString selectedClipKey READ selectedClipKey NOTIFY timelineChanged)
-  Q_PROPERTY(bool canSplit READ canSplit NOTIFY timelineChanged)
+  Q_PROPERTY(bool canSplit READ canSplit NOTIFY editActionStateChanged)
   Q_PROPERTY(bool canUndo READ canUndo NOTIFY timelineChanged)
   Q_PROPERTY(bool canRedo READ canRedo NOTIFY timelineChanged)
 public:
@@ -93,12 +93,13 @@ public:
 signals:
   void statusChanged(); void technicalStatusChanged(); void mediaChanged(); void errorChanged();
   void previewChanged(); void positionChanged(); void playbackChanged(); void busyChanged();
-  void diagnosticsChanged(); void timelineChanged(); void focusImportPathRequested();
+  void diagnosticsChanged(); void timelineChanged(); void timelinePlayheadChanged(); void editActionStateChanged(); void focusImportPathRequested();
 private:
   struct WorkerCommand { std::filesystem::path path; std::uint64_t generation; };
   struct VisualIdentity { std::uint64_t session_epoch; std::uint64_t document_generation; pulsar::domain::MediaId media_id; std::uint64_t source_epoch; std::uint64_t ordinal; };
   void workerLoop();
   void postOpen(std::filesystem::path path, std::uint64_t generation);
+  [[nodiscard]] std::unique_ptr<pulsar::desktop::EditorSession> makeEditorSession() const;
   void enqueue(WorkerCommand command);
   void updateTick();
   void updatePositionProperties();
@@ -107,7 +108,7 @@ private:
   void installTimelineAsset(const pulsar::application::MediaProbeResult&);
   void presentTimeline(const pulsar::application::TimelinePresentation&);
   void clearProgram(QString state);
-  void displayLease(const pulsar::application::TimelinePresentSample&, bool hold);
+  void displayLease(const pulsar::application::TimelinePresentSample&);
   void setBusy(bool); void setStatus(QString); void setTechnicalStatus(QString); void setPreviewLate(bool);
   void setError(QString); void clearError();
   [[nodiscard]] static QString formatTime(pulsar::domain::MediaTime);
@@ -118,6 +119,7 @@ private:
   std::shared_ptr<pulsar::media::ffmpeg::FFmpegPlaybackVisualMailbox> visual_mailbox_;
   std::unique_ptr<pulsar::desktop::EditorSession> active_session_;
   std::uint64_t editor_session_epoch_{1};
+  std::uint64_t import_request_generation_{0};
   std::thread worker_; mutable std::mutex mutex_; std::condition_variable wake_; bool stop_worker_{false}; std::optional<WorkerCommand> pending_command_;
   QString status_{"Vacío"}; QString technical_status_{"Preview CPU"}; QString media_name_; QString metadata_; QString error_message_; QString preview_source_; QString viewer_state_{"empty"}; QString position_text_{"00:00:00.000"}; QString duration_text_{"--:--:--.---"}; QString debug_metrics_; QVariantList timeline_clips_; QString timeline_duration_text_{"00:00:00.000"}; QString selected_clip_key_;
   double timeline_playhead_progress_{0.0}; double progress_{0.0}; bool has_media_{false}; bool playing_{false}; bool busy_{false}; bool preview_late_{false};
