@@ -91,9 +91,20 @@ Window {
         id: scrubber
         anchors.left: parent.left
         anchors.right: parent.right
-        anchors.bottom: statusBar.top
+        anchors.bottom: timelinePane.top
         anchors.margins: 10
         height: 68
+    }
+
+    TimelinePane {
+        id: timelinePane
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.bottom: statusBar.top
+        anchors.leftMargin: 10
+        anchors.rightMargin: 10
+        anchors.bottomMargin: 10
+        height: 142
     }
 
     StatusBar {

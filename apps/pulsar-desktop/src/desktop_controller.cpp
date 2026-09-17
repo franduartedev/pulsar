@@ -7,6 +7,7 @@
 #include <QCoreApplication>
 #include <QFileInfo>
 #include <QMetaObject>
+#include <QVariantMap>
 
 #include <algorithm>
 #include <chrono>
@@ -46,6 +47,17 @@ constexpr double kLatePreviewSeconds = 0.25;
   }
   return image;
 }
+
+class StaticProbe final : public pulsar::application::MediaProbe {
+public:
+  explicit StaticProbe(pulsar::application::MediaProbeResult result) : result_{std::move(result)} {}
+  [[nodiscard]] pulsar::application::MediaProbeResult probe(const std::filesystem::path&) const override {
+    return result_;
+  }
+
+private:
+  pulsar::application::MediaProbeResult result_;
+};
 
 [[nodiscard]] QString metadataText(const pulsar::application::MediaProbeResult& probe,
                                    const pulsar::application::VideoStreamInfo& stream,
@@ -98,7 +110,9 @@ struct DesktopController::WorkerState {
 };
 
 DesktopController::DesktopController(PreviewImageProvider& image_provider, QObject* parent)
-    : QObject{parent}, image_provider_{image_provider}, transport_{clock_} {
+    : QObject{parent}, image_provider_{image_provider}, transport_{clock_},
+      active_session_{std::make_unique<pulsar::desktop::EditorSession>()} {
+  publishTimeline();
   tick_timer_.setInterval(16);
   tick_timer_.setTimerType(Qt::PreciseTimer);
   connect(&tick_timer_, &QTimer::timeout, this, &DesktopController::updateTick);
@@ -197,6 +211,8 @@ void DesktopController::seekToEnd() {
 
 void DesktopController::closeMedia() {
   ++generation_;
+  active_session_ = std::make_unique<pulsar::desktop::EditorSession>();
+  publishTimeline();
   transport_.pause();
   playing_ = false;
   has_media_ = false;
@@ -223,7 +239,84 @@ void DesktopController::closeMedia() {
   postClose(generation_);
 }
 
+void DesktopController::publishTimeline() {
+  timeline_clips_.clear();
+  if (!active_session_) {
+    emit timelineChanged();
+    return;
+  }
+  for (const auto& view : active_session_->timeline_views()) {
+    QVariantMap item;
+    item.insert(QStringLiteral("clipKey"), QString::fromStdString(view.key));
+    item.insert(QStringLiteral("name"), QString::fromStdString(view.name));
+    item.insert(QStringLiteral("start"), QString::fromStdString(view.start));
+    item.insert(QStringLiteral("end"), QString::fromStdString(view.end));
+    item.insert(QStringLiteral("duration"), QString::fromStdString(view.duration));
+    item.insert(QStringLiteral("missing"), view.missing);
+    item.insert(QStringLiteral("selected"), view.selected);
+    item.insert(QStringLiteral("startProgress"),
+                active_session_->pixel_at(active_session_->document().timeline().find_clip(view.id)->timeline_range().start(), 1.0));
+    item.insert(QStringLiteral("endProgress"),
+                active_session_->pixel_at(active_session_->document().timeline().find_clip(view.id)->timeline_range().end(), 1.0));
+    timeline_clips_.push_back(item);
+  }
+  const auto duration = active_session_->timeline_duration();
+  timeline_duration_text_ = formatTime(duration);
+  emit timelineChanged();
+}
+
+void DesktopController::installTimelineAsset(
+    const pulsar::application::MediaProbeResult& probe_result) {
+  if (!active_session_ || probe_result.video_streams.empty()) return;
+  try {
+    StaticProbe static_probe{probe_result};
+    const auto media_id = active_session_->processor().import_asset(probe_result.path, static_probe);
+    const auto& stream = probe_result.video_streams.front();
+    const auto duration = stream.duration.has_value() ? stream.duration : probe_result.duration;
+    if (duration.has_value() && *duration > pulsar::domain::MediaTime::zero() &&
+        active_session_->document().timeline().duration() == pulsar::domain::MediaTime::zero()) {
+      (void)active_session_->processor().add_clip(media_id,
+          pulsar::domain::TimeRange{pulsar::domain::MediaTime::zero(), *duration},
+          pulsar::domain::MediaTime::zero());
+    }
+    active_session_->rebuild_read_model();
+    publishTimeline();
+  } catch (const std::exception& error) {
+    setError(QStringLiteral("No se pudo crear la entrada de timeline: %1")
+                 .arg(QString::fromUtf8(error.what())));
+  }
+}
+
+void DesktopController::selectTimelineClip(const QString& clip_key) {
+  if (!active_session_) return;
+  if (clip_key.isEmpty()) {
+    active_session_->select_clip(std::nullopt);
+    selected_clip_key_.clear();
+    publishTimeline();
+    return;
+  }
+  bool ok = false;
+  const auto value = clip_key.toULongLong(&ok);
+  if (!ok || value == 0) return;
+  active_session_->select_clip(pulsar::domain::ClipId{value});
+  selected_clip_key_ = clip_key;
+  publishTimeline();
+}
+
+void DesktopController::seekTimelineAt(double pixel, double width) {
+  if (!active_session_) return;
+  const auto target = active_session_->time_at(pixel, width);
+  if (!target.has_value()) return;
+  active_session_->seek(*target);
+  const auto duration = active_session_->timeline_duration();
+  timeline_playhead_progress_ = active_session_->pixel_at(*target, 1.0);
+  if (*target >= duration) timeline_playhead_progress_ = 1.0;
+  emit timelineChanged();
+}
+
 void DesktopController::postOpen(std::filesystem::path path, std::uint64_t generation) {
+  active_session_ = std::make_unique<pulsar::desktop::EditorSession>();
+  publishTimeline();
   transport_.pause();
   playing_ = false;
   read_in_flight_ = false;
@@ -307,7 +400,8 @@ void DesktopController::workerLoop() {
         state.origin = opened.stream_time;
         QMetaObject::invokeMethod(
             this,
-            [this, generation = command.generation, opened = std::move(opened), open_started]() mutable {
+            [this, generation = command.generation, opened = std::move(opened),
+             probe_result, open_started]() mutable {
               if (generation != generation_) {
                 ++stale_visual_frames_;
                 updateDiagnostics();
@@ -321,6 +415,7 @@ void DesktopController::workerLoop() {
                                                      : QStringLiteral("--:--:--.---");
               has_media_ = true;
               last_conversion_time_ = opened.conversion_time;
+              installTimelineAsset(probe_result);
               const auto open_latency = std::chrono::steady_clock::now() - open_started;
               setTechnicalStatus(QStringLiteral("Ready · first frame %1 ms")
                                      .arg(std::chrono::duration_cast<std::chrono::milliseconds>(

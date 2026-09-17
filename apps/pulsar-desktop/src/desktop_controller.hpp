@@ -1,6 +1,9 @@
 #pragma once
 
 #include "preview_image_provider.hpp"
+#include "editor_session.hpp"
+
+#include <pulsar/application/media/media_probe_result.hpp>
 
 #include <pulsar/application/playback/monotonic_clock.hpp>
 #include <pulsar/application/playback/playback_transport.hpp>
@@ -11,6 +14,7 @@
 #include <QObject>
 #include <QTimer>
 #include <QUrl>
+#include <QVariantList>
 
 #include <condition_variable>
 #include <cstdint>
@@ -37,6 +41,10 @@ class DesktopController final : public QObject {
   Q_PROPERTY(bool busy READ busy NOTIFY busyChanged)
   Q_PROPERTY(bool previewLate READ previewLate NOTIFY technicalStatusChanged)
   Q_PROPERTY(QString debugMetrics READ debugMetrics NOTIFY diagnosticsChanged)
+  Q_PROPERTY(QVariantList timelineClips READ timelineClips NOTIFY timelineChanged)
+  Q_PROPERTY(QString timelineDurationText READ timelineDurationText NOTIFY timelineChanged)
+  Q_PROPERTY(double timelinePlayheadProgress READ timelinePlayheadProgress NOTIFY timelineChanged)
+  Q_PROPERTY(QString selectedClipKey READ selectedClipKey NOTIFY timelineChanged)
 
 public:
   explicit DesktopController(PreviewImageProvider& image_provider, QObject* parent = nullptr);
@@ -56,6 +64,10 @@ public:
   [[nodiscard]] bool busy() const { return busy_; }
   [[nodiscard]] bool previewLate() const { return preview_late_; }
   [[nodiscard]] QString debugMetrics() const { return debug_metrics_; }
+  [[nodiscard]] QVariantList timelineClips() const { return timeline_clips_; }
+  [[nodiscard]] QString timelineDurationText() const { return timeline_duration_text_; }
+  [[nodiscard]] double timelinePlayheadProgress() const { return timeline_playhead_progress_; }
+  [[nodiscard]] QString selectedClipKey() const { return selected_clip_key_; }
 
   Q_INVOKABLE void openPath(const QString& path);
   Q_INVOKABLE void openUrl(const QUrl& url);
@@ -67,6 +79,8 @@ public:
   Q_INVOKABLE void seekToStart();
   Q_INVOKABLE void seekToEnd();
   Q_INVOKABLE void closeMedia();
+  Q_INVOKABLE void selectTimelineClip(const QString& clip_key);
+  Q_INVOKABLE void seekTimelineAt(double pixel, double width);
 
 signals:
   void statusChanged();
@@ -78,6 +92,7 @@ signals:
   void playbackChanged();
   void busyChanged();
   void diagnosticsChanged();
+  void timelineChanged();
   void focusImportPathRequested();
 
 private:
@@ -121,6 +136,8 @@ private:
   void updateTick();
   void updatePositionProperties();
   void updateDiagnostics();
+  void publishTimeline();
+  void installTimelineAsset(const pulsar::application::MediaProbeResult& probe_result);
   [[nodiscard]] pulsar::domain::MediaTime currentPlaybackPosition() const;
   [[nodiscard]] pulsar::domain::MediaTime currentStreamTarget() const;
   [[nodiscard]] pulsar::domain::MediaTime relativeFromStream(pulsar::domain::MediaTime stream_time) const;
@@ -156,6 +173,11 @@ private:
   QString position_text_{"00:00:00.000"};
   QString duration_text_{"--:--:--.---"};
   QString debug_metrics_;
+  QVariantList timeline_clips_;
+  QString timeline_duration_text_{QStringLiteral("00:00:00.000")};
+  QString selected_clip_key_;
+  double timeline_playhead_progress_{0.0};
+  std::unique_ptr<pulsar::desktop::EditorSession> active_session_;
   double progress_{0.0};
   bool has_media_{false};
   bool playing_{false};

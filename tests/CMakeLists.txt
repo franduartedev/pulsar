@@ -165,6 +165,18 @@ target_compile_definitions(pulsar_project_persistence_tests PRIVATE PULSAR_SOURC
 
 add_test(NAME pulsar.application.project_persistence COMMAND pulsar_project_persistence_tests)
 
+add_executable(pulsar_editor_session_tests
+  application/editor_session_test.cpp
+  ${CMAKE_SOURCE_DIR}/apps/pulsar-desktop/src/editor_session.cpp
+)
+target_include_directories(pulsar_editor_session_tests PRIVATE
+  ${CMAKE_SOURCE_DIR}/apps/pulsar-desktop/src
+)
+target_link_libraries(pulsar_editor_session_tests PRIVATE pulsar::application pulsar::domain)
+pulsar_apply_project_options(pulsar_editor_session_tests)
+pulsar_apply_compiler_warnings(pulsar_editor_session_tests)
+add_test(NAME pulsar.desktop.editor_session COMMAND pulsar_editor_session_tests)
+
 if(NOT PULSAR_BUILD_FFMPEG)
   return()
 endif()

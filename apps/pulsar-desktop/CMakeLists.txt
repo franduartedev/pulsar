@@ -4,6 +4,8 @@ qt_add_executable(pulsar_desktop
   src/main.cpp
   src/desktop_controller.cpp
   src/desktop_controller.hpp
+  src/editor_session.cpp
+  src/editor_session.hpp
   src/preview_image_provider.cpp
   src/preview_image_provider.hpp
 )
@@ -28,6 +30,10 @@ qt_add_resources(pulsar_desktop pulsar_desktop_qml
     qml/components/InspectorPanel.qml
     qml/components/SourceScrubber.qml
     qml/components/StatusBar.qml
+    qml/components/TimelinePane.qml
+    qml/components/VideoTrack.qml
+    qml/components/ClipBlock.qml
+    qml/components/Playhead.qml
 )
 
 set_source_files_properties(imports/QtQml/WorkerScript/qmldir
