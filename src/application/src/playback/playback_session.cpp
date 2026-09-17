@@ -128,7 +128,9 @@ void PlaybackSession::handle_event(PlaybackWorkerEvent event) {
         } else if constexpr (std::is_same_v<Value, PlaybackWorkerCancelled>) {
           if (value.generation != generation_) {
             ++stats_.stale_event_count;
+            return;
           }
+          read_in_flight_ = false;
         } else if constexpr (std::is_same_v<Value, PlaybackWorkerError>) {
           if (value.generation != generation_) {
             ++stats_.stale_event_count;

@@ -22,6 +22,7 @@ using pulsar::application::PlaybackIntent;
 using pulsar::application::PlaybackMediaWorker;
 using pulsar::application::PlaybackPosition;
 using pulsar::application::PlaybackSession;
+using pulsar::application::PlaybackWorkerCancelled;
 using pulsar::application::PlaybackWorkerEndOfStream;
 using pulsar::application::PlaybackWorkerEvent;
 using pulsar::application::PlaybackWorkerSample;
@@ -273,6 +274,71 @@ bool stale_and_eof_tests() {
   return is_ended(decision) && session->availability() == PlaybackAvailability::Ended;
 }
 
+bool matching_cancelled_releases_read_tests() {
+  FakeMonotonicClock clock;
+  auto [session, worker] = make_session(clock);
+  session->open();
+  worker->push(PlaybackWorkerSeekComplete{
+      *worker->last_seek_generation,
+      VideoSeekHit{sample(1, seconds(5)), sample(2, millis(5040))}});
+  if (!is_present(session->update(), 1) || session->availability() != PlaybackAvailability::Ready) {
+    return false;
+  }
+  const auto ready_generation = *worker->last_seek_generation;
+
+  // Drive the scheduler past the buffered samples so a read is outstanding.
+  session->play();
+  clock.advance(seconds(60));
+  if (!is_starved(session->update()) || worker->read_request_count != 1 ||
+      worker->last_read_generation != ready_generation) {
+    return false;
+  }
+
+  // A current-generation cancellation releases the read pump without error.
+  worker->push(PlaybackWorkerCancelled{ready_generation});
+  if (!is_starved(session->update()) || worker->read_request_count != 2 ||
+      session->stats().stale_event_count != 0 ||
+      session->availability() != PlaybackAvailability::Ready) {
+    return false;
+  }
+  return true;
+}
+
+bool stale_cancelled_keeps_read_tests() {
+  FakeMonotonicClock clock;
+  auto [session, worker] = make_session(clock);
+  session->open();
+  const auto old_generation = *worker->last_seek_generation;
+  session->seek(playback(millis(40)));
+  worker->push(PlaybackWorkerSeekComplete{
+      *worker->last_seek_generation,
+      VideoSeekHit{sample(1, seconds(5)), sample(2, millis(5040))}});
+  if (!is_present(session->update(), 2)) {
+    return false;
+  }
+  const auto current_generation = *worker->last_seek_generation;
+  if (current_generation == old_generation) {
+    return false;
+  }
+
+  session->play();
+  clock.advance(seconds(60));
+  if (!is_starved(session->update()) || worker->read_request_count != 1 ||
+      worker->last_read_generation != current_generation) {
+    return false;
+  }
+  const auto intent_before = session->intent();
+
+  worker->push(PlaybackWorkerCancelled{old_generation});
+  if (!is_starved(session->update()) || worker->read_request_count != 1 ||
+      session->stats().stale_event_count != 1 ||
+      session->availability() != PlaybackAvailability::Ready ||
+      session->intent() != intent_before) {
+    return false;
+  }
+  return true;
+}
+
 } // namespace
 
 int main() {
@@ -287,6 +353,12 @@ int main() {
   }
   if (!stale_and_eof_tests()) {
     return fail("stale and EOF tests");
+  }
+  if (!matching_cancelled_releases_read_tests()) {
+    return fail("matching cancelled releases read tests");
+  }
+  if (!stale_cancelled_keeps_read_tests()) {
+    return fail("stale cancelled keeps read tests");
   }
 
   return 0;
