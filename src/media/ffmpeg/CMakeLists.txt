@@ -12,6 +12,7 @@ pkg_check_modules(
 add_library(pulsar_media_ffmpeg
   src/ffmpeg_video_decode_session.cpp
   src/ffmpeg_media_probe.cpp
+  src/ffmpeg_playback_worker.cpp
   src/internal/ffmpeg_common.cpp
   src/media_decode_error.cpp
 )

@@ -1,6 +1,7 @@
 #include <pulsar/application/media/media_probe_error.hpp>
 #include <pulsar/domain/time/media_time.hpp>
 #include <pulsar/domain/time/rational.hpp>
+#include <pulsar/media/ffmpeg/ffmpeg_playback_worker.hpp>
 #include <pulsar/media/ffmpeg/ffmpeg_video_decode_session.hpp>
 #include <pulsar/media/ffmpeg/media_decode_error.hpp>
 
@@ -21,12 +22,15 @@ extern "C" {
 #include <string>
 #include <string_view>
 #include <stdexcept>
+#include <thread>
+#include <variant>
 #include <vector>
 
 namespace {
 
 using pulsar::application::MediaProbeError;
 using pulsar::application::MediaProbeErrorCode;
+using pulsar::media::ffmpeg::FFmpegPlaybackWorker;
 using pulsar::media::ffmpeg::FFmpegVideoDecodeSession;
 using pulsar::media::ffmpeg::MediaDecodeError;
 using pulsar::media::ffmpeg::MediaDecodeErrorCode;
@@ -262,6 +266,39 @@ bool seek_returns_timestamp(const std::filesystem::path& path,
          *result.frame->presentation_timestamp == expected_timestamp;
 }
 
+bool presentation_seek_returns_timestamp(const std::filesystem::path& path,
+                                         pulsar::domain::MediaTime target,
+                                         pulsar::domain::MediaTime expected_timestamp,
+                                         std::optional<pulsar::domain::MediaTime> expected_next) {
+  auto session = FFmpegVideoDecodeSession{path, 0};
+  const auto result = session.seek_to_presentation_timestamp(target);
+  if (!result.frame.has_value() || !result.frame->presentation_timestamp.has_value() ||
+      *result.frame->presentation_timestamp != expected_timestamp) {
+    return false;
+  }
+
+  const auto next = session.decode_next();
+  if (!expected_next.has_value()) {
+    return !next.has_value();
+  }
+  return next.has_value() && next->presentation_timestamp.has_value() &&
+         *next->presentation_timestamp == *expected_next;
+}
+
+template <typename EventType>
+std::optional<EventType> wait_for_worker_event(FFmpegPlaybackWorker& worker) {
+  for (int attempt = 0; attempt < 100000; ++attempt) {
+    if (auto event = worker.poll_event()) {
+      if (auto* typed = std::get_if<EventType>(&*event); typed != nullptr) {
+        return std::move(*typed);
+      }
+      return std::nullopt;
+    }
+    std::this_thread::yield();
+  }
+  return std::nullopt;
+}
+
 bool ppm_decode_test(const std::filesystem::path& root) {
   const auto ppm_path = root / "tiny visual fixture.ppm";
   write_ppm_fixture(ppm_path);
@@ -455,6 +492,40 @@ bool non_zero_start_time_seek_test(const std::filesystem::path& root) {
   if (!seek_returns_timestamp(fixture.path, between_frames, upper_timestamp)) {
     return false;
   }
+  if (!presentation_seek_returns_timestamp(fixture.path, lower_timestamp, lower_timestamp,
+                                           upper_timestamp)) {
+    return false;
+  }
+  if (!presentation_seek_returns_timestamp(fixture.path, between_frames, lower_timestamp,
+                                           upper_timestamp)) {
+    return false;
+  }
+  {
+    auto worker = FFmpegPlaybackWorker{fixture.path, 0, FFmpegPlaybackWorker::Limits{4}};
+    worker.request_seek_for_presentation(12, pulsar::application::StreamTimestamp{between_frames});
+    const auto seek = wait_for_worker_event<pulsar::application::PlaybackWorkerSeekComplete>(worker);
+    if (!seek.has_value() || seek->generation != 12) {
+      return false;
+    }
+    const auto* hit = std::get_if<pulsar::application::VideoSeekHit>(&seek->outcome);
+    if (hit == nullptr || !hit->sample.presentation_timestamp.has_value() ||
+        hit->sample.presentation_timestamp->value() != lower_timestamp || !hit->lookahead.has_value() ||
+        !hit->lookahead->presentation_timestamp.has_value() ||
+        hit->lookahead->presentation_timestamp->value() != upper_timestamp) {
+      return false;
+    }
+
+    worker.request_read(13);
+    const auto sample = wait_for_worker_event<pulsar::application::PlaybackWorkerSample>(worker);
+    if (!sample.has_value() || sample->generation != 13 ||
+        !sample->sample.presentation_timestamp.has_value() ||
+        sample->sample.presentation_timestamp->value() != upper_timestamp) {
+      return false;
+    }
+    if (worker.event_queue_high_water_mark() > 4) {
+      return false;
+    }
+  }
 
   const auto before_first = one_stream_tick_before(first_timestamp);
   if (!seek_returns_timestamp(fixture.path, before_first, first_timestamp)) {
@@ -472,6 +543,15 @@ bool non_zero_start_time_seek_test(const std::filesystem::path& root) {
   }
 
   const auto after_final = one_stream_tick_after(fixture.timestamps.back());
+  {
+    auto session = FFmpegVideoDecodeSession{fixture.path, 0};
+    const auto result = session.seek_to_presentation_timestamp(after_final);
+    if (!result.frame.has_value() || !result.frame->presentation_timestamp.has_value() ||
+        *result.frame->presentation_timestamp != fixture.timestamps.back() ||
+        session.decode_next().has_value()) {
+      return false;
+    }
+  }
   {
     auto session = FFmpegVideoDecodeSession{fixture.path, 0};
     const auto result = session.seek_to_stream_timestamp(after_final);

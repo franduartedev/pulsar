@@ -231,6 +231,12 @@ public:
   }
 
   [[nodiscard]] std::optional<DecodedVideoFrameInfo> decode_next() {
+    if (pending_decoded_frame_.has_value()) {
+      auto pending = std::move(pending_decoded_frame_);
+      pending_decoded_frame_.reset();
+      return pending;
+    }
+
     if (state_ == State::Finished) {
       return std::nullopt;
     }
@@ -299,6 +305,59 @@ public:
     }
 
     return VideoSeekResult{target, std::nullopt, decoded_after_seek};
+  }
+
+  [[nodiscard]] VideoPresentationSeekResult seek_to_presentation_timestamp(
+      domain::MediaTime target) {
+    const std::int64_t seek_timestamp =
+        floor_media_time_to_stream_timestamp(target, stream_time_base_);
+
+    reset_reusable_objects_before_seek();
+
+    const int seek_result =
+        av_seek_frame(context_.get(), stream_index_, seek_timestamp, AVSEEK_FLAG_BACKWARD);
+    if (seek_result == AVERROR(ENOSYS) || seek_result == AVERROR(EPIPE)) {
+      mark_after_failed_seek();
+      throw MediaDecodeError{MediaDecodeErrorCode::SeekUnsupported,
+                             "FFmpeg demuxer does not support seeking for this stream"};
+    }
+    if (seek_result < 0) {
+      mark_after_failed_seek();
+      throw MediaDecodeError{MediaDecodeErrorCode::SeekFailed,
+                             "FFmpeg failed while seeking video stream: " +
+                                 ffmpeg_error_text(seek_result)};
+    }
+
+    avcodec_flush_buffers(codec_context_.get());
+    reset_logical_decode_state();
+    pending_decoded_frame_.reset();
+
+    std::size_t decoded_after_seek = 0;
+    std::optional<DecodedVideoFrameInfo> candidate;
+    while (auto frame = decode_next()) {
+      ++decoded_after_seek;
+      if (!frame->presentation_timestamp.has_value()) {
+        continue;
+      }
+
+      if (*frame->presentation_timestamp <= target) {
+        candidate = std::move(frame);
+        continue;
+      }
+
+      if (candidate.has_value()) {
+        pending_decoded_frame_ = std::move(frame);
+        return VideoPresentationSeekResult{target, std::move(candidate), pending_decoded_frame_,
+                                           decoded_after_seek};
+      }
+
+      pending_decoded_frame_ = std::move(frame);
+      return VideoPresentationSeekResult{target, std::nullopt, pending_decoded_frame_,
+                                         decoded_after_seek};
+    }
+
+    return VideoPresentationSeekResult{target, std::move(candidate), std::nullopt,
+                                       decoded_after_seek};
   }
 
 private:
@@ -407,6 +466,7 @@ private:
     if (has_pending_packet_) {
       av_packet_unref(packet_.get());
     }
+    pending_decoded_frame_.reset();
     av_frame_unref(frame_.get());
   }
 
@@ -420,6 +480,7 @@ private:
     avcodec_flush_buffers(codec_context_.get());
     has_pending_packet_ = false;
     pending_send_was_blocked_ = false;
+    pending_decoded_frame_.reset();
     state_ = State::Finished;
   }
 
@@ -431,6 +492,7 @@ private:
   domain::Rational stream_time_base_{1, 1};
   std::optional<domain::MediaTime> stream_start_timestamp_;
   std::string codec_name_{"unknown"};
+  std::optional<DecodedVideoFrameInfo> pending_decoded_frame_;
   State state_{State::Reading};
   bool has_pending_packet_{false};
   bool pending_send_was_blocked_{false};
@@ -453,6 +515,11 @@ std::optional<DecodedVideoFrameInfo> FFmpegVideoDecodeSession::decode_next() {
 
 VideoSeekResult FFmpegVideoDecodeSession::seek_to_stream_timestamp(domain::MediaTime target) {
   return impl_->seek_to_stream_timestamp(target);
+}
+
+VideoPresentationSeekResult FFmpegVideoDecodeSession::seek_to_presentation_timestamp(
+    domain::MediaTime target) {
+  return impl_->seek_to_presentation_timestamp(target);
 }
 
 int FFmpegVideoDecodeSession::stream_index() const noexcept {

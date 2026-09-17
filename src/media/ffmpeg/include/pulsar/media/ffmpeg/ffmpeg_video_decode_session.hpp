@@ -1,6 +1,7 @@
 #pragma once
 
 #include <pulsar/media/ffmpeg/decoded_video_frame_info.hpp>
+#include <pulsar/media/ffmpeg/video_presentation_seek_result.hpp>
 #include <pulsar/media/ffmpeg/video_seek_result.hpp>
 
 #include <filesystem>
@@ -25,6 +26,7 @@ public:
   // playback orchestration must not retain pointers/iterators into mutable Timeline data.
   [[nodiscard]] std::optional<DecodedVideoFrameInfo> decode_next();
   [[nodiscard]] VideoSeekResult seek_to_stream_timestamp(domain::MediaTime target);
+  [[nodiscard]] VideoPresentationSeekResult seek_to_presentation_timestamp(domain::MediaTime target);
   [[nodiscard]] int stream_index() const noexcept;
   [[nodiscard]] const std::string& codec_name() const noexcept;
   [[nodiscard]] std::optional<domain::MediaTime> stream_start_timestamp() const;
