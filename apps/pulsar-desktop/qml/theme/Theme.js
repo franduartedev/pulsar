@@ -1,16 +1,19 @@
 .pragma library
 
-// Backgrounds
-var base     = "#0d1117"
-var header   = "#0b0f15"
-var panel    = "#111821"
-var panelAlt = "#0e141d"
-var viewer   = "#05070a"
-var input    = "#0c121a"
+// Backgrounds: three levels — workspace frame, monitor module, quiet panels.
+var base      = "#0d1117"
+var workspace = "#070a0e"
+var header    = "#0b0f15"
+var panel     = "#111821"
+var panelAlt  = "#0e141d"
+var monitor   = "#101823"
+var viewer    = "#05070a"
+var input     = "#0c121a"
 
 // Borders
 var border     = "#263241"
 var borderSoft = "#1a2330"
+var edge       = "#2e405a"
 
 // Text
 var text       = "#d7dee8"
@@ -48,4 +51,5 @@ var fontSizeS  = 11
 var fontSizeM  = 12
 var fontSizeL  = 13
 var fontSizeXL = 16
+var fontSizeTC = 19
 var fontSizeXXL = 30
