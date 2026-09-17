@@ -14,10 +14,14 @@ int main(int argc, char** argv) {
   app.setApplicationName(QStringLiteral("PULSAR"));
   app.setOrganizationName(QStringLiteral("PULSAR"));
 
+  // Declared before the controller so reverse destruction tears down the
+  // controller first: QQmlApplicationEngine (sole owner of image_provider)
+  // is destroyed only after every PreviewImageProvider& user is gone.
+  QQmlApplicationEngine engine;
+
   auto* image_provider = new PreviewImageProvider{};
   DesktopController controller{*image_provider};
 
-  QQmlApplicationEngine engine;
   engine.addImportPath(QStringLiteral("qrc:/pulsar/imports"));
   engine.addImageProvider(QStringLiteral("pulsar-preview"), image_provider);
   engine.rootContext()->setContextProperty(QStringLiteral("controller"), &controller);
