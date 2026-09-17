@@ -300,11 +300,61 @@ void snapshot_replacement_invalidates_old_session() {
   coordinator.set_snapshot(first);
   (void)coordinator.update();
   (void)coordinator.update();
+  (void)fixture.processor.add_clip(fixture.media_one, TimeRange{time(0), time(5)}, time(10));
   const auto second = fixture.document.snapshot();
   coordinator.set_snapshot(second);
   const auto presentation = coordinator.update();
-  assert(std::holds_alternative<TimelineStarvedPresentation>(presentation) ||
-         std::holds_alternative<TimelinePresentSample>(presentation));
+  assert(std::holds_alternative<TimelinePresentSample>(presentation) ||
+         std::holds_alternative<TimelineStarvedPresentation>(presentation));
+  assert(fixture.factory_calls == 2);
+}
+
+void canonical_end_position_and_snapshot_shrink() {
+  Fixture fixture;
+  (void)fixture.processor.add_clip(fixture.media_one, TimeRange{time(0), time(5)}, time(0));
+  const auto long_snapshot = fixture.document.snapshot();
+  FakeClock clock;
+  TimelinePlaybackCoordinator coordinator{clock, fixture.factory()};
+  coordinator.set_snapshot(long_snapshot);
+  coordinator.seek(time(20));
+  auto presentation = coordinator.update();
+  assert(coordinator.timeline_position() == time(5));
+  assert(std::holds_alternative<TimelineEndedPresentation>(presentation));
+  const auto ended = std::get<TimelineEndedPresentation>(presentation);
+  assert(ended.position == time(5));
+  assert(ended.duration == time(5));
+
+  Fixture replacement;
+  (void)replacement.processor.add_clip(replacement.media_one, TimeRange{time(0), time(20)}, time(0));
+  const auto longer = replacement.document.snapshot();
+  TimelinePlaybackCoordinator shrinking{clock, replacement.factory()};
+  shrinking.set_snapshot(longer);
+  shrinking.seek(time(8));
+  Fixture short_fixture;
+  (void)short_fixture.processor.add_clip(short_fixture.media_one, TimeRange{time(0), time(5)}, time(0));
+  const auto shorter = short_fixture.document.snapshot();
+  shrinking.set_snapshot(shorter);
+  presentation = shrinking.update();
+  assert(shrinking.timeline_position() == shorter.timeline.duration());
+  assert(std::holds_alternative<TimelineEndedPresentation>(presentation));
+  const auto shrunk_end = std::get<TimelineEndedPresentation>(presentation);
+  assert(shrunk_end.position == shorter.timeline.duration());
+  assert(shrunk_end.duration == shorter.timeline.duration());
+}
+
+void rapid_same_source_seek_uses_latest_completion() {
+  Fixture fixture;
+  (void)fixture.processor.add_clip(fixture.media_one, TimeRange{time(0), time(10)}, time(0));
+  FakeClock clock;
+  TimelinePlaybackCoordinator coordinator{clock, fixture.factory()};
+  coordinator.set_snapshot(fixture.document.snapshot());
+  coordinator.seek(time(2));
+  coordinator.seek(time(7));
+  const auto presentation = coordinator.update();
+  assert(std::holds_alternative<TimelinePresentSample>(presentation) ||
+         std::holds_alternative<TimelineHoldPresentation>(presentation));
+  assert(!fixture.requested_targets.empty());
+  assert(fixture.requested_targets.back() == time(7) + time(5));
 }
 
 } // namespace
@@ -317,4 +367,6 @@ int main() {
   preparing_starvation_and_runtime_errors();
   exact_awkward_source_mapping();
   snapshot_replacement_invalidates_old_session();
+  canonical_end_position_and_snapshot_shrink();
+  rapid_same_source_seek_uses_latest_completion();
 }

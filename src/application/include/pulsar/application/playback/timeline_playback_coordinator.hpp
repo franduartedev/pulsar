@@ -110,6 +110,7 @@ private:
   [[nodiscard]] TimelinePresentation make_gap(const TimelineGap& gap) const;
   [[nodiscard]] TimelinePresentation make_missing(const MissingClipMedia& missing) const;
   [[nodiscard]] TimelinePresentation make_ended(const TimelineEnded& ended) const;
+  [[nodiscard]] domain::MediaTime next_gap_boundary(domain::MediaTime position) const;
   void reset_source();
 
   const MonotonicClock& clock_;
@@ -118,6 +119,8 @@ private:
   std::optional<ProjectSnapshot> snapshot_;
   std::unique_ptr<PlaybackSession> source_session_;
   std::optional<ResolvedClip> active_clip_;
+  std::optional<MissingClipMedia> active_missing_;
+  std::optional<domain::MediaTime> segment_end_;
   std::optional<TimelinePresentation> current_presentation_;
   std::optional<std::string> source_creation_error_;
   PlaybackIntent intent_{PlaybackIntent::Paused};

@@ -19,6 +19,8 @@ void TimelinePlaybackCoordinator::set_snapshot(ProjectSnapshot snapshot) {
   segment_kind_ = SegmentKind::None;
   current_presentation_.reset();
   source_creation_error_.reset();
+  active_missing_.reset();
+  segment_end_.reset();
   const auto outcome = resolve_clip_at(*snapshot_, snapshot_->video_track_id, position);
   reconcile(outcome, position, true);
 }
@@ -61,8 +63,35 @@ TimelinePresentation TimelinePlaybackCoordinator::update() {
   }
 
   const domain::MediaTime position = timeline_position();
+  switch (segment_kind_) {
+  case SegmentKind::Clip:
+    if (active_clip_.has_value() && position < active_clip_->timeline_range.end()) {
+      return evaluate_clip(*active_clip_, position);
+    }
+    break;
+  case SegmentKind::Gap:
+    if (segment_end_.has_value() && position < *segment_end_) {
+      current_presentation_ = TimelineGapPresentation{position};
+      return *current_presentation_;
+    }
+    break;
+  case SegmentKind::Missing:
+    if (active_missing_.has_value() && position < active_missing_->timeline_range.end()) {
+      current_presentation_ = TimelineMissingMediaPresentation{
+          active_missing_->clip_id, active_missing_->media_id, position,
+          active_missing_->timeline_range, active_missing_->reason};
+      return *current_presentation_;
+    }
+    break;
+  case SegmentKind::Ended:
+  case SegmentKind::SourceError:
+    return *current_presentation_;
+  case SegmentKind::None:
+    break;
+  }
+
   const auto outcome = resolve_clip_at(*snapshot_, snapshot_->video_track_id, position);
-  reconcile(outcome, position, false);
+  reconcile(outcome, position, true);
   if (std::holds_alternative<ResolvedClip>(outcome)) {
     return evaluate_clip(std::get<ResolvedClip>(outcome), position);
   }
@@ -126,6 +155,8 @@ void TimelinePlaybackCoordinator::enter_clip(const ResolvedClip& clip, bool forc
     }
   }
   active_clip_ = clip;
+  active_missing_.reset();
+  segment_end_ = clip.timeline_range.end();
   segment_kind_ = SegmentKind::Clip;
   current_presentation_ = TimelineStarvedPresentation{};
 }
@@ -136,7 +167,9 @@ void TimelinePlaybackCoordinator::enter_gap(const TimelineGap& gap, bool force_t
   }
   reset_source();
   active_clip_.reset();
+  active_missing_.reset();
   source_creation_error_.reset();
+  segment_end_ = next_gap_boundary(gap.position);
   segment_kind_ = SegmentKind::Gap;
   current_presentation_ = make_gap(gap);
   if (intent_ == PlaybackIntent::Playing) {
@@ -152,7 +185,9 @@ void TimelinePlaybackCoordinator::enter_missing(const MissingClipMedia& missing,
   }
   reset_source();
   active_clip_.reset();
+  active_missing_ = missing;
   source_creation_error_.reset();
+  segment_end_ = missing.timeline_range.end();
   segment_kind_ = SegmentKind::Missing;
   current_presentation_ = make_missing(missing);
   if (intent_ == PlaybackIntent::Playing) {
@@ -166,7 +201,9 @@ void TimelinePlaybackCoordinator::enter_ended(const TimelineEnded& ended, bool f
   }
   reset_source();
   active_clip_.reset();
+  active_missing_.reset();
   source_creation_error_.reset();
+  segment_end_ = ended.duration;
   transport_.pause();
   transport_.seek(PlaybackPosition{ended.duration});
   segment_kind_ = SegmentKind::Ended;
@@ -244,7 +281,20 @@ TimelinePresentation TimelinePlaybackCoordinator::make_missing(
 }
 
 TimelinePresentation TimelinePlaybackCoordinator::make_ended(const TimelineEnded& ended) const {
-  return TimelineEndedPresentation{ended.position, ended.duration};
+  return TimelineEndedPresentation{ended.duration, ended.duration};
+}
+
+domain::MediaTime TimelinePlaybackCoordinator::next_gap_boundary(
+    domain::MediaTime position) const {
+  const auto* track = snapshot_->timeline.find_track(snapshot_->video_track_id);
+  if (track != nullptr) {
+    for (const auto& clip : track->clips()) {
+      if (clip.timeline_start() > position) {
+        return clip.timeline_start();
+      }
+    }
+  }
+  return snapshot_->timeline.duration();
 }
 
 void TimelinePlaybackCoordinator::reset_source() {
