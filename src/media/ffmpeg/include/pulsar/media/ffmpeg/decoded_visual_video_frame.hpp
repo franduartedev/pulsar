@@ -22,6 +22,8 @@ struct FFmpegVideoImageDescriptor {
   std::string color_matrix;
 };
 
+class FFmpegPreviewConverter;
+
 class FFmpegVideoFrameLease {
 public:
   FFmpegVideoFrameLease();
@@ -42,6 +44,7 @@ private:
   std::shared_ptr<const Impl> impl_;
 
   friend class FFmpegVideoDecodeSession;
+  friend class FFmpegPreviewConverter;
 };
 
 struct DecodedVisualVideoFrame {

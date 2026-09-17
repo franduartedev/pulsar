@@ -5,6 +5,7 @@
 #include <pulsar/domain/time/rational.hpp>
 #include <pulsar/media/ffmpeg/decoded_visual_video_frame.hpp>
 #include <pulsar/media/ffmpeg/ffmpeg_playback_worker.hpp>
+#include <pulsar/media/ffmpeg/ffmpeg_preview_converter.hpp>
 #include <pulsar/media/ffmpeg/ffmpeg_video_decode_session.hpp>
 #include <pulsar/media/ffmpeg/media_decode_error.hpp>
 
@@ -44,6 +45,8 @@ using pulsar::application::PresentationDecision;
 using pulsar::application::StreamTimestamp;
 using pulsar::media::ffmpeg::DecodedVisualVideoFrame;
 using pulsar::media::ffmpeg::FFmpegPlaybackWorker;
+using pulsar::media::ffmpeg::FFmpegPreviewConverter;
+using pulsar::media::ffmpeg::FFmpegPreviewPixelFormat;
 using pulsar::media::ffmpeg::FFmpegVideoDecodeSession;
 using pulsar::media::ffmpeg::MediaDecodeError;
 using pulsar::media::ffmpeg::MediaDecodeErrorCode;
@@ -451,6 +454,95 @@ bool visual_frame_timestamp_alignment_test(const std::filesystem::path& root) {
   return previous.frame.valid();
 }
 
+bool preview_conversion_test(const std::filesystem::path& root) {
+  const auto fixture_path = root / "preview-conversion-h264.mkv";
+  write_non_zero_start_h264_fixture(fixture_path);
+  const auto fixture = inspect_non_zero_start_fixture(fixture_path);
+
+  auto session = FFmpegVideoDecodeSession{fixture.path, 0};
+  const auto frame = session.decode_next_visual();
+  if (!frame.has_value()) {
+    return false;
+  }
+
+  const FFmpegPreviewConverter converter;
+  const auto preview = converter.convert(*frame);
+  if (preview.width != fixture.width || preview.height != fixture.height ||
+      preview.stride_bytes != fixture.width * 4 ||
+      preview.pixel_format != FFmpegPreviewPixelFormat::Rgba8888) {
+    return false;
+  }
+  if (preview.pixels.size() !=
+      static_cast<std::size_t>(preview.stride_bytes) * static_cast<std::size_t>(preview.height)) {
+    return false;
+  }
+  if (!preview.presentation_timestamp.has_value() ||
+      *preview.presentation_timestamp != fixture.timestamps.front()) {
+    return false;
+  }
+  if (preview.source_image.coded_width != fixture.width ||
+      preview.source_image.coded_height != fixture.height || preview.conversion_time.count() < 0) {
+    return false;
+  }
+
+  for (int index = 0; index < 10; ++index) {
+    const auto next = session.decode_next_visual();
+    if (!next.has_value()) {
+      return false;
+    }
+    const auto converted = converter.convert(*next);
+    if (converted.pixels.size() != preview.pixels.size() || converted.stride_bytes != preview.stride_bytes) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+bool visual_presentation_seek_test(const std::filesystem::path& root) {
+  const auto fixture_path = root / "visual-presentation-seek-h264.mkv";
+  write_non_zero_start_h264_fixture(fixture_path);
+  const auto fixture = inspect_non_zero_start_fixture(fixture_path);
+
+  const auto lower_timestamp = fixture.timestamps.at(37);
+  const auto upper_timestamp = fixture.timestamps.at(38);
+  const auto between_frames = one_stream_tick_after(lower_timestamp);
+
+  auto session = FFmpegVideoDecodeSession{fixture.path, 0};
+  const auto result = session.seek_to_presentation_timestamp_visual(between_frames);
+  if (!result.frame.has_value() || !result.frame->frame.valid() ||
+      !result.frame->presentation_timestamp.has_value() ||
+      *result.frame->presentation_timestamp != lower_timestamp) {
+    return false;
+  }
+  if (!result.lookahead.has_value() || !result.lookahead->frame.valid() ||
+      !result.lookahead->presentation_timestamp.has_value() ||
+      *result.lookahead->presentation_timestamp != upper_timestamp) {
+    return false;
+  }
+  const auto next = session.decode_next_visual();
+  if (!next.has_value() || !next->presentation_timestamp.has_value() ||
+      *next->presentation_timestamp != upper_timestamp) {
+    return false;
+  }
+
+  const FFmpegPreviewConverter converter;
+  const auto preview = converter.convert(*result.frame);
+  if (preview.width != fixture.width || preview.height != fixture.height || preview.pixels.empty()) {
+    return false;
+  }
+
+  const auto after_final = one_stream_tick_after(fixture.timestamps.back());
+  const auto eof_result = session.seek_to_presentation_timestamp_visual(after_final);
+  if (!eof_result.frame.has_value() || !eof_result.frame->presentation_timestamp.has_value() ||
+      *eof_result.frame->presentation_timestamp != fixture.timestamps.back() ||
+      session.decode_next_visual().has_value()) {
+    return false;
+  }
+
+  return true;
+}
+
 bool audio_only_error_test(const std::filesystem::path& root) {
   const auto wav_path = root / "tiny audio fixture.wav";
   write_wav_fixture(wav_path);
@@ -765,6 +857,12 @@ int main() {
   }
   if (!visual_frame_timestamp_alignment_test(root)) {
     return fail("visual frame timestamp alignment test");
+  }
+  if (!preview_conversion_test(root)) {
+    return fail("preview conversion test");
+  }
+  if (!visual_presentation_seek_test(root)) {
+    return fail("visual presentation seek test");
   }
   if (!audio_only_error_test(root)) {
     return fail("audio-only error test");

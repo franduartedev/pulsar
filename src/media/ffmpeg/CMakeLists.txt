@@ -7,6 +7,7 @@ pkg_check_modules(
     libavformat
     libavcodec
     libavutil
+    libswscale
 )
 
 add_library(pulsar_media_ffmpeg

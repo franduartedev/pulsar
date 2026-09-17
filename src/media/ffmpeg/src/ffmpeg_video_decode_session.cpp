@@ -1,6 +1,7 @@
 #include <pulsar/media/ffmpeg/ffmpeg_video_decode_session.hpp>
 
 #include <pulsar/media/ffmpeg/decoded_visual_video_frame.hpp>
+#include <pulsar/media/ffmpeg/ffmpeg_preview_converter.hpp>
 
 #include <pulsar/media/ffmpeg/media_decode_error.hpp>
 
@@ -13,9 +14,12 @@ extern "C" {
 #include <libavformat/avformat.h>
 #include <libavutil/avutil.h>
 #include <libavutil/error.h>
+#include <libavutil/imgutils.h>
 #include <libavutil/pixdesc.h>
+#include <libswscale/swscale.h>
 }
 
+#include <chrono>
 #include <cerrno>
 #include <cstdint>
 #include <filesystem>
@@ -24,6 +28,7 @@ extern "C" {
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 namespace pulsar::media::ffmpeg {
 namespace {
@@ -54,9 +59,16 @@ struct FrameDeleter {
   }
 };
 
+struct SwsContextDeleter {
+  void operator()(SwsContext* context) const noexcept {
+    sws_freeContext(context);
+  }
+};
+
 using CodecContextPtr = std::unique_ptr<AVCodecContext, CodecContextDeleter>;
 using PacketPtr = std::unique_ptr<AVPacket, PacketDeleter>;
 using FramePtr = std::unique_ptr<AVFrame, FrameDeleter>;
+using SwsContextPtr = std::unique_ptr<SwsContext, SwsContextDeleter>;
 
 #if defined(__SIZEOF_INT128__)
 using WideInt = __int128_t;
@@ -177,6 +189,27 @@ using WideInt = __int128_t;
   };
 }
 
+[[nodiscard]] int checked_rgba_stride(int width) {
+  if (width <= 0 || width > std::numeric_limits<int>::max() / 4) {
+    throw MediaDecodeError{MediaDecodeErrorCode::DecodeFailed,
+                           "preview conversion received invalid frame width"};
+  }
+  return width * 4;
+}
+
+[[nodiscard]] std::size_t checked_preview_buffer_size(int stride, int height) {
+  if (height <= 0) {
+    throw MediaDecodeError{MediaDecodeErrorCode::DecodeFailed,
+                           "preview conversion received invalid frame height"};
+  }
+  const auto wide_size = static_cast<std::uint64_t>(stride) * static_cast<std::uint64_t>(height);
+  if (wide_size > static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max())) {
+    throw MediaDecodeError{MediaDecodeErrorCode::DecodeFailed,
+                           "preview conversion buffer size overflowed"};
+  }
+  return static_cast<std::size_t>(wide_size);
+}
+
 [[nodiscard]] std::int64_t checked_to_int64(WideInt value) {
   if (value < static_cast<WideInt>(std::numeric_limits<std::int64_t>::min()) ||
       value > static_cast<WideInt>(std::numeric_limits<std::int64_t>::max())) {
@@ -258,6 +291,14 @@ public:
     return frame_ != nullptr;
   }
 
+  [[nodiscard]] const AVFrame& frame() const {
+    if (frame_ == nullptr) {
+      throw MediaDecodeError{MediaDecodeErrorCode::DecodeFailed,
+                             "preview conversion received an invalid frame lease"};
+    }
+    return *frame_;
+  }
+
 private:
   FramePtr frame_;
 };
@@ -275,6 +316,64 @@ FFmpegVideoFrameLease::FFmpegVideoFrameLease(std::shared_ptr<const Impl> impl) n
 
 bool FFmpegVideoFrameLease::valid() const noexcept {
   return impl_ != nullptr && impl_->valid();
+}
+
+FFmpegPreviewFrame FFmpegPreviewConverter::convert(const DecodedVisualVideoFrame& frame) const {
+  if (!frame.frame.valid() || frame.frame.impl_ == nullptr) {
+    throw MediaDecodeError{MediaDecodeErrorCode::DecodeFailed,
+                           "preview conversion requires a valid frame lease"};
+  }
+
+  const AVFrame& source = frame.frame.impl_->frame();
+  if (source.width <= 0 || source.height <= 0 || source.format < 0) {
+    throw MediaDecodeError{MediaDecodeErrorCode::DecodeFailed,
+                           "preview conversion received unsupported frame metadata"};
+  }
+
+  const auto start = std::chrono::steady_clock::now();
+  const int stride = checked_rgba_stride(source.width);
+  std::vector<std::uint8_t> pixels(checked_preview_buffer_size(stride, source.height));
+
+  std::uint8_t* destination_data[4] = {pixels.data(), nullptr, nullptr, nullptr};
+  int destination_linesize[4] = {stride, 0, 0, 0};
+
+  SwsContextPtr context{sws_getContext(source.width,
+                                       source.height,
+                                       static_cast<AVPixelFormat>(source.format),
+                                       source.width,
+                                       source.height,
+                                       AV_PIX_FMT_RGBA,
+                                       SWS_BILINEAR,
+                                       nullptr,
+                                       nullptr,
+                                       nullptr)};
+  if (context == nullptr) {
+    throw MediaDecodeError{MediaDecodeErrorCode::DecodeFailed,
+                           "libswscale could not create preview conversion context"};
+  }
+
+  const int converted_height = sws_scale(context.get(),
+                                         source.data,
+                                         source.linesize,
+                                         0,
+                                         source.height,
+                                         destination_data,
+                                         destination_linesize);
+  if (converted_height != source.height) {
+    throw MediaDecodeError{MediaDecodeErrorCode::DecodeFailed,
+                           "libswscale did not convert the full preview frame"};
+  }
+
+  return FFmpegPreviewFrame{
+      source.width,
+      source.height,
+      stride,
+      FFmpegPreviewPixelFormat::Rgba8888,
+      std::move(pixels),
+      frame.presentation_timestamp,
+      frame.image,
+      std::chrono::steady_clock::now() - start,
+  };
 }
 
 class FFmpegVideoDecodeSession::Impl {
@@ -314,6 +413,17 @@ public:
   }
 
   [[nodiscard]] std::optional<DecodedVideoFrameInfo> decode_next() {
+    if (pending_visual_frame_.has_value()) {
+      auto pending = std::move(pending_visual_frame_);
+      pending_visual_frame_.reset();
+      return DecodedVideoFrameInfo{
+          pending->stream_index,
+          pending->image.coded_width,
+          pending->image.coded_height,
+          pending->image.pixel_format_name,
+          pending->presentation_timestamp,
+      };
+    }
     if (pending_decoded_frame_.has_value()) {
       auto pending = std::move(pending_decoded_frame_);
       pending_decoded_frame_.reset();
@@ -342,6 +452,11 @@ public:
   }
 
   [[nodiscard]] std::optional<DecodedVisualVideoFrame> decode_next_visual() {
+    if (pending_visual_frame_.has_value()) {
+      auto pending = std::move(pending_visual_frame_);
+      pending_visual_frame_.reset();
+      return pending;
+    }
     if (pending_decoded_frame_.has_value()) {
       throw MediaDecodeError{
           MediaDecodeErrorCode::DecodeFailed,
@@ -469,6 +584,59 @@ public:
 
     return VideoPresentationSeekResult{target, std::move(candidate), std::nullopt,
                                        decoded_after_seek};
+  }
+
+  [[nodiscard]] VideoPresentationVisualSeekResult seek_to_presentation_timestamp_visual(
+      domain::MediaTime target) {
+    const std::int64_t seek_timestamp =
+        floor_media_time_to_stream_timestamp(target, stream_time_base_);
+
+    reset_reusable_objects_before_seek();
+
+    const int seek_result =
+        av_seek_frame(context_.get(), stream_index_, seek_timestamp, AVSEEK_FLAG_BACKWARD);
+    if (seek_result == AVERROR(ENOSYS) || seek_result == AVERROR(EPIPE)) {
+      mark_after_failed_seek();
+      throw MediaDecodeError{MediaDecodeErrorCode::SeekUnsupported,
+                             "FFmpeg demuxer does not support seeking for this stream"};
+    }
+    if (seek_result < 0) {
+      mark_after_failed_seek();
+      throw MediaDecodeError{MediaDecodeErrorCode::SeekFailed,
+                             "FFmpeg failed while seeking video stream: " +
+                                 ffmpeg_error_text(seek_result)};
+    }
+
+    avcodec_flush_buffers(codec_context_.get());
+    reset_logical_decode_state();
+    pending_decoded_frame_.reset();
+    pending_visual_frame_.reset();
+
+    std::size_t decoded_after_seek = 0;
+    std::optional<DecodedVisualVideoFrame> candidate;
+    while (auto frame = decode_next_visual()) {
+      ++decoded_after_seek;
+      if (!frame->presentation_timestamp.has_value()) {
+        continue;
+      }
+
+      if (*frame->presentation_timestamp <= target) {
+        candidate = std::move(frame);
+        continue;
+      }
+
+      pending_visual_frame_ = std::move(frame);
+      if (candidate.has_value()) {
+        return VideoPresentationVisualSeekResult{target, std::move(candidate), pending_visual_frame_,
+                                                decoded_after_seek};
+      }
+
+      return VideoPresentationVisualSeekResult{target, std::nullopt, pending_visual_frame_,
+                                              decoded_after_seek};
+    }
+
+    return VideoPresentationVisualSeekResult{target, std::move(candidate), std::nullopt,
+                                            decoded_after_seek};
   }
 
 private:
@@ -619,6 +787,7 @@ private:
       av_packet_unref(packet_.get());
     }
     pending_decoded_frame_.reset();
+    pending_visual_frame_.reset();
     av_frame_unref(frame_.get());
   }
 
@@ -633,6 +802,7 @@ private:
     has_pending_packet_ = false;
     pending_send_was_blocked_ = false;
     pending_decoded_frame_.reset();
+    pending_visual_frame_.reset();
     state_ = State::Finished;
   }
 
@@ -645,6 +815,7 @@ private:
   std::optional<domain::MediaTime> stream_start_timestamp_;
   std::string codec_name_{"unknown"};
   std::optional<DecodedVideoFrameInfo> pending_decoded_frame_;
+  std::optional<DecodedVisualVideoFrame> pending_visual_frame_;
   State state_{State::Reading};
   bool has_pending_packet_{false};
   bool pending_send_was_blocked_{false};
@@ -676,6 +847,11 @@ VideoSeekResult FFmpegVideoDecodeSession::seek_to_stream_timestamp(domain::Media
 VideoPresentationSeekResult FFmpegVideoDecodeSession::seek_to_presentation_timestamp(
     domain::MediaTime target) {
   return impl_->seek_to_presentation_timestamp(target);
+}
+
+VideoPresentationVisualSeekResult FFmpegVideoDecodeSession::seek_to_presentation_timestamp_visual(
+    domain::MediaTime target) {
+  return impl_->seek_to_presentation_timestamp_visual(target);
 }
 
 int FFmpegVideoDecodeSession::stream_index() const noexcept {
