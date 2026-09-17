@@ -16,6 +16,11 @@ namespace pulsar::project_file {
 namespace {
 
 constexpr std::size_t max_project_bytes = 128 * 1024 * 1024;
+constexpr bool project_size_allowed(std::size_t size) noexcept {
+  return size <= max_project_bytes;
+}
+static_assert(project_size_allowed(max_project_bytes));
+static_assert(!project_size_allowed(max_project_bytes + 1));
 std::atomic<std::uint64_t> temp_counter{0};
 
 [[noreturn]] void fail(const std::string& message) {
@@ -36,7 +41,7 @@ std::string read_all(const std::filesystem::path& path) {
   std::ifstream input{path, std::ios::binary | std::ios::ate};
   if (!input) throw application::ProjectRepositoryError{"cannot open project file for reading"};
   const auto end = input.tellg();
-  if (end < 0 || static_cast<std::uint64_t>(end) > max_project_bytes) {
+  if (end < 0 || !project_size_allowed(static_cast<std::size_t>(end))) {
     throw application::ProjectRepositoryError{"project file exceeds size limit"};
   }
   std::string bytes(static_cast<std::size_t>(end), '\0');
@@ -76,6 +81,9 @@ application::ProjectSaveResult FileProjectRepository::save(
     const std::filesystem::path& destination,
     const application::ProjectSnapshot& snapshot) const {
   const std::string bytes = application::ProjectCodec::encode(snapshot);
+  if (!project_size_allowed(bytes.size())) {
+    throw application::ProjectRepositoryError{"encoded project exceeds size limit"};
+  }
   int fd = -1;
   std::filesystem::path temporary;
   for (int attempt = 0; attempt < 32; ++attempt) {
