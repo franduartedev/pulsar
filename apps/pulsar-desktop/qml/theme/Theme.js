@@ -4,19 +4,24 @@
 var base     = "#0d1117"
 var header   = "#0b0f15"
 var panel    = "#111821"
+var panelAlt = "#0e141d"
 var viewer   = "#05070a"
 var input    = "#0c121a"
 
 // Borders
-var border       = "#263241"
-var borderSubtle = "#1b232c"
+var border     = "#263241"
+var borderSoft = "#1a2330"
 
 // Text
-var text  = "#d7dee8"
-var muted = "#7f8b99"
+var text       = "#d7dee8"
+var textBright = "#f0f4f9"
+var muted      = "#7f8b99"
+var faint      = "#5b6673"
 
 // Accent
-var accent = "#4c8dff"
+var accent      = "#4c8dff"
+var accentHover = "#5f9bff"
+var accentDim   = "#1a2c4d"
 
 // Interactive
 var buttonBase     = "#131c27"
@@ -32,6 +37,10 @@ var danger = "#ff6b6b"
 
 // Overlay
 var badge = "#aa101820"
+
+// Geometry
+var radiusS = 3
+var radiusM = 5
 
 // Font sizes
 var fontSizeXS = 10

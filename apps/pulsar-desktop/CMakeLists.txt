@@ -18,6 +18,8 @@ qt_add_resources(pulsar_desktop pulsar_desktop_qml
     qml/components/PText.qml
     qml/components/PMuted.qml
     qml/components/PSlider.qml
+    qml/components/SectionLabel.qml
+    qml/components/StatusDot.qml
 )
 
 set_source_files_properties(imports/QtQml/WorkerScript/qmldir
