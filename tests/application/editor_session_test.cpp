@@ -42,6 +42,8 @@ void viewport_is_exactly_guarded() {
   assert(!viewport.time_at(std::numeric_limits<double>::infinity(), 100.0).has_value());
   assert(!viewport.time_at(1.0, 0.0).has_value());
   assert(!viewport.time_at(1.0, -1.0).has_value());
+  assert(viewport.time_at(-10.0, 100.0).value() == MediaTime::zero());
+  assert(viewport.time_at(110.0, 100.0).value() == endpoint);
   assert(viewport.pixel_at(MediaTime{1001, Rational{1, 30000}}, 1000.0) >= 0.0);
 }
 
@@ -59,12 +61,31 @@ void session_read_model_and_selection() {
   assert(std::stoull(opaque_key) == large_id);
   session.select_clip(clip);
   assert(session.timeline_views().front().selected);
+  const auto generation_before_selection = session.document().document_generation();
+  session.select_clip(std::nullopt);
+  session.select_clip(clip);
+  assert(session.document().document_generation() == generation_before_selection);
   session.processor().move_clip(clip, session.document().video_track_id(), MediaTime{2, Rational{1, 1}});
   session.rebuild_read_model();
   assert(session.timeline_views().front().selected);
   session.processor().remove_clip(clip);
-  session.rebuild_read_model();
+  session.synchronize_document_state();
   assert(!session.selected_clip().has_value());
+
+  EditorSession rounded;
+  const auto rounded_media = rounded.processor().import_asset("rounded.mp4", probe);
+  (void)rounded.processor().add_clip(rounded_media,
+      TimeRange{MediaTime::zero(), MediaTime{19996, Rational{1, 10000}}}, MediaTime::zero());
+  rounded.synchronize_document_state();
+  assert(rounded.timeline_views().front().end == "00:00:02.000");
+
+  EditorSession project;
+  const auto first = project.processor().import_asset("A.mp4", probe);
+  const auto first_clip = project.processor().add_clip(first, TimeRange{MediaTime::zero(), MediaTime{2, Rational{1, 1}}}, MediaTime::zero());
+  const auto second = project.processor().import_asset("B.mp4", probe);
+  assert(project.document().assets().size() == 2);
+  assert(project.document().timeline().find_clip(first_clip) != nullptr);
+  (void)second;
 }
 
 } // namespace

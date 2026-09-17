@@ -211,7 +211,6 @@ void DesktopController::seekToEnd() {
 
 void DesktopController::closeMedia() {
   ++generation_;
-  active_session_ = std::make_unique<pulsar::desktop::EditorSession>();
   publishTimeline();
   transport_.pause();
   playing_ = false;
@@ -279,7 +278,7 @@ void DesktopController::installTimelineAsset(
           pulsar::domain::TimeRange{pulsar::domain::MediaTime::zero(), *duration},
           pulsar::domain::MediaTime::zero());
     }
-    active_session_->rebuild_read_model();
+    active_session_->synchronize_document_state();
     publishTimeline();
   } catch (const std::exception& error) {
     setError(QStringLiteral("No se pudo crear la entrada de timeline: %1")
@@ -315,8 +314,6 @@ void DesktopController::seekTimelineAt(double pixel, double width) {
 }
 
 void DesktopController::postOpen(std::filesystem::path path, std::uint64_t generation) {
-  active_session_ = std::make_unique<pulsar::desktop::EditorSession>();
-  publishTimeline();
   transport_.pause();
   playing_ = false;
   read_in_flight_ = false;

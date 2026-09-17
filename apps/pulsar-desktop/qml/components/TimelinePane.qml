@@ -27,7 +27,7 @@ Panel {
         clip: true
 
         Rectangle { anchors.fill: parent; color: Theme.panelAlt; opacity: 0.55 }
-        VideoTrack { anchors.fill: parent }
+        VideoTrack { anchors.fill: parent; z: 2 }
 
         MouseArea {
             anchors.fill: parent

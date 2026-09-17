@@ -36,6 +36,7 @@ private:
 class EditorSession final {
 public:
   EditorSession();
+  explicit EditorSession(application::PlaybackWorkerFactory worker_factory);
   ~EditorSession() = default;
   EditorSession(const EditorSession&) = delete;
   EditorSession& operator=(const EditorSession&) = delete;
@@ -52,6 +53,7 @@ public:
   void seek(domain::MediaTime position);
   [[nodiscard]] domain::MediaTime playback_position() const;
 
+  void synchronize_document_state();
   void rebuild_read_model();
   void select_clip(std::optional<domain::ClipId> clip);
   [[nodiscard]] std::optional<domain::MediaTime> time_at(double pixel, double width) const;
@@ -65,6 +67,7 @@ private:
   std::optional<domain::ClipId> selected_clip_;
   std::vector<TimelineClipView> views_;
   std::uint64_t read_model_generation_{0};
+  std::optional<std::uint64_t> synchronized_document_generation_;
 };
 
 } // namespace pulsar::desktop

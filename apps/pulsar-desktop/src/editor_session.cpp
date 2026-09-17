@@ -13,11 +13,15 @@ constexpr std::int64_t display_quantum_denominator = 1'000'000;
 
 std::string time_text(domain::MediaTime value) {
   const auto seconds = value.seconds();
-  const auto whole = seconds.numerator() / seconds.denominator();
+  auto whole = seconds.numerator() / seconds.denominator();
   const auto remainder = seconds.numerator() % seconds.denominator();
-  const auto millis = static_cast<std::int64_t>(
+  auto millis = static_cast<std::int64_t>(
       std::llround(static_cast<long double>(remainder) * 1000.0L /
                    static_cast<long double>(seconds.denominator())));
+  if (millis >= 1000) {
+    ++whole;
+    millis = 0;
+  }
   std::ostringstream text;
   text << std::setfill('0') << std::setw(2) << whole / 3600 << ':' << std::setw(2)
        << (whole / 60) % 60 << ':' << std::setw(2) << whole % 60 << '.' << std::setw(3)
@@ -28,11 +32,11 @@ std::string time_text(domain::MediaTime value) {
 } // namespace
 
 std::optional<domain::MediaTime> TimelineViewport::time_at(double pixel, double width) const {
-  if (!std::isfinite(pixel) || !std::isfinite(width) || width <= 0.0 || pixel < 0.0) {
+  if (!std::isfinite(pixel) || !std::isfinite(width) || width <= 0.0) {
     return std::nullopt;
   }
   if (duration_ <= domain::MediaTime::zero()) return domain::MediaTime::zero();
-  const double bounded = std::min(pixel, width);
+  const double bounded = std::clamp(pixel, 0.0, width);
   const long double fraction = static_cast<long double>(bounded / width);
   const long double seconds = static_cast<long double>(duration_.value()) *
                               static_cast<long double>(duration_.time_base().numerator()) /
@@ -60,19 +64,30 @@ double TimelineViewport::pixel_at(domain::MediaTime time, double width) const {
 }
 
 EditorSession::EditorSession()
-    : processor_{document_},
-      coordinator_{clock_, [](const std::filesystem::path&, int) {
+    : EditorSession{[](const std::filesystem::path&, int) {
         return std::unique_ptr<application::PlaybackMediaWorker>{};
-      }} {
-  rebuild_read_model();
+      }} {}
+
+EditorSession::EditorSession(application::PlaybackWorkerFactory worker_factory)
+    : processor_{document_}, coordinator_{clock_, std::move(worker_factory)} {
+  synchronize_document_state();
 }
 
 domain::MediaTime EditorSession::timeline_duration() const noexcept {
   return document_.timeline().duration();
 }
 
-void EditorSession::rebuild_read_model() {
+void EditorSession::synchronize_document_state() {
+  if (synchronized_document_generation_.has_value() &&
+      synchronized_document_generation_.value() == document_.document_generation()) {
+    return;
+  }
   coordinator_.set_snapshot(document_.snapshot());
+  synchronized_document_generation_ = document_.document_generation();
+  rebuild_read_model();
+}
+
+void EditorSession::rebuild_read_model() {
   views_.clear();
   const auto& timeline = document_.timeline();
   const auto* track = timeline.find_track(document_.video_track_id());
