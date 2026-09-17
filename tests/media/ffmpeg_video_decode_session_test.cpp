@@ -5,6 +5,7 @@
 #include <pulsar/domain/time/rational.hpp>
 #include <pulsar/media/ffmpeg/decoded_visual_video_frame.hpp>
 #include <pulsar/media/ffmpeg/ffmpeg_playback_worker.hpp>
+#include <pulsar/media/ffmpeg/ffmpeg_playback_visual_mailbox.hpp>
 #include <pulsar/media/ffmpeg/ffmpeg_preview_converter.hpp>
 #include <pulsar/media/ffmpeg/ffmpeg_video_decode_session.hpp>
 #include <pulsar/media/ffmpeg/media_decode_error.hpp>
@@ -345,6 +346,46 @@ std::optional<pulsar::domain::MediaTime> wait_for_session_presentation(
 pulsar::domain::MediaTime playback_position_for_stream_time(pulsar::domain::MediaTime origin,
                                                             pulsar::domain::MediaTime stream_time) {
   return stream_time - origin;
+}
+
+
+bool visual_mailbox_test() {
+  using pulsar::media::ffmpeg::DecodedVisualVideoFrame;
+  using pulsar::media::ffmpeg::FFmpegPlaybackVisualMailbox;
+  auto frame = [](std::int64_t value) {
+    return DecodedVisualVideoFrame{0,
+                                   {1, 1, 1, 1, std::nullopt, std::nullopt, "", "", "", ""},
+                                   pulsar::domain::MediaTime{value, pulsar::domain::Rational{1, 1}},
+                                   {}};
+  };
+  FFmpegPlaybackVisualMailbox mailbox{2};
+  const auto first_epoch = mailbox.activate();
+  mailbox.publish(first_epoch, 10, frame(10));
+  if (mailbox.take(first_epoch, 11).has_value() || !mailbox.take(first_epoch, 10).has_value()) {
+    return false;
+  }
+  mailbox.publish(first_epoch, 20, frame(20));
+  mailbox.publish(first_epoch, 21, frame(21));
+  mailbox.publish(first_epoch, 22, frame(22));
+  if (mailbox.size() != 2 || mailbox.take(first_epoch, 20).has_value() ||
+      !mailbox.take(first_epoch, 21).has_value() || !mailbox.take(first_epoch, 22).has_value()) {
+    return false;
+  }
+  mailbox.publish(first_epoch, 30, frame(30));
+  const auto second_epoch = mailbox.activate();
+  if (second_epoch == first_epoch || mailbox.take(first_epoch, 30).has_value()) {
+    return false;
+  }
+  mailbox.publish(first_epoch, 31, frame(31));
+  if (mailbox.size() != 0 || mailbox.take(second_epoch, 31).has_value()) {
+    return false;
+  }
+  mailbox.publish(second_epoch, 57, frame(57));
+  if (!mailbox.take(second_epoch, 57).has_value()) {
+    return false;
+  }
+  mailbox.deactivate(second_epoch);
+  return mailbox.active_epoch() == 0;
 }
 
 bool ppm_decode_test(const std::filesystem::path& root) {
@@ -749,6 +790,26 @@ bool non_zero_start_time_seek_test(const std::filesystem::path& root) {
     }
   }
   {
+    auto mailbox = std::make_shared<pulsar::media::ffmpeg::FFmpegPlaybackVisualMailbox>(4);
+    auto worker = FFmpegPlaybackWorker{fixture.path, 0, FFmpegPlaybackWorker::Limits{4}, mailbox};
+    const auto epoch = worker.source_epoch();
+    worker.request_read(31);
+    const auto sample = wait_for_worker_event<pulsar::application::PlaybackWorkerSample>(worker);
+    if (!sample.has_value() || !mailbox->take(epoch, sample->sample.ordinal).has_value()) {
+      return false;
+    }
+    worker.request_seek_for_presentation(32, pulsar::application::StreamTimestamp{between_frames});
+    const auto seek = wait_for_worker_event<pulsar::application::PlaybackWorkerSeekComplete>(worker);
+    if (!seek.has_value()) {
+      return false;
+    }
+    if (const auto* hit = std::get_if<pulsar::application::VideoSeekHit>(&seek->outcome)) {
+      if (!mailbox->take(epoch, hit->sample.ordinal).has_value()) return false;
+      if (hit->lookahead.has_value() && !mailbox->take(epoch, hit->lookahead->ordinal).has_value()) return false;
+    }
+  }
+
+  {
     FakeMonotonicClock clock;
     auto worker = std::make_unique<FFmpegPlaybackWorker>(fixture.path, 0,
                                                          FFmpegPlaybackWorker::Limits{8});
@@ -847,6 +908,9 @@ bool non_zero_start_time_seek_test(const std::filesystem::path& root) {
 } // namespace
 
 int main() {
+  if (!visual_mailbox_test()) {
+    return fail("visual mailbox test");
+  }
   const auto root = fixture_root();
 
   if (!ppm_decode_test(root)) {
