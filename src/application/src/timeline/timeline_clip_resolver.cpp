@@ -1,0 +1,58 @@
+#include <pulsar/application/timeline/timeline_clip_resolver.hpp>
+
+#include <stdexcept>
+
+namespace pulsar::application {
+namespace {
+
+[[nodiscard]] const MediaAsset* find_asset(const ProjectSnapshot& snapshot,
+                                           domain::MediaId media_id) {
+  for (const auto& asset : snapshot.assets) {
+    if (asset.id() == media_id) {
+      return &asset;
+    }
+  }
+  return nullptr;
+}
+
+} // namespace
+
+TimelineResolveOutcome resolve_clip_at(const ProjectSnapshot& snapshot,
+                                       domain::TrackId track_id,
+                                       domain::MediaTime timeline_position) {
+  if (timeline_position < domain::MediaTime::zero()) {
+    throw std::invalid_argument{"timeline resolver position cannot be negative"};
+  }
+  if (snapshot.timeline.find_track(track_id) == nullptr) {
+    throw std::invalid_argument{"timeline resolver track does not exist"};
+  }
+
+  const auto clip = snapshot.timeline.find_clip_at(track_id, timeline_position);
+  if (!clip.has_value()) {
+    const domain::MediaTime duration = snapshot.timeline.duration();
+    if (timeline_position >= duration) {
+      return TimelineEnded{timeline_position, duration};
+    }
+    return TimelineGap{timeline_position};
+  }
+
+  const domain::TimeRange timeline_range = clip->timeline_range();
+  const domain::MediaTime clip_offset = timeline_position - timeline_range.start();
+  const domain::TimeRange source_range = clip->source_range();
+  const domain::MediaTime source_time = source_range.start() + clip_offset;
+  const MediaAsset* asset = find_asset(snapshot, clip->media_id());
+  if (asset == nullptr) {
+    return MissingClipMedia{clip->id(), clip->media_id(), timeline_position, timeline_range,
+                            std::nullopt};
+  }
+  if (asset->availability() == MediaAvailability::Unavailable) {
+    return MissingClipMedia{clip->id(), clip->media_id(), timeline_position, timeline_range,
+                            asset->availability_reason()};
+  }
+
+  return ResolvedClip{clip->id(), clip->media_id(), timeline_position, timeline_range, clip_offset,
+                      source_range, source_time, asset->video_stream_index(),
+                      asset->source_locator()};
+}
+
+} // namespace pulsar::application
