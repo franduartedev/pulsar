@@ -1,4 +1,4 @@
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Qml QmlWorkerScript Quick)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Qml Quick)
 
 qt_add_executable(pulsar_desktop
   src/main.cpp
@@ -38,7 +38,6 @@ target_link_libraries(pulsar_desktop
     Qt6::Core
     Qt6::Gui
     Qt6::Qml
-    Qt6::QmlWorkerScript
     Qt6::Quick
     pulsar::media_ffmpeg
     pulsar::application
