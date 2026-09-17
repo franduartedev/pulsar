@@ -5,6 +5,7 @@ add_library(pulsar_application
   src/playback/monotonic_clock.cpp
   src/playback/playback_time.cpp
   src/playback/playback_transport.cpp
+  src/playback/playback_session.cpp
   src/playback/presentation_scheduler.cpp
   src/playback/video_source.cpp
 )
