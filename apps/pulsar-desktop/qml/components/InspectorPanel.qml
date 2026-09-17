@@ -4,6 +4,8 @@ import "../theme/Theme.js" as Theme
 // Real inspector: typographic sections with hairline rhythm, subdued keys,
 // clear values, intelligent wrapping. No cards-in-cards.
 Panel {
+    border.width: 0
+    radius: 0
     id: inspector
 
     function metaSection(key) {
@@ -109,8 +111,8 @@ Panel {
             Column {
                 width: parent.width
                 spacing: 4
-                SectionLabel { width: parent.width; text: "DIAGNÓSTICO" }
-                Text { width: parent.width; text: controller.debugMetrics; color: Theme.faint; font.pixelSize: Theme.fontSizeXS; wrapMode: Text.WordWrap }
+                SectionLabel { width: parent.width; text: "DIAGNÓSTICO"; opacity: 0.65 }
+                Text { width: parent.width; text: controller.debugMetrics; opacity: 0.7; color: Theme.faint; font.pixelSize: Theme.fontSizeXS; wrapMode: Text.WordWrap }
             }
         }
     }

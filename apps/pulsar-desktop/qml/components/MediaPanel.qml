@@ -4,6 +4,8 @@ import "../theme/Theme.js" as Theme
 // Quiet support panel: the loaded session object leads, manual path entry
 // stays secondary. Reads controller directly, like the rest of the UI.
 Panel {
+    border.width: 0
+    radius: 0
     id: mediaPanel
 
     // Presentation-only lookup into the existing metadata blob.
@@ -41,10 +43,11 @@ Panel {
         return codecInfo + resInfo
     }
 
-    SectionLabel { id: title; anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top; anchors.leftMargin: 10; anchors.rightMargin: 10; anchors.topMargin: 10; text: "MEDIOS" }
+    Rectangle { anchors.left: parent.left; anchors.top: parent.top; width: 3; height: 16; color: Theme.accent; opacity: 0.8 }
+    SectionLabel { id: title; anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top; anchors.leftMargin: 10; anchors.rightMargin: 10; anchors.topMargin: 10; text: "MEDIA BIN" }
     PButton { id: importButton; anchors.left: parent.left; anchors.right: parent.right; anchors.top: title.bottom; anchors.leftMargin: 10; anchors.rightMargin: 10; anchors.topMargin: 8; text: "+  IMPORTAR"; primary: true; onClicked: controller.importRequested() }
 
-    SectionLabel { id: sessionLabel; anchors.left: parent.left; anchors.right: parent.right; anchors.top: importButton.bottom; anchors.leftMargin: 10; anchors.rightMargin: 10; anchors.topMargin: 14; text: "EN SESIÓN" }
+    SectionLabel { id: sessionLabel; anchors.left: parent.left; anchors.right: parent.right; anchors.top: importButton.bottom; anchors.leftMargin: 10; anchors.rightMargin: 10; anchors.topMargin: 14; text: "ACTIVE SOURCE" }
     Rectangle {
         anchors.left: parent.left; anchors.right: parent.right; anchors.top: sessionLabel.bottom; anchors.leftMargin: 10; anchors.rightMargin: 10; anchors.topMargin: 8
         height: cardCol.height + 18
@@ -66,7 +69,7 @@ Panel {
     }
 
     Rectangle { id: manualSep; anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: pathRow.top; anchors.leftMargin: 10; anchors.rightMargin: 10; anchors.bottomMargin: 8; height: 1; color: Theme.borderSoft }
-    SectionLabel { id: manualTitle; anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: manualSep.top; anchors.leftMargin: 10; anchors.rightMargin: 10; anchors.bottomMargin: 8; text: "RUTA MANUAL" }
+    SectionLabel { id: manualTitle; anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: manualSep.top; anchors.leftMargin: 10; anchors.rightMargin: 10; anchors.bottomMargin: 8; text: "SOURCE PATH" }
     Row {
         id: pathRow
         anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; anchors.leftMargin: 10; anchors.rightMargin: 10; anchors.bottomMargin: 10

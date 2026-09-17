@@ -41,6 +41,7 @@ class DesktopController final : public QObject {
   Q_PROPERTY(QString debugMetrics READ debugMetrics NOTIFY diagnosticsChanged)
   Q_PROPERTY(QVariantList timelineClips READ timelineClips NOTIFY timelineChanged)
   Q_PROPERTY(QString timelineDurationText READ timelineDurationText NOTIFY timelineChanged)
+  Q_PROPERTY(QVariantList timelineRulerTicks READ timelineRulerTicks NOTIFY timelineChanged)
   Q_PROPERTY(double timelinePlayheadProgress READ timelinePlayheadProgress NOTIFY timelinePlayheadChanged)
   Q_PROPERTY(QString selectedClipKey READ selectedClipKey NOTIFY timelineChanged)
   Q_PROPERTY(bool canSplit READ canSplit NOTIFY editActionStateChanged)
@@ -66,6 +67,7 @@ public:
   [[nodiscard]] QString debugMetrics() const { return debug_metrics_; }
   [[nodiscard]] QVariantList timelineClips() const { return timeline_clips_; }
   [[nodiscard]] QString timelineDurationText() const { return timeline_duration_text_; }
+  [[nodiscard]] QVariantList timelineRulerTicks() const { return timeline_ruler_ticks_; }
   [[nodiscard]] double timelinePlayheadProgress() const { return timeline_playhead_progress_; }
   [[nodiscard]] QString selectedClipKey() const { return selected_clip_key_; }
   [[nodiscard]] bool canSplit() const { return active_session_ && active_session_->can_split(); }
@@ -121,7 +123,7 @@ private:
   std::uint64_t editor_session_epoch_{1};
   std::uint64_t import_request_generation_{0};
   std::thread worker_; mutable std::mutex mutex_; std::condition_variable wake_; bool stop_worker_{false}; std::optional<WorkerCommand> pending_command_;
-  QString status_{"Vacío"}; QString technical_status_{"Preview CPU"}; QString media_name_; QString metadata_; QString error_message_; QString preview_source_; QString viewer_state_{"empty"}; QString position_text_{"00:00:00.000"}; QString duration_text_{"--:--:--.---"}; QString debug_metrics_; QVariantList timeline_clips_; QString timeline_duration_text_{"00:00:00.000"}; QString selected_clip_key_;
+  QString status_{"Vacío"}; QString technical_status_{"Preview CPU"}; QString media_name_; QString metadata_; QString error_message_; QString preview_source_; QString viewer_state_{"empty"}; QString position_text_{"00:00:00.000"}; QString duration_text_{"--:--:--.---"}; QString debug_metrics_; QVariantList timeline_clips_; QVariantList timeline_ruler_ticks_; QString timeline_duration_text_{"00:00:00.000"}; QString selected_clip_key_;
   double timeline_playhead_progress_{0.0}; double progress_{0.0}; bool has_media_{false}; bool playing_{false}; bool busy_{false}; bool preview_late_{false};
   std::optional<VisualIdentity> displayed_identity_; std::uint64_t preview_revision_{0}; std::uint64_t stale_visual_frames_{0}; std::uint64_t displayed_frames_{0}; std::uint64_t visual_misses_{0}; std::uint64_t seek_count_{0}; std::uint64_t read_count_{0}; std::chrono::nanoseconds last_conversion_time_{0};
 };

@@ -2,7 +2,7 @@ import QtQuick
 import "../theme/Theme.js" as Theme
 
 Rectangle {
-    radius: Theme.radiusM
+    radius: Theme.radiusS
     color: Theme.panel
     border.color: Theme.borderSoft
     border.width: 1
@@ -16,6 +16,6 @@ Rectangle {
         anchors.rightMargin: 6
         height: 1
         color: Theme.text
-        opacity: 0.04
+        opacity: 0.025
     }
 }

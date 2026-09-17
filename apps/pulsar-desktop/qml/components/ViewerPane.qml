@@ -14,7 +14,7 @@ Item {
         anchors.leftMargin: 12
         anchors.rightMargin: 12
         anchors.verticalCenter: chromeCenter.verticalCenter
-        text: controller.hasMedia ? controller.mediaName : "SIN SEÑAL"
+        text: controller.hasMedia ? controller.mediaName : "PROGRAM OUTPUT  /  SIN SEÑAL"
         color: Theme.muted
         font.pixelSize: Theme.fontSizeS
         elide: Text.ElideMiddle

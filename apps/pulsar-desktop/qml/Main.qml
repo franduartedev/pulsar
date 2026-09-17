@@ -17,8 +17,8 @@ Window {
     color: Theme.workspace
 
     // Viewer stays dominant: side panels take bounded relative slices.
-    property real mediaWidth: Math.max(210, Math.min(250, width * 0.17))
-    property real inspectorWidth: Math.max(250, Math.min(310, width * 0.21))
+    property real mediaWidth: Math.max(220, Math.min(250, width * 0.16))
+    property real inspectorWidth: Math.max(260, Math.min(300, width * 0.19))
 
     Shortcut { sequence: "Space"; onActivated: controller.togglePlayback() }
     Shortcut { sequence: "Ctrl+I"; onActivated: controller.importRequested() }
@@ -58,7 +58,7 @@ Window {
         anchors.left: parent.left
         anchors.top: header.bottom
         anchors.bottom: scrubber.top
-        anchors.margins: 10
+        anchors.margins: 12
         width: root.mediaWidth
     }
 
@@ -67,7 +67,7 @@ Window {
         anchors.right: parent.right
         anchors.top: header.bottom
         anchors.bottom: scrubber.top
-        anchors.margins: 10
+        anchors.margins: 12
         width: root.inspectorWidth
     }
 
@@ -77,7 +77,7 @@ Window {
         anchors.right: inspector.left
         anchors.top: header.bottom
         anchors.bottom: scrubber.top
-        anchors.margins: 10
+        anchors.margins: 12
         color: Theme.monitor
         border.color: Theme.edge
         radius: Theme.radiusM
@@ -96,8 +96,8 @@ Window {
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.bottom: timelinePane.top
-        anchors.margins: 10
-        height: 68
+        anchors.margins: 12
+        height: 62
     }
 
     TimelinePane {
@@ -105,10 +105,10 @@ Window {
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.bottom: statusBar.top
-        anchors.leftMargin: 10
-        anchors.rightMargin: 10
-        anchors.bottomMargin: 10
-        height: 172
+        anchors.leftMargin: 12
+        anchors.rightMargin: 12
+        anchors.bottomMargin: 12
+        height: 220
     }
 
     StatusBar {
@@ -116,8 +116,8 @@ Window {
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.bottom: parent.bottom
-        anchors.leftMargin: 10
-        anchors.rightMargin: 10
-        anchors.bottomMargin: 10
+        anchors.leftMargin: 12
+        anchors.rightMargin: 12
+        anchors.bottomMargin: 12
     }
 }

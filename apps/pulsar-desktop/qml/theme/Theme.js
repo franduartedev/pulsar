@@ -2,11 +2,11 @@
 
 // Backgrounds: three levels — workspace frame, monitor module, quiet panels.
 var base      = "#0d1117"
-var workspace = "#070a0e"
-var header    = "#0b0f15"
-var panel     = "#111821"
-var panelAlt  = "#0e141d"
-var surfaceRaised = "#17212d"
+var workspace = "#080b10"
+var header    = "#0a0e14"
+var panel     = "#101720"
+var panelAlt  = "#0c131c"
+var surfaceRaised = "#151f2b"
 var ruler = "#0a1018"
 var lane = "#0a0f16"
 var monitor   = "#101823"
@@ -15,8 +15,8 @@ var input     = "#0c121a"
 
 // Borders
 var border     = "#263241"
-var borderSoft = "#1a2330"
-var edge       = "#2e405a"
+var borderSoft = "#1d2937"
+var edge       = "#34485f"
 
 // Text
 var text       = "#d7dee8"
@@ -27,7 +27,7 @@ var faint      = "#5b6673"
 // Accent
 var accent      = "#4c8dff"
 var accentHover = "#5f9bff"
-var accentDim   = "#1a2c4d"
+var accentDim   = "#203a5d"
 
 // Interactive
 var buttonBase     = "#131c27"
@@ -48,8 +48,8 @@ var danger = "#ff6b6b"
 var badge = "#aa101820"
 
 // Geometry
-var radiusS = 3
-var radiusM = 5
+var radiusS = 2
+var radiusM = 3
 
 // Font sizes
 var fontSizeXS = 10

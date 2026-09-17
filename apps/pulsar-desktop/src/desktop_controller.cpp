@@ -104,6 +104,17 @@ void DesktopController::publishTimeline() {
   has_media_ = duration > MediaTime::zero();
   timeline_duration_text_ = formatTime(duration);
   duration_text_ = formatTime(duration);
+  timeline_ruler_ticks_.clear();
+  constexpr int ruler_tick_count = 7;
+  for (int index = 0; index < ruler_tick_count; ++index) {
+    const double progress = static_cast<double>(index) / static_cast<double>(ruler_tick_count - 1);
+    const auto tick_time = active_session_->time_at(progress, 1.0);
+    if (!tick_time) continue;
+    QVariantMap tick;
+    tick.insert("progress", progress);
+    tick.insert("label", formatTime(*tick_time));
+    timeline_ruler_ticks_.push_back(tick);
+  }
   timeline_playhead_progress_ = active_session_->pixel_at(active_session_->playback_position(), 1.0);
   emit timelineChanged();
   emit editActionStateChanged();
