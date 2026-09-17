@@ -65,8 +65,9 @@ Window {
             TextInput { id: importPath; anchors.fill: parent; anchors.margins: 7; color: Theme.text; selectedTextColor: "white"; selectionColor: Theme.accent; clip: true; font.pixelSize: Theme.fontSizeM; onAccepted: controller.openPath(text) }
             Text { anchors.left: parent.left; anchors.leftMargin: 7; anchors.verticalCenter: parent.verticalCenter; text: "/ruta/video.mp4"; color: Theme.muted; font.pixelSize: Theme.fontSizeM; visible: importPath.text.length === 0 && !importPath.activeFocus }
         }
-        Rectangle { anchors.left: parent.left; anchors.right: parent.right; anchors.top: pathBox.bottom; anchors.margins: 10; height: 1; color: Theme.border }
-        PText { id: mediaName; anchors.left: parent.left; anchors.right: parent.right; anchors.top: pathBox.bottom; anchors.topMargin: 16; text: controller.hasMedia ? controller.mediaName : "Sin medios abiertos" }
+        PButton { id: openButton; anchors.left: parent.left; anchors.right: parent.right; anchors.top: pathBox.bottom; anchors.margins: 10; text: "Abrir ruta"; enabled: importPath.text.length > 0; onClicked: controller.openPath(importPath.text) }
+        Rectangle { anchors.left: parent.left; anchors.right: parent.right; anchors.top: openButton.bottom; anchors.margins: 10; height: 1; color: Theme.border }
+        PText { id: mediaName; anchors.left: parent.left; anchors.right: parent.right; anchors.top: openButton.bottom; anchors.topMargin: 16; text: controller.hasMedia ? controller.mediaName : "Sin medios abiertos" }
         PMuted { anchors.left: parent.left; anchors.right: parent.right; anchors.top: mediaName.bottom; anchors.margins: 10; text: "Arrastrá un video aquí o pasá la ruta por CLI."; wrapMode: Text.WordWrap }
     }
 
@@ -105,6 +106,7 @@ Window {
                 visible: controller.previewSource.length === 0
                 Text { anchors.horizontalCenter: parent.horizontalCenter; text: "PULSAR"; color: Theme.text; font.pixelSize: Theme.fontSizeXXL; font.letterSpacing: 3 }
                 Text { anchors.horizontalCenter: parent.horizontalCenter; text: controller.busy ? "Preparando medio…" : "Importá material para empezar"; color: Theme.muted; font.pixelSize: Theme.fontSizeL }
+                PButton { anchors.horizontalCenter: parent.horizontalCenter; width: 150; text: "Importar video"; onClicked: controller.importRequested() }
             }
             Rectangle { anchors.right: parent.right; anchors.top: parent.top; anchors.margins: 10; width: badgeText.width + 14; height: 22; radius: 3; color: Theme.badge; border.color: controller.previewLate ? Theme.danger : Theme.border; visible: controller.hasMedia; Text { id: badgeText; anchors.centerIn: parent; text: controller.previewLate ? "Preview atrasada" : "Preview CPU"; color: controller.previewLate ? Theme.danger : Theme.muted; font.pixelSize: Theme.fontSizeS } }
         }
@@ -116,7 +118,6 @@ Window {
             PButton { id: playButton; anchors.left: homeButton.right; anchors.leftMargin: 6; anchors.verticalCenter: parent.verticalCenter; width: 42; text: controller.playing ? "❚❚" : "▶"; enabled: controller.hasMedia && !controller.busy; onClicked: controller.togglePlayback() }
             PButton { id: endButton; anchors.left: playButton.right; anchors.leftMargin: 6; anchors.verticalCenter: parent.verticalCenter; width: 34; text: "▶|"; enabled: controller.hasMedia; onClicked: controller.seekToEnd() }
             Text { id: tc; anchors.left: endButton.right; anchors.leftMargin: 14; anchors.verticalCenter: parent.verticalCenter; text: controller.positionText + " / " + controller.durationText; color: Theme.text; font.family: "monospace"; font.pixelSize: Theme.fontSizeL }
-            Text { anchors.right: parent.right; anchors.rightMargin: 10; anchors.verticalCenter: parent.verticalCenter; text: controller.technicalStatus; color: Theme.muted; font.pixelSize: Theme.fontSizeS }
         }
     }
 
