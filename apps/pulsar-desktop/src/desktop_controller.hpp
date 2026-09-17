@@ -45,6 +45,9 @@ class DesktopController final : public QObject {
   Q_PROPERTY(QString timelineDurationText READ timelineDurationText NOTIFY timelineChanged)
   Q_PROPERTY(double timelinePlayheadProgress READ timelinePlayheadProgress NOTIFY timelineChanged)
   Q_PROPERTY(QString selectedClipKey READ selectedClipKey NOTIFY timelineChanged)
+  Q_PROPERTY(bool canSplit READ canSplit NOTIFY timelineChanged)
+  Q_PROPERTY(bool canUndo READ canUndo NOTIFY timelineChanged)
+  Q_PROPERTY(bool canRedo READ canRedo NOTIFY timelineChanged)
 
 public:
   explicit DesktopController(PreviewImageProvider& image_provider, QObject* parent = nullptr);
@@ -68,6 +71,9 @@ public:
   [[nodiscard]] QString timelineDurationText() const { return timeline_duration_text_; }
   [[nodiscard]] double timelinePlayheadProgress() const { return timeline_playhead_progress_; }
   [[nodiscard]] QString selectedClipKey() const { return selected_clip_key_; }
+  [[nodiscard]] bool canSplit() const { return active_session_ && active_session_->can_split(); }
+  [[nodiscard]] bool canUndo() const { return active_session_ && active_session_->can_undo(); }
+  [[nodiscard]] bool canRedo() const { return active_session_ && active_session_->can_redo(); }
 
   Q_INVOKABLE void openPath(const QString& path);
   Q_INVOKABLE void openUrl(const QUrl& url);
@@ -81,6 +87,14 @@ public:
   Q_INVOKABLE void closeMedia();
   Q_INVOKABLE void selectTimelineClip(const QString& clip_key);
   Q_INVOKABLE void seekTimelineAt(double pixel, double width);
+  Q_INVOKABLE void moveTimelineClip(const QString& clip_key, double press_pixel,
+                                     double current_pixel, double width);
+  Q_INVOKABLE void trimTimelineClipStart(const QString& clip_key, double pixel, double width);
+  Q_INVOKABLE void trimTimelineClipEnd(const QString& clip_key, double pixel, double width);
+  Q_INVOKABLE void splitSelectedClip();
+  Q_INVOKABLE void deleteSelectedClip();
+  Q_INVOKABLE void undoEdit();
+  Q_INVOKABLE void redoEdit();
 
 signals:
   void statusChanged();

@@ -52,6 +52,16 @@ public:
   [[nodiscard]] std::uint64_t read_model_generation() const noexcept { return read_model_generation_; }
   void seek(domain::MediaTime position);
   [[nodiscard]] domain::MediaTime playback_position() const;
+  void move_clip(domain::ClipId clip, double press_pixel, double current_pixel, double width);
+  void trim_clip_start(domain::ClipId clip, double pixel, double width);
+  void trim_clip_end(domain::ClipId clip, double pixel, double width);
+  [[nodiscard]] bool can_split() const;
+  [[nodiscard]] domain::ClipId split_selected_at_playhead();
+  void delete_selected();
+  [[nodiscard]] bool undo();
+  [[nodiscard]] bool redo();
+  [[nodiscard]] bool can_undo() const noexcept { return processor_.can_undo(); }
+  [[nodiscard]] bool can_redo() const noexcept { return processor_.can_redo(); }
 
   void synchronize_document_state();
   void rebuild_read_model();

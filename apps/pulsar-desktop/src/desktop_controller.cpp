@@ -261,6 +261,7 @@ void DesktopController::publishTimeline() {
   }
   const auto duration = active_session_->timeline_duration();
   timeline_duration_text_ = formatTime(duration);
+  timeline_playhead_progress_ = active_session_->pixel_at(active_session_->playback_position(), 1.0);
   emit timelineChanged();
 }
 
@@ -311,6 +312,98 @@ void DesktopController::seekTimelineAt(double pixel, double width) {
   timeline_playhead_progress_ = active_session_->pixel_at(*target, 1.0);
   if (*target >= duration) timeline_playhead_progress_ = 1.0;
   emit timelineChanged();
+}
+
+void DesktopController::moveTimelineClip(const QString& clip_key, double press_pixel,
+                                               double current_pixel, double width) {
+  if (!active_session_) return;
+  bool ok = false;
+  const auto id = clip_key.toULongLong(&ok);
+  if (!ok || id == 0) return;
+  try {
+    active_session_->move_clip(pulsar::domain::ClipId{id}, press_pixel, current_pixel, width);
+    clearError();
+    setStatus(QStringLiteral("Clip movido"));
+    publishTimeline();
+  } catch (const std::exception&) {
+    setError(QStringLiteral("El clip se superpone con otro o el movimiento no es válido."));
+    publishTimeline();
+  }
+}
+
+void DesktopController::trimTimelineClipStart(const QString& clip_key, double pixel, double width) {
+  if (!active_session_) return;
+  bool ok = false;
+  const auto id = clip_key.toULongLong(&ok);
+  if (!ok || id == 0) return;
+  try {
+    active_session_->trim_clip_start(pulsar::domain::ClipId{id}, pixel, width);
+    clearError();
+    setStatus(QStringLiteral("Recorte aplicado"));
+    publishTimeline();
+  } catch (const std::exception&) {
+    setError(QStringLiteral("El recorte no es válido."));
+    publishTimeline();
+  }
+}
+
+void DesktopController::trimTimelineClipEnd(const QString& clip_key, double pixel, double width) {
+  if (!active_session_) return;
+  bool ok = false;
+  const auto id = clip_key.toULongLong(&ok);
+  if (!ok || id == 0) return;
+  try {
+    active_session_->trim_clip_end(pulsar::domain::ClipId{id}, pixel, width);
+    clearError();
+    setStatus(QStringLiteral("Recorte aplicado"));
+    publishTimeline();
+  } catch (const std::exception&) {
+    setError(QStringLiteral("El recorte no es válido."));
+    publishTimeline();
+  }
+}
+
+void DesktopController::splitSelectedClip() {
+  if (!active_session_ || !active_session_->can_split()) {
+    setError(QStringLiteral("El punto de corte debe estar dentro del clip."));
+    return;
+  }
+  try {
+    (void)active_session_->split_selected_at_playhead();
+    clearError();
+    setStatus(QStringLiteral("Clip dividido"));
+    publishTimeline();
+  } catch (const std::exception&) {
+    setError(QStringLiteral("El punto de corte debe estar dentro del clip."));
+    publishTimeline();
+  }
+}
+
+void DesktopController::deleteSelectedClip() {
+  if (!active_session_ || !active_session_->selected_clip().has_value()) return;
+  try {
+    active_session_->delete_selected();
+    clearError();
+    setStatus(QStringLiteral("Clip eliminado"));
+    selected_clip_key_.clear();
+    publishTimeline();
+  } catch (const std::exception&) {
+    setError(QStringLiteral("No se pudo eliminar el clip."));
+  }
+}
+
+void DesktopController::undoEdit() {
+  if (!active_session_ || !active_session_->undo()) return;
+  clearError();
+  setStatus(QStringLiteral("Deshacer"));
+  publishTimeline();
+}
+
+void DesktopController::redoEdit() {
+  if (!active_session_ || !active_session_->redo()) return;
+  clearError();
+  setStatus(QStringLiteral("Rehacer"));
+  publishTimeline();
 }
 
 void DesktopController::postOpen(std::filesystem::path path, std::uint64_t generation) {

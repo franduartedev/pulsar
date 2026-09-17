@@ -65,6 +65,39 @@ void viewport_is_exactly_guarded() {
   assert(viewport.pixel_at(MediaTime{1001, Rational{1, 30000}}, 1000.0) >= 0.0);
 }
 
+
+void editing_actions_use_document_commands() {
+  Probe probe;
+  EditorSession session;
+  const auto media = session.processor().import_asset("edit.mp4", probe);
+  const auto clip = session.processor().add_clip(media, TimeRange{MediaTime::zero(), MediaTime{10, Rational{1, 1}}}, MediaTime::zero());
+  session.synchronize_document_state();
+  session.select_clip(clip);
+  session.move_clip(clip, 20.0, 30.0, 100.0);
+  const auto one = MediaTime{1, Rational{1, 1}};
+  assert(session.document().timeline().find_clip(clip)->timeline_start() == one);
+  const auto source_before = session.document().timeline().find_clip(clip)->source_range();
+  const auto trim_target = session.time_at(30.0, 100.0).value();
+  session.trim_clip_start(clip, 30.0, 100.0);
+  auto current = session.document().timeline().find_clip(clip);
+  assert(current->source_range().start() == source_before.start() + (trim_target - one));
+  assert(current->id() == clip && current->source_range().end() == source_before.end());
+  session.seek(MediaTime{5, Rational{1, 1}});
+  assert(session.can_split());
+  const auto right = session.split_selected_at_playhead();
+  assert(right != clip);
+  assert(session.selected_clip() == clip);
+  assert(session.document().timeline().find_clip(right) != nullptr);
+  session.delete_selected();
+  assert(session.document().timeline().find_clip(clip) == nullptr);
+  assert(session.document().find_asset(media).has_value());
+  assert(!session.selected_clip().has_value());
+  assert(session.undo());
+  assert(session.document().timeline().find_clip(clip) != nullptr);
+  assert(session.redo());
+  assert(session.document().timeline().find_clip(clip) == nullptr);
+}
+
 void session_read_model_and_selection() {
   EditorSession session;
   Probe probe;
@@ -127,5 +160,6 @@ void session_read_model_and_selection() {
 
 int main() {
   viewport_is_exactly_guarded();
+  editing_actions_use_document_commands();
   session_read_model_and_selection();
 }

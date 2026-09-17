@@ -12,6 +12,8 @@ Item {
             y: 9
             width: Math.max(3, (modelData.endProgress - modelData.startProgress) * track.width)
             height: track.height - 14
+            startProgress: modelData.startProgress
+            timelineWidth: track.width
             clipName: modelData.name
             startText: modelData.start
             endText: modelData.end

@@ -24,6 +24,10 @@ Window {
     Shortcut { sequence: "Ctrl+I"; onActivated: controller.importRequested() }
     Shortcut { sequence: "Home"; onActivated: controller.seekToStart() }
     Shortcut { sequence: "End"; onActivated: controller.seekToEnd() }
+    Shortcut { sequence: "S"; onActivated: controller.splitSelectedClip() }
+    Shortcut { sequence: "Delete"; onActivated: controller.deleteSelectedClip() }
+    Shortcut { sequence: "Ctrl+Z"; onActivated: controller.undoEdit() }
+    Shortcut { sequence: "Ctrl+Shift+Z"; onActivated: controller.redoEdit() }
 
     Connections {
         target: controller

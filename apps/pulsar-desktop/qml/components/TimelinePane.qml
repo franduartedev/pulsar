@@ -14,6 +14,10 @@ Panel {
         spacing: 12
         Text { text: "TIMELINE"; color: Theme.muted; font.pixelSize: Theme.fontSizeS; font.letterSpacing: 1.4 }
         Text { text: controller.timelineDurationText; color: Theme.faint; font.family: "monospace"; font.pixelSize: Theme.fontSizeS }
+        PButton { text: "Split"; enabled: controller.canSplit; width: 54; height: 26; onClicked: controller.splitSelectedClip() }
+        PButton { text: "Delete"; enabled: controller.selectedClipKey.length > 0; width: 58; height: 26; onClicked: controller.deleteSelectedClip() }
+        PButton { text: "Undo"; enabled: controller.canUndo; width: 52; height: 26; onClicked: controller.undoEdit() }
+        PButton { text: "Redo"; enabled: controller.canRedo; width: 52; height: 26; onClicked: controller.redoEdit() }
     }
 
     Item {

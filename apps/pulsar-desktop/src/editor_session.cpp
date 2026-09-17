@@ -5,6 +5,7 @@
 #include <iomanip>
 #include <limits>
 #include <sstream>
+#include <stdexcept>
 
 namespace pulsar::desktop {
 namespace {
@@ -30,6 +31,13 @@ std::string time_text(domain::MediaTime value) {
 }
 
 } // namespace
+
+
+const domain::Clip& require_clip(const application::ProjectDocument& document, domain::ClipId id) {
+  const auto* clip = document.timeline().find_clip(id);
+  if (clip == nullptr) throw std::invalid_argument{"clip no longer exists"};
+  return *clip;
+}
 
 std::optional<domain::MediaTime> TimelineViewport::time_at(double pixel, double width) const {
   if (!std::isfinite(pixel) || !std::isfinite(width) || width <= 0.0) {
@@ -117,8 +125,71 @@ void EditorSession::seek(domain::MediaTime position) {
   coordinator_.seek(position);
 }
 
+
 domain::MediaTime EditorSession::playback_position() const {
   return coordinator_.timeline_position();
+}
+
+void EditorSession::move_clip(domain::ClipId clip_id, double press_pixel, double current_pixel,
+                              double width) {
+  const auto press = time_at(press_pixel, width);
+  const auto current = time_at(current_pixel, width);
+  if (!press.has_value() || !current.has_value()) throw std::invalid_argument{"invalid move gesture"};
+  const auto& original = require_clip(document_, clip_id);
+  const auto delta = *current - *press;
+  processor_.move_clip(clip_id, document_.video_track_id(), original.timeline_start() + delta);
+  synchronize_document_state();
+}
+
+void EditorSession::trim_clip_start(domain::ClipId clip_id, double pixel, double width) {
+  const auto target = time_at(pixel, width);
+  if (!target.has_value()) throw std::invalid_argument{"invalid trim gesture"};
+  processor_.trim_clip_start(clip_id, *target);
+  synchronize_document_state();
+}
+
+void EditorSession::trim_clip_end(domain::ClipId clip_id, double pixel, double width) {
+  const auto target = time_at(pixel, width);
+  if (!target.has_value()) throw std::invalid_argument{"invalid trim gesture"};
+  processor_.trim_clip_end(clip_id, *target);
+  synchronize_document_state();
+}
+
+bool EditorSession::can_split() const {
+  if (!selected_clip_.has_value()) return false;
+  const auto* clip = document_.timeline().find_clip(*selected_clip_);
+  if (clip == nullptr) return false;
+  const auto position = playback_position();
+  return position > clip->timeline_range().start() && position < clip->timeline_range().end();
+}
+
+domain::ClipId EditorSession::split_selected_at_playhead() {
+  if (!can_split()) throw std::invalid_argument{"split point must be inside the clip"};
+  const auto id = *selected_clip_;
+  const auto right = processor_.split_clip(id, playback_position());
+  synchronize_document_state();
+  selected_clip_ = id;
+  rebuild_read_model();
+  return right;
+}
+
+void EditorSession::delete_selected() {
+  if (!selected_clip_.has_value()) throw std::invalid_argument{"no clip selected"};
+  processor_.remove_clip(*selected_clip_);
+  selected_clip_.reset();
+  synchronize_document_state();
+}
+
+bool EditorSession::undo() {
+  if (!processor_.undo()) return false;
+  synchronize_document_state();
+  return true;
+}
+
+bool EditorSession::redo() {
+  if (!processor_.redo()) return false;
+  synchronize_document_state();
+  return true;
 }
 
 void EditorSession::select_clip(std::optional<domain::ClipId> clip) {
