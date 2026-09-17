@@ -11,6 +11,8 @@
 
 namespace pulsar::application {
 
+class CommandProcessor;
+
 class ProjectDocument {
 public:
   ProjectDocument();
@@ -19,18 +21,13 @@ public:
   [[nodiscard]] std::vector<MediaAsset> assets() const { return assets_; }
   [[nodiscard]] std::optional<MediaAsset> find_asset(domain::MediaId id) const;
   [[nodiscard]] const domain::Timeline& timeline() const noexcept { return timeline_; }
-
-  [[nodiscard]] domain::MediaId import_asset(const std::filesystem::path& source_locator,
-                                              const MediaProbe& probe);
-  [[nodiscard]] domain::ClipId allocate_clip_id();
+  [[nodiscard]] domain::ClipId next_clip_id() const;
 
   [[nodiscard]] ProjectSnapshot snapshot() const;
   [[nodiscard]] bool is_dirty() const noexcept {
     return current_history_state_id_ != saved_history_state_id_;
   }
-  [[nodiscard]] HistoryStateId history_state_id() const noexcept {
-    return current_history_state_id_;
-  }
+  [[nodiscard]] HistoryStateId history_state_id() const noexcept { return current_history_state_id_; }
   [[nodiscard]] HistoryStateId saved_history_state_id() const noexcept {
     return saved_history_state_id_;
   }
@@ -38,10 +35,12 @@ public:
     return document_generation_;
   }
 
-  // Transitional state marker for tests and future repository integration; no I/O is performed.
+  // Transitional marker only; no filesystem save is performed.
   void mark_current_state_saved() noexcept { saved_history_state_id_ = current_history_state_id_; }
 
 private:
+  friend class CommandProcessor;
+
   struct IdAllocator {
     ProjectAllocatorState state{};
 
@@ -60,8 +59,19 @@ private:
     void consume_track();
   };
 
-  void ensure_state_advance_possible() const;
-  void advance_state();
+  [[nodiscard]] MediaAsset build_asset(const std::filesystem::path& source_locator,
+                                       const MediaProbe& probe, domain::MediaId id) const;
+  void add_asset_value(const MediaAsset& asset);
+  void remove_asset_value(domain::MediaId id);
+  void validate_new_clip(const domain::Clip& clip) const;
+  [[nodiscard]] domain::Timeline& timeline_mutable() noexcept { return timeline_; }
+  [[nodiscard]] HistoryStateId next_history_state_id() const noexcept {
+    return next_history_state_id_;
+  }
+  void ensure_new_edit_possible() const;
+  void commit_new_edit();
+  void commit_history_restore(HistoryStateId state_id);
+  void ensure_generation_advance_possible() const;
 
   IdAllocator allocator_;
   domain::Timeline timeline_;

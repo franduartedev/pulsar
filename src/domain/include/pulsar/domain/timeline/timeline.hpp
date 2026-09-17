@@ -30,6 +30,11 @@ public:
   void trim_clip_end(ClipId clip_id, MediaTime timeline_end);
   void split_clip(ClipId clip_id, MediaTime split_timeline_position, ClipId right_clip_id);
 
+  // Internal value restoration used by application history; validates the complete replacement
+  // before publishing it.
+  void restore_clip(TrackId track_id, Clip clip);
+  void restore_split(TrackId track_id, Clip original_clip, ClipId right_clip_id);
+
   // Returned pointers/references are observations only. Do not retain them across
   // Timeline or Track mutation; vector storage and copied replacement tracks may invalidate them.
   [[nodiscard]] const Track* find_track(TrackId id) const noexcept;

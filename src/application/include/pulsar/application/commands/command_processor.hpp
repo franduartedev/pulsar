@@ -1,10 +1,11 @@
 #pragma once
 
 #include <pulsar/application/commands/command.hpp>
-#include <pulsar/domain/timeline/timeline.hpp>
+#include <pulsar/application/project/project_document.hpp>
 
 #include <cstddef>
 #include <deque>
+#include <filesystem>
 
 namespace pulsar::application {
 
@@ -12,9 +13,7 @@ class CommandProcessor {
 public:
   static constexpr std::size_t default_history_capacity = 256;
 
-  // A processor is the single active editorial writer/history for its Timeline.
-  // The Timeline/document must outlive the processor; replacing it creates a new history.
-  explicit CommandProcessor(domain::Timeline& timeline,
+  explicit CommandProcessor(ProjectDocument& document,
                             std::size_t history_capacity = default_history_capacity);
 
   CommandProcessor(const CommandProcessor&) = delete;
@@ -24,6 +23,19 @@ public:
   ~CommandProcessor() = default;
 
   void execute(Command command);
+
+  [[nodiscard]] domain::ClipId add_clip(domain::MediaId media_id,
+                                         domain::TimeRange source_range,
+                                         domain::MediaTime timeline_start);
+  void remove_clip(domain::ClipId clip_id);
+  void move_clip(domain::ClipId clip_id, domain::TrackId destination_track_id,
+                 domain::MediaTime timeline_start);
+  void trim_clip_start(domain::ClipId clip_id, domain::MediaTime timeline_start);
+  void trim_clip_end(domain::ClipId clip_id, domain::MediaTime timeline_end);
+  [[nodiscard]] domain::ClipId split_clip(domain::ClipId clip_id,
+                                           domain::MediaTime split_timeline_position);
+  [[nodiscard]] domain::MediaId import_asset(const std::filesystem::path& source_locator,
+                                              const MediaProbe& probe);
 
   [[nodiscard]] bool can_undo() const noexcept;
   [[nodiscard]] bool can_redo() const noexcept;
@@ -37,14 +49,18 @@ private:
   struct ExecutedCommand {
     Command forward;
     Command inverse;
+    HistoryStateId before_state_id;
+    HistoryStateId after_state_id;
   };
 
-  static void execute_existing(domain::Timeline& timeline, const Command& command);
-  [[nodiscard]] static Command build_inverse_for(domain::Timeline& timeline,
-                                                 const Command& command);
+  enum class ApplyMode { NewEdit, HistoryRestore };
+
+  static void apply(ProjectDocument& document, const Command& command, ApplyMode mode);
+  [[nodiscard]] static Command build_inverse(const ProjectDocument& document,
+                                              const Command& command);
   void trim_undo_to_capacity();
 
-  domain::Timeline& timeline_;
+  ProjectDocument& document_;
   std::size_t history_capacity_;
   std::deque<ExecutedCommand> undo_stack_;
   std::deque<ExecutedCommand> redo_stack_;

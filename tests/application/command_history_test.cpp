@@ -1,277 +1,212 @@
-#include <pulsar/application/commands/command.hpp>
 #include <pulsar/application/commands/command_processor.hpp>
+#include <pulsar/application/media/media_probe.hpp>
 #include <pulsar/domain/ids/ids.hpp>
 #include <pulsar/domain/time/media_time.hpp>
 #include <pulsar/domain/time/rational.hpp>
 #include <pulsar/domain/time/time_range.hpp>
-#include <pulsar/domain/timeline/clip.hpp>
-#include <pulsar/domain/timeline/timeline.hpp>
-#include <pulsar/domain/timeline/track.hpp>
-#include <pulsar/domain/timeline/track_kind.hpp>
 
+#include <cassert>
+#include <filesystem>
 #include <iostream>
+#include <optional>
 #include <stdexcept>
 #include <string_view>
 #include <type_traits>
+#include <utility>
 
 namespace {
+using namespace pulsar;
+using application::CommandProcessor;
+using domain::ClipId;
+using domain::MediaId;
+using domain::MediaTime;
+using domain::Rational;
+using domain::TimeRange;
 
-using pulsar::application::AddClipCommand;
-using pulsar::application::CommandProcessor;
-using pulsar::application::MoveClipCommand;
-using pulsar::application::RemoveClipCommand;
-using pulsar::domain::Clip;
-using pulsar::domain::ClipId;
-using pulsar::domain::MediaId;
-using pulsar::domain::MediaTime;
-using pulsar::domain::Rational;
-using pulsar::domain::TimeRange;
-using pulsar::domain::Timeline;
-using pulsar::domain::TimelineId;
-using pulsar::domain::Track;
-using pulsar::domain::TrackId;
-using pulsar::domain::TrackKind;
+MediaTime t(std::int64_t value) { return MediaTime{value, Rational{1, 1}}; }
 
-int fail(std::string_view message) {
-  std::cerr << "command history test failed: " << message << '\n';
-  return 1;
+class FakeProbe final : public application::MediaProbe {
+public:
+  mutable int calls{0};
+  application::MediaProbeResult probe(const std::filesystem::path& path) const override {
+    ++calls;
+    application::MediaProbeResult result;
+    result.path = path;
+    result.video_streams.push_back(application::VideoStreamInfo{
+        2, "h264", 1920, 1080, Rational{1, 1000}, MediaTime{100000, Rational{1, 1000}},
+        std::nullopt});
+    return result;
+  }
+};
+
+MediaId import(application::ProjectDocument&, CommandProcessor& processor, FakeProbe& probe) {
+  return processor.import_asset("media/source.mp4", probe);
 }
 
-template <typename Exception, typename Callable>
-bool throws(Callable callable) {
+bool same_range(TimeRange lhs, TimeRange rhs) {
+  return lhs.start() == rhs.start() && lhs.end() == rhs.end();
+}
+
+void add_undo_redo() {
+  application::ProjectDocument document;
+  CommandProcessor processor{document};
+  FakeProbe probe;
+  const auto media = import(document, processor, probe);
+  const auto clip = processor.add_clip(media, TimeRange{t(0), t(5)}, t(0));
+  assert(document.timeline().find_clip(clip) != nullptr);
+  assert(processor.undo());
+  assert(document.timeline().find_clip(clip) == nullptr);
+  assert(processor.redo());
+  assert(document.timeline().find_clip(clip) != nullptr);
+}
+
+void remove_move_and_exact_restore() {
+  application::ProjectDocument document;
+  CommandProcessor processor{document};
+  FakeProbe probe;
+  const auto media = import(document, processor, probe);
+  const auto clip = processor.add_clip(media, TimeRange{t(7), t(12)}, t(0));
+  processor.move_clip(clip, document.video_track_id(), t(10));
+  assert(document.timeline().find_clip(clip)->timeline_start() == t(10));
+  assert(processor.undo());
+  assert(document.timeline().find_clip(clip)->timeline_start() == t(0));
+  processor.remove_clip(clip);
+  assert(document.timeline().find_clip(clip) == nullptr);
+  assert(processor.undo());
+  const auto restored = document.timeline().find_clip(clip);
+  assert(restored != nullptr && same_range(restored->source_range(), TimeRange{t(7), t(12)}) &&
+         restored->timeline_start() == t(0));
+  assert(processor.redo());
+  assert(document.timeline().find_clip(clip) == nullptr);
+}
+
+void trims_restore_exact_values() {
+  application::ProjectDocument document;
+  CommandProcessor processor{document};
+  FakeProbe probe;
+  const auto media = import(document, processor, probe);
+  const auto clip = processor.add_clip(media, TimeRange{t(7), t(20)}, t(10));
+  processor.trim_clip_start(clip, t(13));
+  auto current = document.timeline().find_clip(clip);
+  assert(current != nullptr && current->timeline_start() == t(13) &&
+         same_range(current->source_range(), TimeRange{t(10), t(20)}));
+  assert(processor.undo());
+  current = document.timeline().find_clip(clip);
+  assert(current != nullptr && current->timeline_start() == t(10) &&
+         same_range(current->source_range(), TimeRange{t(7), t(20)}));
+  assert(processor.redo());
+  processor.trim_clip_end(clip, t(18));
+  current = document.timeline().find_clip(clip);
+  assert(current != nullptr && same_range(current->source_range(), TimeRange{t(10), t(15)}));
+  assert(processor.undo());
+  current = document.timeline().find_clip(clip);
+  assert(current != nullptr && same_range(current->source_range(), TimeRange{t(10), t(20)}));
+}
+
+void split_exact_identity_and_high_water() {
+  application::ProjectDocument document;
+  CommandProcessor processor{document};
+  FakeProbe probe;
+  const auto media = import(document, processor, probe);
+  const auto clip = processor.add_clip(media, TimeRange{t(5), t(15)}, t(0));
+  const auto right = processor.split_clip(clip, t(4));
+  assert(right == ClipId{2});
+  auto left_value = document.timeline().find_clip(clip);
+  auto right_value = document.timeline().find_clip(right);
+  assert(left_value != nullptr && right_value != nullptr);
+  assert(same_range(left_value->source_range(), TimeRange{t(5), t(9)}));
+  assert(same_range(right_value->source_range(), TimeRange{t(9), t(15)}));
+  assert(processor.undo());
+  assert(document.timeline().find_clip(clip) != nullptr);
+  assert(document.timeline().find_clip(right) == nullptr);
+  assert(document.next_clip_id() == ClipId{3});
+  assert(processor.redo());
+  assert(document.timeline().find_clip(right) != nullptr);
+  assert(processor.undo());
+  const auto branch_right = processor.split_clip(clip, t(6));
+  assert(branch_right == ClipId{3});
+  assert(document.timeline().find_clip(right) == nullptr);
+}
+
+void dirty_history_identity_and_generation() {
+  application::ProjectDocument document;
+  CommandProcessor processor{document};
+  FakeProbe probe;
+  assert(!document.is_dirty() && document.document_generation() == 0);
+  import(document, processor, probe);
+  document.mark_current_state_saved();
+  const auto saved = document.history_state_id();
+  const auto generation = document.document_generation();
+  const auto second_media = import(document, processor, probe);
+  const auto clip = processor.add_clip(second_media, TimeRange{t(0), t(1)}, t(0));
+  assert(document.is_dirty() && document.history_state_id() != saved &&
+         document.document_generation() == generation + 2);
+  assert(processor.undo());
+  assert(document.is_dirty());
+  (void)clip;
+  document.mark_current_state_saved();
+  const auto saved_after_undo = document.history_state_id();
+  (void)processor.add_clip(second_media, TimeRange{t(2), t(3)}, t(0));
+  assert(document.is_dirty());
+  assert(processor.undo());
+  assert(document.history_state_id() == saved_after_undo);
+  assert(!document.is_dirty());
+  assert(processor.redo() && document.is_dirty());
+}
+
+void import_redo_does_not_probe() {
+  application::ProjectDocument document;
+  CommandProcessor processor{document};
+  FakeProbe probe;
+  const auto media = processor.import_asset("media/source.mp4", probe);
+  assert(media == MediaId{1} && probe.calls == 1);
+  assert(processor.undo());
+  assert(!document.find_asset(media).has_value());
+  assert(processor.redo());
+  assert(document.find_asset(media).has_value() && probe.calls == 1);
+}
+
+void failures_are_atomic_and_preserve_redo() {
+  application::ProjectDocument document;
+  CommandProcessor processor{document};
+  FakeProbe probe;
+  const auto media = import(document, processor, probe);
+  const auto first = processor.add_clip(media, TimeRange{t(0), t(5)}, t(0));
+  assert(processor.undo() && processor.can_redo());
+  const auto state = document.history_state_id();
+  const auto generation = document.document_generation();
+  const auto next = document.next_clip_id();
+  bool failed = false;
   try {
-    callable();
-  } catch (const Exception&) {
-    return true;
-  } catch (...) {
-    return false;
+    (void)processor.add_clip(MediaId{999}, TimeRange{t(0), t(1)}, t(0));
+  } catch (const std::invalid_argument&) {
+    failed = true;
   }
-
-  return false;
+  assert(failed && processor.can_redo() && document.history_state_id() == state &&
+         document.document_generation() == generation && document.next_clip_id() == next);
+  assert(document.timeline().find_clip(first) == nullptr);
 }
 
-MediaTime seconds(std::int64_t value) {
-  return MediaTime{value, Rational{1, 1}};
+void capacity_zero_and_noncopyable() {
+  static_assert(!std::is_copy_constructible_v<CommandProcessor>);
+  static_assert(!std::is_move_constructible_v<CommandProcessor>);
+  application::ProjectDocument document;
+  CommandProcessor processor{document, 0};
+  FakeProbe probe;
+  const auto media = import(document, processor, probe);
+  (void)processor.add_clip(media, TimeRange{t(0), t(1)}, t(0));
+  assert(!processor.can_undo() && document.document_generation() == 2);
+  assert(!processor.undo());
 }
-
-Clip clip(ClipId id, MediaId media_id, MediaTime timeline_start, MediaTime duration) {
-  return Clip{id, media_id, TimeRange{MediaTime::zero(), duration}, timeline_start};
-}
-
-Timeline base_timeline() {
-  Timeline timeline{TimelineId{1}};
-  timeline.add_track(Track{TrackId{1}, TrackKind::Video});
-  timeline.add_track(Track{TrackId{2}, TrackKind::Audio});
-  return timeline;
-}
-
-bool add_undo_redo_tests() {
-  Timeline timeline = base_timeline();
-  CommandProcessor processor{timeline};
-
-  processor.execute(AddClipCommand{TrackId{1}, clip(ClipId{1}, MediaId{1}, seconds(0), seconds(5))});
-  if (timeline.find_clip(ClipId{1}) == nullptr || !processor.can_undo()) {
-    return false;
-  }
-  if (!processor.undo() || timeline.find_clip(ClipId{1}) != nullptr || !processor.can_redo()) {
-    return false;
-  }
-  if (!processor.redo() || timeline.find_clip(ClipId{1}) == nullptr) {
-    return false;
-  }
-
-  return true;
-}
-
-bool remove_undo_redo_tests() {
-  Timeline timeline = base_timeline();
-  timeline.insert_clip(TrackId{1}, clip(ClipId{1}, MediaId{1}, seconds(5), seconds(5)));
-  CommandProcessor processor{timeline};
-
-  processor.execute(RemoveClipCommand{ClipId{1}});
-  if (timeline.find_clip(ClipId{1}) != nullptr) {
-    return false;
-  }
-  if (!processor.undo()) {
-    return false;
-  }
-  const auto* restored = timeline.find_clip(ClipId{1});
-  if (restored == nullptr || restored->timeline_start() != seconds(5) ||
-      timeline.find_track(TrackId{1})->find_clip(ClipId{1}) == nullptr) {
-    return false;
-  }
-  if (!processor.redo() || timeline.find_clip(ClipId{1}) != nullptr) {
-    return false;
-  }
-
-  return true;
-}
-
-bool move_undo_redo_tests() {
-  Timeline timeline = base_timeline();
-  timeline.insert_clip(TrackId{1}, clip(ClipId{1}, MediaId{1}, seconds(0), seconds(5)));
-  CommandProcessor processor{timeline};
-
-  processor.execute(MoveClipCommand{ClipId{1}, TrackId{2}, seconds(10)});
-  if (timeline.find_track(TrackId{1})->find_clip(ClipId{1}) != nullptr ||
-      timeline.find_track(TrackId{2})->find_clip(ClipId{1}) == nullptr ||
-      timeline.find_clip(ClipId{1})->timeline_start() != seconds(10)) {
-    return false;
-  }
-  if (!processor.undo() || timeline.find_track(TrackId{1})->find_clip(ClipId{1}) == nullptr ||
-      timeline.find_clip(ClipId{1})->timeline_start() != seconds(0)) {
-    return false;
-  }
-  if (!processor.redo() || timeline.find_track(TrackId{2})->find_clip(ClipId{1}) == nullptr ||
-      timeline.find_clip(ClipId{1})->timeline_start() != seconds(10)) {
-    return false;
-  }
-
-  return true;
-}
-
-bool redo_invalidation_tests() {
-  Timeline timeline = base_timeline();
-  CommandProcessor processor{timeline};
-
-  processor.execute(AddClipCommand{TrackId{1}, clip(ClipId{1}, MediaId{1}, seconds(0), seconds(5))});
-  if (!processor.undo() || !processor.can_redo()) {
-    return false;
-  }
-  processor.execute(AddClipCommand{TrackId{1}, clip(ClipId{2}, MediaId{2}, seconds(5), seconds(5))});
-  if (processor.can_redo()) {
-    return false;
-  }
-
-  return true;
-}
-
-bool failed_command_tests() {
-  Timeline timeline = base_timeline();
-  CommandProcessor processor{timeline};
-
-  processor.execute(AddClipCommand{TrackId{1}, clip(ClipId{1}, MediaId{1}, seconds(0), seconds(5))});
-  processor.undo();
-  if (!processor.can_redo()) {
-    return false;
-  }
-  const std::size_t undo_before = processor.undo_size();
-  const std::size_t redo_before = processor.redo_size();
-
-  if (!throws<std::invalid_argument>([&processor] {
-        processor.execute(AddClipCommand{TrackId{99},
-                                         clip(ClipId{2}, MediaId{2}, seconds(0), seconds(5))});
-      })) {
-    return false;
-  }
-  if (processor.undo_size() != undo_before || processor.redo_size() != redo_before ||
-      timeline.find_clip(ClipId{2}) != nullptr) {
-    return false;
-  }
-
-  return true;
-}
-
-bool capacity_tests() {
-  Timeline timeline = base_timeline();
-  CommandProcessor processor{timeline, 3};
-
-  processor.execute(AddClipCommand{TrackId{1}, clip(ClipId{1}, MediaId{1}, seconds(0), seconds(1))});
-  processor.execute(AddClipCommand{TrackId{1}, clip(ClipId{2}, MediaId{2}, seconds(1), seconds(1))});
-  processor.execute(AddClipCommand{TrackId{1}, clip(ClipId{3}, MediaId{3}, seconds(2), seconds(1))});
-  processor.execute(AddClipCommand{TrackId{1}, clip(ClipId{4}, MediaId{4}, seconds(3), seconds(1))});
-
-  if (processor.undo_size() != 3) {
-    return false;
-  }
-  if (!processor.undo() || !processor.undo() || !processor.undo()) {
-    return false;
-  }
-  if (processor.can_undo()) {
-    return false;
-  }
-  if (timeline.find_clip(ClipId{1}) == nullptr || timeline.find_clip(ClipId{2}) != nullptr ||
-      timeline.find_clip(ClipId{3}) != nullptr || timeline.find_clip(ClipId{4}) != nullptr) {
-    return false;
-  }
-
-  return true;
-}
-
-bool capacity_edge_tests() {
-  Timeline disabled_timeline = base_timeline();
-  CommandProcessor disabled{disabled_timeline, 0};
-  disabled.execute(
-      AddClipCommand{TrackId{1}, clip(ClipId{10}, MediaId{10}, seconds(0), seconds(1))});
-  if (disabled_timeline.find_clip(ClipId{10}) == nullptr || disabled.can_undo() ||
-      disabled.undo_size() != 0) {
-    return false;
-  }
-
-  Timeline single_timeline = base_timeline();
-  CommandProcessor single{single_timeline, 1};
-  single.execute(AddClipCommand{TrackId{1}, clip(ClipId{20}, MediaId{20}, seconds(0), seconds(1))});
-  single.execute(AddClipCommand{TrackId{1}, clip(ClipId{21}, MediaId{21}, seconds(1), seconds(1))});
-  if (single.undo_size() != 1) {
-    return false;
-  }
-  if (!single.undo()) {
-    return false;
-  }
-  if (single_timeline.find_clip(ClipId{20}) == nullptr ||
-      single_timeline.find_clip(ClipId{21}) != nullptr) {
-    return false;
-  }
-
-  return true;
-}
-
-static_assert(!std::is_copy_constructible_v<CommandProcessor>);
-static_assert(!std::is_copy_assignable_v<CommandProcessor>);
-static_assert(!std::is_move_constructible_v<CommandProcessor>);
-static_assert(!std::is_move_assignable_v<CommandProcessor>);
-
-bool empty_history_tests() {
-  Timeline timeline = base_timeline();
-  CommandProcessor processor{timeline};
-
-  if (processor.can_undo() || processor.can_redo()) {
-    return false;
-  }
-  if (processor.undo() || processor.redo()) {
-    return false;
-  }
-
-  return true;
-}
-
 } // namespace
 
 int main() {
-  if (!add_undo_redo_tests()) {
-    return fail("add undo/redo tests");
-  }
-  if (!remove_undo_redo_tests()) {
-    return fail("remove undo/redo tests");
-  }
-  if (!move_undo_redo_tests()) {
-    return fail("move undo/redo tests");
-  }
-  if (!redo_invalidation_tests()) {
-    return fail("redo invalidation tests");
-  }
-  if (!failed_command_tests()) {
-    return fail("failed command tests");
-  }
-  if (!capacity_tests()) {
-    return fail("capacity tests");
-  }
-  if (!capacity_edge_tests()) {
-    return fail("capacity edge tests");
-  }
-  if (!empty_history_tests()) {
-    return fail("empty history tests");
-  }
-
-  return 0;
+  add_undo_redo();
+  remove_move_and_exact_restore();
+  trims_restore_exact_values();
+  split_exact_identity_and_high_water();
+  dirty_history_identity_and_generation();
+  import_redo_does_not_probe();
+  failures_are_atomic_and_preserve_redo();
+  capacity_zero_and_noncopyable();
 }

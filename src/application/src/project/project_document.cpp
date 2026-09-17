@@ -2,6 +2,7 @@
 
 #include <pulsar/domain/timeline/track_kind.hpp>
 
+#include <algorithm>
 #include <limits>
 #include <stdexcept>
 #include <string>
@@ -63,42 +64,65 @@ std::optional<MediaAsset> ProjectDocument::find_asset(domain::MediaId id) const 
   return std::nullopt;
 }
 
-domain::MediaId ProjectDocument::import_asset(const std::filesystem::path& source_locator,
-                                              const MediaProbe& probe) {
+domain::ClipId ProjectDocument::next_clip_id() const {
+  return allocator_.next_clip();
+}
+
+MediaAsset ProjectDocument::build_asset(const std::filesystem::path& source_locator,
+                                        const MediaProbe& probe, domain::MediaId id) const {
   if (source_locator.empty()) {
     throw std::invalid_argument{"media asset source locator cannot be empty"};
   }
 
-  // Probe and validate before consuming an ID or mutating the catalog.
   const MediaProbeResult result = probe.probe(source_locator);
   if (result.video_streams.empty()) {
     throw std::invalid_argument{"media has no video stream"};
   }
-
   const VideoStreamInfo& stream = result.video_streams.front();
   if (!stream.duration.has_value() || *stream.duration <= domain::MediaTime::zero()) {
     throw std::invalid_argument{"selected video stream has no exact positive duration"};
   }
 
-  ensure_state_advance_possible();
-  allocator_.ensure_media_consumable();
-  const domain::MediaId id = allocator_.next_media();
   VideoAssetMetadata metadata{stream.codec_name, stream.width, stream.height, stream.time_base,
                               stream.nominal_frame_rate, result.container_name};
-  assets_.emplace_back(id, source_locator, stream.stream_index, *stream.duration,
-                       std::move(metadata));
-  allocator_.consume_media();
-  advance_state();
-  return id;
+  return MediaAsset{id, source_locator, stream.stream_index, *stream.duration,
+                    std::move(metadata)};
 }
 
-domain::ClipId ProjectDocument::allocate_clip_id() {
-  ensure_state_advance_possible();
-  allocator_.ensure_clip_consumable();
-  const domain::ClipId id = allocator_.next_clip();
-  allocator_.consume_clip();
-  advance_state();
-  return id;
+void ProjectDocument::add_asset_value(const MediaAsset& asset) {
+  if (find_asset(asset.id()).has_value()) {
+    throw std::invalid_argument{"media asset id already exists in document"};
+  }
+  assets_.push_back(asset);
+}
+
+void ProjectDocument::remove_asset_value(domain::MediaId id) {
+  for (const auto& track : timeline_.tracks()) {
+    for (const auto& clip : track.clips()) {
+      if (clip.media_id() == id) {
+        throw std::invalid_argument{"cannot remove media asset referenced by a clip"};
+      }
+    }
+  }
+  const auto iterator = std::find_if(assets_.begin(), assets_.end(),
+                                     [id](const MediaAsset& asset) { return asset.id() == id; });
+  if (iterator == assets_.end()) {
+    throw std::invalid_argument{"media asset does not exist in document"};
+  }
+  assets_.erase(iterator);
+}
+
+void ProjectDocument::validate_new_clip(const domain::Clip& clip) const {
+  const auto asset = find_asset(clip.media_id());
+  if (!asset.has_value()) {
+    throw std::invalid_argument{"clip references an unknown media asset"};
+  }
+  if (asset->availability() != MediaAvailability::Available) {
+    throw std::invalid_argument{"clip references unavailable media"};
+  }
+  if (clip.source_range().end() > asset->playable_duration()) {
+    throw std::invalid_argument{"clip source range exceeds media duration"};
+  }
 }
 
 ProjectSnapshot ProjectDocument::snapshot() const {
@@ -107,15 +131,28 @@ ProjectSnapshot ProjectDocument::snapshot() const {
                          document_generation_};
 }
 
-void ProjectDocument::ensure_state_advance_possible() const {
-  if (next_history_state_id_ == std::numeric_limits<HistoryStateId>::max() ||
-      document_generation_ == std::numeric_limits<std::uint64_t>::max()) {
-    throw std::overflow_error{"project document state identity exhausted"};
+void ProjectDocument::ensure_new_edit_possible() const {
+  ensure_generation_advance_possible();
+  if (next_history_state_id_ == std::numeric_limits<HistoryStateId>::max()) {
+    throw std::overflow_error{"project history state identity exhausted"};
   }
 }
 
-void ProjectDocument::advance_state() {
+void ProjectDocument::ensure_generation_advance_possible() const {
+  if (document_generation_ == std::numeric_limits<std::uint64_t>::max()) {
+    throw std::overflow_error{"project document generation exhausted"};
+  }
+}
+
+void ProjectDocument::commit_new_edit() {
+  ensure_new_edit_possible();
   current_history_state_id_ = next_history_state_id_++;
+  ++document_generation_;
+}
+
+void ProjectDocument::commit_history_restore(HistoryStateId state_id) {
+  ensure_generation_advance_possible();
+  current_history_state_id_ = state_id;
   ++document_generation_;
 }
 

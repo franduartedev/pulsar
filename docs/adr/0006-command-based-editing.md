@@ -16,7 +16,7 @@ Los commands viven en `pulsar_application`, no en `pulsar_domain`. El dominio de
 
 Los commands son value types concretos almacenados en `std::variant`, no una jerarquía virtual. M3 introduce únicamente `AddClipCommand`, `RemoveClipCommand` y `MoveClipCommand`.
 
-`CommandProcessor` opera sobre una `Timeline&` no propietaria. Esto mantiene ownership claro: quien crea la timeline conserva su lifetime, y el processor coordina mutaciones e historial sobre esa instancia.
+`CommandProcessor` opera sobre un `ProjectDocument&` no propietario desde M9.2. El documento conserva el ownership de la timeline, el catálogo de assets, los allocators y la identidad de estado. El processor es el único escritor editorial activo; no se expone una timeline mutable pública. El documento debe vivir más que el processor; reemplazarlo crea un nuevo contexto de historial.
 
 Para M7 se hace explícito que cada documento/timeline tiene un único escritor editorial y una única historia activa. `CommandProcessor` no es copiable ni movible: dos historiales independientes no deben mutar la misma `Timeline`. La `Timeline` debe vivir más que el processor; reemplazar el documento implica construir un nuevo processor y empezar una nueva historia.
 
@@ -39,3 +39,18 @@ La serialización de commands, journaling, autosave y crash recovery quedan fuer
 El modelo es determinista, testeable y compatible con journaling futuro sin introducir dependencias ni allocations polimórficas para commands.
 
 Undo/redo de operaciones pequeñas no requiere snapshots completos de timeline. A cambio, cada command debe capturar o derivar una operación inversa precisa al ejecutarse.
+
+## Evolución M9.2
+
+M9.2 integra la historia con `ProjectDocument` porque una edición debe coordinar
+timeline, IDs, catálogo y estado lógico como una sola mutación. Cada entrada guarda
+comandos forward/inverse por valor y `before_state_id`/`after_state_id`. Undo y redo
+restauran esas identidades y solo incrementan la generación monotónica. Una nueva
+edición después de undo recibe una identidad nunca usada y descarta redo solo
+después de aplicar con éxito.
+
+Los inverses de trim restauran el `Clip` exacto; el inverse de split restaura el
+clip original y elimina el lado derecho con su ID histórico. El allocator mantiene
+la high-water mark durante undo, de modo que los IDs abandonados no se reutilizan.
+La importación de media participa en el mismo historial con valores de `MediaAsset`;
+redo restaura el valor sin volver a ejecutar probing.

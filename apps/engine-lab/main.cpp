@@ -1,5 +1,6 @@
 #include <pulsar/application/bootstrap.hpp>
 #include <pulsar/application/commands/command_processor.hpp>
+#include <pulsar/application/project/project_document.hpp>
 #include <pulsar/domain/time/frame_number.hpp>
 #include <pulsar/domain/time/frame_rate.hpp>
 #include <pulsar/domain/time/media_time.hpp>
@@ -478,17 +479,19 @@ int main(int argc, char** argv) {
   }
   std::cout << " s\n";
 
-  auto command_timeline = Timeline{TimelineId{10}};
-  command_timeline.add_track(Track{TrackId{10}, TrackKind::Video});
-  auto processor = pulsar::application::CommandProcessor{command_timeline};
-  processor.execute(pulsar::application::AddClipCommand{
-      TrackId{10},
-      Clip{ClipId{10}, MediaId{10},
-           TimeRange{MediaTime{0, Rational{1, 1}}, MediaTime{1, Rational{1, 1}}},
-           MediaTime{0, Rational{1, 1}}}});
-  const bool add_ok = command_timeline.find_clip(ClipId{10}) != nullptr;
-  const bool undo_ok = processor.undo() && command_timeline.find_clip(ClipId{10}) == nullptr;
-  const bool redo_ok = processor.redo() && command_timeline.find_clip(ClipId{10}) != nullptr;
+  pulsar::application::ProjectDocument command_document;
+  auto processor = pulsar::application::CommandProcessor{command_document};
+  const auto asset = pulsar::application::MediaAsset{
+      MediaId{1}, "engine-lab/source.mp4", 0, MediaTime{10, Rational{1, 1}},
+      pulsar::application::VideoAssetMetadata{"synthetic", 1920, 1080, Rational{1, 1000},
+                                               std::nullopt, std::nullopt}};
+  processor.execute(pulsar::application::ImportAssetCommand{asset});
+  const auto clip_id = processor.add_clip(
+      MediaId{1}, TimeRange{MediaTime{0, Rational{1, 1}}, MediaTime{1, Rational{1, 1}}},
+      MediaTime{0, Rational{1, 1}});
+  const bool add_ok = command_document.timeline().find_clip(clip_id) != nullptr;
+  const bool undo_ok = processor.undo() && command_document.timeline().find_clip(clip_id) == nullptr;
+  const bool redo_ok = processor.redo() && command_document.timeline().find_clip(clip_id) != nullptr;
 
   std::cout << "Command model\n";
   std::cout << "Add clip: " << (add_ok ? "OK" : "FAILED") << '\n';
