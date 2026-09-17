@@ -149,6 +149,11 @@ void session_read_model_and_selection() {
       playback_media, TimeRange{MediaTime::zero(), MediaTime{5, Rational{1, 1}}}, MediaTime::zero());
   playback_session.synchronize_document_state();
   playback_session.seek(MediaTime{1, Rational{1, 1}});
+  playback_session.play();
+  assert(playback_session.playback_intent() == application::PlaybackIntent::Playing);
+  (void)playback_session.update_playback();
+  playback_session.pause();
+  assert(playback_session.playback_intent() == application::PlaybackIntent::Paused);
   assert(worker_creations == 1);
   const auto generation_before = playback_session.document().document_generation();
   playback_session.select_clip(playback_clip);

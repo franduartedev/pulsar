@@ -7,7 +7,7 @@ import "../theme/Theme.js" as Theme
 Item {
     id: bar
 
-    Text { anchors.left: parent.left; anchors.leftMargin: 14; anchors.verticalCenter: parent.verticalCenter; text: "SOURCE"; color: Theme.faint; font.pixelSize: Theme.fontSizeS; font.letterSpacing: 1.5 }
+    Text { anchors.left: parent.left; anchors.leftMargin: 14; anchors.verticalCenter: parent.verticalCenter; text: "TIMELINE"; color: Theme.faint; font.pixelSize: Theme.fontSizeS; font.letterSpacing: 1.5 }
     Row {
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.verticalCenter: parent.verticalCenter

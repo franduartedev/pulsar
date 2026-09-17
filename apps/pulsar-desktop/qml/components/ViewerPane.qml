@@ -1,13 +1,13 @@
 import QtQuick
 import "../theme/Theme.js" as Theme
 
-// Monitor surface: viewer chrome (ORIGEN context + preview state) on top,
+// Monitor surface: viewer chrome (PROGRAMA context + preview state) on top,
 // clean black mat with the image as hero, no overlays over the picture.
 // Lives inside the monitor module frame composed by Main.qml.
 Item {
     id: pane
 
-    Text { id: originLabel; anchors.left: parent.left; anchors.leftMargin: 12; anchors.verticalCenter: chromeCenter; text: "ORIGEN"; color: Theme.faint; font.pixelSize: Theme.fontSizeS; font.letterSpacing: 1.5 }
+    Text { id: originLabel; anchors.left: parent.left; anchors.leftMargin: 12; anchors.verticalCenter: chromeCenter; text: "PROGRAMA"; color: Theme.faint; font.pixelSize: Theme.fontSizeS; font.letterSpacing: 1.5 }
     Text {
         anchors.left: originLabel.right
         anchors.right: badgeRow.left
@@ -50,9 +50,9 @@ Item {
             spacing: 10
             visible: controller.previewSource.length === 0
             Text { anchors.horizontalCenter: parent.horizontalCenter; text: "PULSAR"; color: Theme.textBright; font.pixelSize: 34; font.bold: true; font.letterSpacing: 5 }
-            Text { anchors.horizontalCenter: parent.horizontalCenter; text: "SOURCE VIEWER READY"; color: Theme.muted; font.pixelSize: Theme.fontSizeS; font.letterSpacing: 2.5 }
+            Text { anchors.horizontalCenter: parent.horizontalCenter; text: controller.viewerState === "gap" ? "GAP" : (controller.viewerState === "missing" ? "MEDIO NO DISPONIBLE" : (controller.viewerState === "ended" ? "FIN DEL PROGRAMA" : "PROGRAM VIEWER READY")); color: Theme.muted; font.pixelSize: Theme.fontSizeS; font.letterSpacing: 2.5 }
             Rectangle { anchors.horizontalCenter: parent.horizontalCenter; width: 56; height: 2; color: Theme.accent; opacity: 0.55 }
-            Text { anchors.horizontalCenter: parent.horizontalCenter; text: controller.busy ? "Preparando medio…" : "Importá o arrastrá un video"; color: Theme.muted; font.pixelSize: Theme.fontSizeL }
+            Text { anchors.horizontalCenter: parent.horizontalCenter; text: controller.viewerState === "loading" ? "Preparando presentación…" : (controller.viewerState === "error" ? "No se pudo presentar este segmento" : (controller.busy ? "Preparando medio…" : "Importá o arrastrá un video")); color: Theme.muted; font.pixelSize: Theme.fontSizeL }
             PButton { anchors.horizontalCenter: parent.horizontalCenter; width: 170; text: "IMPORTAR"; primary: true; onClicked: controller.importRequested() }
             PMuted { anchors.horizontalCenter: parent.horizontalCenter; text: "Space · reproducir / pausar"; color: Theme.faint }
         }

@@ -121,6 +121,14 @@ void EditorSession::rebuild_read_model() {
   ++read_model_generation_;
 }
 
+void EditorSession::play() { coordinator_.play(); }
+
+void EditorSession::pause() { coordinator_.pause(); }
+
+application::TimelinePresentation EditorSession::update_playback() { return coordinator_.update(); }
+
+application::PlaybackIntent EditorSession::playback_intent() const noexcept { return coordinator_.intent(); }
+
 void EditorSession::seek(domain::MediaTime position) {
   coordinator_.seek(position);
 }

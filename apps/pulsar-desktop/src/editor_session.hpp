@@ -50,6 +50,10 @@ public:
   [[nodiscard]] std::optional<domain::ClipId> selected_clip() const noexcept { return selected_clip_; }
   [[nodiscard]] domain::MediaTime timeline_duration() const noexcept;
   [[nodiscard]] std::uint64_t read_model_generation() const noexcept { return read_model_generation_; }
+  void play();
+  void pause();
+  [[nodiscard]] application::TimelinePresentation update_playback();
+  [[nodiscard]] application::PlaybackIntent playback_intent() const noexcept;
   void seek(domain::MediaTime position);
   [[nodiscard]] domain::MediaTime playback_position() const;
   void move_clip(domain::ClipId clip, double press_pixel, double current_pixel, double width);
