@@ -58,12 +58,6 @@ private:
     application::StreamTimestamp target;
   };
 
-  enum class ActiveKind {
-    None,
-    Read,
-    Seek,
-  };
-
   void run();
   void enqueue_event(application::PlaybackWorkerEvent event);
   [[nodiscard]] application::VideoSample to_sample(const DecodedVideoFrameInfo& frame);
@@ -78,7 +72,6 @@ private:
   bool stop_{false};
   bool cancel_requested_{false};
   std::optional<ReadRequest> pending_read_;
-  std::optional<SeekRequest> active_seek_;
   std::optional<SeekRequest> pending_seek_;
   std::deque<application::PlaybackWorkerEvent> events_;
   FFmpegPlaybackWorkerStats stats_;

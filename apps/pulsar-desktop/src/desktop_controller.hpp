@@ -125,7 +125,6 @@ private:
   [[nodiscard]] pulsar::domain::MediaTime currentStreamTarget() const;
   [[nodiscard]] pulsar::domain::MediaTime relativeFromStream(pulsar::domain::MediaTime stream_time) const;
   [[nodiscard]] pulsar::domain::MediaTime streamFromRelative(pulsar::domain::MediaTime relative) const;
-  [[nodiscard]] pulsar::domain::MediaTime durationOrZero() const;
   [[nodiscard]] static QString formatTime(pulsar::domain::MediaTime time);
   [[nodiscard]] static pulsar::domain::MediaTime mediaTimeFromSeconds(double seconds);
   [[nodiscard]] static double secondsAsDouble(pulsar::domain::MediaTime time);
@@ -140,7 +139,6 @@ private:
   std::condition_variable wake_;
   bool stop_worker_{false};
   std::optional<WorkerCommand> pending_command_;
-  bool worker_busy_{false};
 
   std::uint64_t generation_{0};
   bool read_in_flight_{false};
@@ -165,7 +163,6 @@ private:
   bool preview_late_{false};
 
   std::uint64_t preview_revision_{0};
-  std::uint64_t dropped_visual_frames_{0};
   std::uint64_t stale_visual_frames_{0};
   std::uint64_t displayed_frames_{0};
   std::uint64_t seek_count_{0};

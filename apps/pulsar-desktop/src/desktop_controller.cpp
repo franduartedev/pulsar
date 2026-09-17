@@ -94,7 +94,6 @@ struct DesktopController::WorkerState {
   std::unique_ptr<FFmpegVideoDecodeSession> session;
   std::optional<pulsar::application::VideoStreamInfo> stream;
   std::optional<MediaTime> origin;
-  std::optional<MediaTime> duration;
   FFmpegPreviewConverter converter;
 };
 
@@ -278,7 +277,6 @@ void DesktopController::workerLoop() {
       }
       command = std::move(*pending_command_);
       pending_command_.reset();
-      worker_busy_ = true;
     }
 
     try {
@@ -307,7 +305,6 @@ void DesktopController::workerLoop() {
         state.session = std::move(session);
         state.stream = stream;
         state.origin = opened.stream_time;
-        state.duration = opened.duration;
         QMetaObject::invokeMethod(
             this,
             [this, generation = command.generation, opened = std::move(opened), open_started]() mutable {
@@ -434,11 +431,6 @@ void DesktopController::workerLoop() {
           },
           Qt::QueuedConnection);
     }
-
-    {
-      std::lock_guard lock{mutex_};
-      worker_busy_ = false;
-    }
   }
 }
 
@@ -554,9 +546,8 @@ void DesktopController::updatePositionProperties() {
 
 void DesktopController::updateDiagnostics() {
   debug_metrics_ = QStringLiteral(
-                       "displayed=%1 dropped_visual=%2 stale=%3 reads=%4 seeks=%5 conversion_ms=%6 seek_visible_ms=%7")
+                       "displayed=%1 stale=%2 reads=%3 seeks=%4 conversion_ms=%5 seek_visible_ms=%6")
                        .arg(displayed_frames_)
-                       .arg(dropped_visual_frames_)
                        .arg(stale_visual_frames_)
                        .arg(read_count_)
                        .arg(seek_count_)
@@ -596,13 +587,6 @@ MediaTime DesktopController::streamFromRelative(MediaTime relative) const {
     return relative;
   }
   return *origin_stream_time_ + relative;
-}
-
-MediaTime DesktopController::durationOrZero() const {
-  if (duration_.has_value()) {
-    return *duration_;
-  }
-  return MediaTime::zero();
 }
 
 QString DesktopController::formatTime(MediaTime time) {
