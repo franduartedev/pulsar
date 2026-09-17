@@ -17,9 +17,17 @@ qt_add_resources(pulsar_desktop pulsar_desktop_qml
     qml/components/PButton.qml
     qml/components/PText.qml
     qml/components/PMuted.qml
-    qml/components/PSlider.qml
     qml/components/SectionLabel.qml
     qml/components/StatusDot.qml
+    qml/components/TGlyph.qml
+    qml/components/TButton.qml
+    qml/components/HeaderBar.qml
+    qml/components/MediaPanel.qml
+    qml/components/ViewerPane.qml
+    qml/components/TransportBar.qml
+    qml/components/InspectorPanel.qml
+    qml/components/SourceScrubber.qml
+    qml/components/StatusBar.qml
 )
 
 set_source_files_properties(imports/QtQml/WorkerScript/qmldir
