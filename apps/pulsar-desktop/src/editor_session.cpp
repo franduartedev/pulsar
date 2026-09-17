@@ -168,8 +168,6 @@ domain::ClipId EditorSession::split_selected_at_playhead() {
   const auto id = *selected_clip_;
   const auto right = processor_.split_clip(id, playback_position());
   synchronize_document_state();
-  selected_clip_ = id;
-  rebuild_read_model();
   return right;
 }
 

@@ -8,11 +8,10 @@ Item {
     Repeater {
         model: controller.timelineClips
         delegate: ClipBlock {
-            x: modelData.startProgress * track.width
             y: 9
-            width: Math.max(3, (modelData.endProgress - modelData.startProgress) * track.width)
+            canonicalStartX: modelData.startProgress * track.width
+            canonicalWidth: Math.max(3, (modelData.endProgress - modelData.startProgress) * track.width)
             height: track.height - 14
-            startProgress: modelData.startProgress
             timelineWidth: track.width
             clipName: modelData.name
             startText: modelData.start

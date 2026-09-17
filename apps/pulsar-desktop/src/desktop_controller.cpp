@@ -241,8 +241,14 @@ void DesktopController::closeMedia() {
 void DesktopController::publishTimeline() {
   timeline_clips_.clear();
   if (!active_session_) {
+    selected_clip_key_.clear();
     emit timelineChanged();
     return;
+  }
+  if (active_session_->selected_clip().has_value()) {
+    selected_clip_key_ = QString::number(active_session_->selected_clip()->value());
+  } else {
+    selected_clip_key_.clear();
   }
   for (const auto& view : active_session_->timeline_views()) {
     QVariantMap item;
@@ -291,7 +297,6 @@ void DesktopController::selectTimelineClip(const QString& clip_key) {
   if (!active_session_) return;
   if (clip_key.isEmpty()) {
     active_session_->select_clip(std::nullopt);
-    selected_clip_key_.clear();
     publishTimeline();
     return;
   }
@@ -299,7 +304,6 @@ void DesktopController::selectTimelineClip(const QString& clip_key) {
   const auto value = clip_key.toULongLong(&ok);
   if (!ok || value == 0) return;
   active_session_->select_clip(pulsar::domain::ClipId{value});
-  selected_clip_key_ = clip_key;
   publishTimeline();
 }
 
@@ -385,7 +389,6 @@ void DesktopController::deleteSelectedClip() {
     active_session_->delete_selected();
     clearError();
     setStatus(QStringLiteral("Clip eliminado"));
-    selected_clip_key_.clear();
     publishTimeline();
   } catch (const std::exception&) {
     setError(QStringLiteral("No se pudo eliminar el clip."));
