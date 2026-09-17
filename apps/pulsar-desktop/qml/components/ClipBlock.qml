@@ -14,11 +14,14 @@ Rectangle {
     property real timelineWidth: 1
     property real previewOffset: 0
     property real trimWidthDelta: 0
-    property real pressPixel: 0
-    property real pressMouseX: 0
+    property real pressTimelineX: 0
     property bool trimDragging: false
     property bool moveDragging: false
     signal activated()
+
+    function timelineX(area, mouse) {
+        return area.mapToItem(block.parent, mouse.x, mouse.y).x
+    }
 
     x: canonicalStartX + previewOffset
     width: Math.max(3, canonicalWidth + trimWidthDelta)
@@ -41,14 +44,14 @@ Rectangle {
             preventStealing: true
             cursorShape: Qt.SizeHorCursor
             onPressed: {
-                block.pressPixel = block.x + mouse.x
-                block.pressMouseX = mouse.x
+                block.pressTimelineX = block.timelineX(parent, mouse)
                 block.trimDragging = false
                 block.previewOffset = 0
                 block.trimWidthDelta = 0
             }
             onPositionChanged: {
-                var delta = mouse.x - block.pressMouseX
+                var currentTimelineX = block.timelineX(parent, mouse)
+            var delta = currentTimelineX - block.pressTimelineX
                 if (Math.abs(delta) >= 4) block.trimDragging = true
                 if (block.trimDragging) {
                     block.previewOffset = delta
@@ -56,9 +59,10 @@ Rectangle {
                 }
             }
             onReleased: {
+                var currentTimelineX = block.timelineX(parent, mouse)
                 if (block.trimDragging)
                     controller.trimTimelineClipStart(block.clipKey,
-                                                     block.pressPixel + (mouse.x - block.pressMouseX),
+                                                     currentTimelineX,
                                                      block.timelineWidth)
                 block.previewOffset = 0
                 block.trimWidthDelta = 0
@@ -77,20 +81,21 @@ Rectangle {
             preventStealing: true
             cursorShape: Qt.SizeHorCursor
             onPressed: {
-                block.pressPixel = block.x + rightHandle.x + mouse.x
-                block.pressMouseX = mouse.x
+                block.pressTimelineX = block.timelineX(parent, mouse)
                 block.trimDragging = false
                 block.trimWidthDelta = 0
             }
             onPositionChanged: {
-                var delta = mouse.x - block.pressMouseX
+                var currentTimelineX = block.timelineX(parent, mouse)
+            var delta = currentTimelineX - block.pressTimelineX
                 if (Math.abs(delta) >= 4) block.trimDragging = true
                 if (block.trimDragging) block.trimWidthDelta = delta
             }
             onReleased: {
+                var currentTimelineX = block.timelineX(parent, mouse)
                 if (block.trimDragging)
                     controller.trimTimelineClipEnd(block.clipKey,
-                                                   block.pressPixel + (mouse.x - block.pressMouseX),
+                                                   currentTimelineX,
                                                    block.timelineWidth)
                 block.trimWidthDelta = 0
                 block.trimDragging = false
@@ -104,20 +109,21 @@ Rectangle {
         anchors.rightMargin: rightHandle.width
         preventStealing: true
         onPressed: {
-            block.pressPixel = mouse.x + body.x + block.x
-            block.pressMouseX = mouse.x
+            block.pressTimelineX = block.timelineX(parent, mouse)
             block.moveDragging = false
             block.previewOffset = 0
         }
         onPositionChanged: {
-            var delta = mouse.x - block.pressMouseX
+            var currentTimelineX = block.timelineX(parent, mouse)
+            var delta = currentTimelineX - block.pressTimelineX
             if (Math.abs(delta) >= 4) block.moveDragging = true
             if (block.moveDragging) block.previewOffset = delta
         }
         onReleased: {
+            var currentTimelineX = block.timelineX(parent, mouse)
             if (block.moveDragging) {
-                controller.moveTimelineClip(block.clipKey, block.pressPixel,
-                                            block.pressPixel + (mouse.x - block.pressMouseX),
+                controller.moveTimelineClip(block.clipKey, block.pressTimelineX,
+                                            currentTimelineX,
                                             block.timelineWidth)
             } else {
                 block.activated()

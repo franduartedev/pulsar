@@ -138,6 +138,7 @@ void EditorSession::move_clip(domain::ClipId clip_id, double press_pixel, double
   const auto& original = require_clip(document_, clip_id);
   const auto delta = *current - *press;
   processor_.move_clip(clip_id, document_.video_track_id(), original.timeline_start() + delta);
+  selected_clip_ = clip_id;
   synchronize_document_state();
 }
 

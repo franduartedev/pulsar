@@ -37,6 +37,8 @@ private:
   int& count_;
 };
 
+bool same_range(const TimeRange& lhs, const TimeRange& rhs) { return lhs.start() == rhs.start() && lhs.end() == rhs.end(); }
+
 class Probe final : public MediaProbe {
 public:
   MediaProbeResult probe(const std::filesystem::path& path) const override {
@@ -156,10 +158,93 @@ void session_read_model_and_selection() {
   assert(playback_session.document().document_generation() == generation_before);
 }
 
+
+void final_pointer_edit_regressions() {
+  Probe probe;
+
+  EditorSession moves;
+  const auto media = moves.processor().import_asset("moves.mp4", probe);
+  const auto first = moves.processor().add_clip(media, TimeRange{MediaTime::zero(), MediaTime{5, Rational{1, 1}}}, MediaTime::zero());
+  const auto second = moves.processor().add_clip(media, TimeRange{MediaTime::zero(), MediaTime{5, Rational{1, 1}}}, MediaTime{10, Rational{1, 1}});
+  moves.synchronize_document_state();
+  moves.select_clip(first);
+  const auto source = moves.document().timeline().find_clip(second)->source_range();
+  const auto generation_before_move = moves.document().document_generation();
+  const auto history_before_move = moves.processor().undo_size();
+  moves.move_clip(second, 80.0, 90.0, 100.0);
+  assert(moves.selected_clip() == second);
+  assert(moves.processor().undo_size() == history_before_move + 1);
+  assert(same_range(moves.document().timeline().find_clip(second)->source_range(), source));
+  assert(moves.document().document_generation() == generation_before_move + 1);
+
+  moves.select_clip(first);
+  const auto failed_generation = moves.document().document_generation();
+  const auto failed_history = moves.processor().undo_size();
+  bool rejected = false;
+  try { moves.move_clip(second, 80.0, 0.0, 100.0); } catch (const std::invalid_argument&) { rejected = true; }
+  assert(rejected && moves.selected_clip() == first);
+  assert(moves.document().document_generation() == failed_generation);
+  assert(moves.processor().undo_size() == failed_history);
+  rejected = false;
+  try { moves.move_clip(second, 80.0, 20.0, 100.0); } catch (const std::invalid_argument&) { rejected = true; }
+  assert(rejected && moves.selected_clip() == first);
+  assert(same_range(moves.document().timeline().find_clip(second)->source_range(), source));
+
+  EditorSession trims;
+  const auto trim_media = trims.processor().import_asset("trim.mp4", probe);
+  const auto trim_clip = trims.processor().add_clip(trim_media,
+      TimeRange{MediaTime{5, Rational{1, 1}}, MediaTime{15, Rational{1, 1}}}, MediaTime::zero());
+  (void)trims.processor().add_clip(trim_media,
+      TimeRange{MediaTime::zero(), MediaTime{1, Rational{1, 1}}}, MediaTime{12, Rational{1, 1}});
+  trims.synchronize_document_state();
+  trims.select_clip(trim_clip);
+  const auto trim_target = trims.time_at(60.0, 100.0).value();
+  trims.trim_clip_end(trim_clip, 60.0, 100.0);
+  auto trimmed = trims.document().timeline().find_clip(trim_clip);
+  const auto expected_source_end = MediaTime{5, Rational{1, 1}} + trim_target;
+  assert(trimmed->timeline_range().end() == trim_target);
+  assert(trimmed->source_range().end() == expected_source_end);
+  const auto after_trim = trimmed->source_range();
+  bool trim_rejected = false;
+  try { trims.trim_clip_end(trim_clip, 90.0, 100.0); } catch (const std::invalid_argument&) { trim_rejected = true; }
+  assert(trim_rejected);
+  assert(same_range(trims.document().timeline().find_clip(trim_clip)->source_range(), after_trim));
+  assert(trims.undo());
+  const auto source_fifteen = MediaTime{15, Rational{1, 1}};
+  assert(trims.document().timeline().find_clip(trim_clip)->source_range().end() == source_fifteen);
+  assert(trims.redo());
+  assert(same_range(trims.document().timeline().find_clip(trim_clip)->source_range(), after_trim));
+
+  EditorSession splits;
+  const auto split_media = splits.processor().import_asset("split.mp4", probe);
+  const auto split_clip = splits.processor().add_clip(split_media,
+      TimeRange{MediaTime::zero(), MediaTime{10, Rational{1, 1}}}, MediaTime::zero());
+  splits.synchronize_document_state();
+  splits.select_clip(split_clip);
+  const auto next_before = splits.document().next_clip_id();
+  splits.seek(MediaTime::zero());
+  bool split_rejected = false;
+  try { (void)splits.split_selected_at_playhead(); } catch (const std::invalid_argument&) { split_rejected = true; }
+  assert(split_rejected && splits.document().next_clip_id() == next_before);
+  splits.seek(MediaTime{10, Rational{1, 1}});
+  split_rejected = false;
+  try { (void)splits.split_selected_at_playhead(); } catch (const std::invalid_argument&) { split_rejected = true; }
+  assert(split_rejected && splits.document().next_clip_id() == next_before);
+  splits.seek(MediaTime{5, Rational{1, 1}});
+  const auto right = splits.split_selected_at_playhead();
+  assert(splits.selected_clip() == split_clip);
+  assert(splits.undo());
+  assert(splits.document().timeline().find_clip(right) == nullptr);
+  assert(splits.document().timeline().find_clip(split_clip) != nullptr);
+  assert(splits.redo());
+  assert(splits.document().timeline().find_clip(right) != nullptr);
+}
+
 } // namespace
 
 int main() {
   viewport_is_exactly_guarded();
   editing_actions_use_document_commands();
   session_read_model_and_selection();
+  final_pointer_edit_regressions();
 }
