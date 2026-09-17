@@ -2,6 +2,9 @@ add_library(pulsar_application
   src/bootstrap.cpp
   src/commands/command_processor.cpp
   src/media/media_probe_error.cpp
+  src/playback/monotonic_clock.cpp
+  src/playback/playback_time.cpp
+  src/playback/playback_transport.cpp
 )
 
 add_library(pulsar::application ALIAS pulsar_application)
