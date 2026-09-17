@@ -56,7 +56,19 @@ void PlaybackSession::seek(PlaybackPosition position) {
 }
 
 PresentationDecision PlaybackSession::update() {
+  return update_at_impl(transport_.position(), true);
+}
+
+PresentationDecision PlaybackSession::update_at(PlaybackPosition source_position) {
+  return update_at_impl(source_position, false);
+}
+
+PresentationDecision PlaybackSession::update_at_impl(PlaybackPosition source_position,
+                                                     bool drive_transport) {
   poll_worker_events();
+  if (drive_transport) {
+    source_position = transport_.position();
+  }
 
   if (availability_ == PlaybackAvailability::Error) {
     return PresentationTemporalError{error_message_.value_or("playback session error")};
@@ -66,10 +78,12 @@ PresentationDecision PlaybackSession::update() {
     return PresentationStarved{};
   }
 
-  auto decision = scheduler_.evaluate(transport_.position());
+  auto decision = scheduler_.evaluate(source_position);
   if (std::holds_alternative<PresentationEnded>(decision)) {
     availability_ = PlaybackAvailability::Ended;
-    transport_.pause();
+    if (drive_transport) {
+      transport_.pause();
+    }
   } else if (std::holds_alternative<PresentationTemporalError>(decision)) {
     const auto& error = std::get<PresentationTemporalError>(decision);
     set_error(error.message);

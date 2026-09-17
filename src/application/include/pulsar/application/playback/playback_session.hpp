@@ -43,6 +43,8 @@ public:
   void pause();
   void seek(PlaybackPosition position);
   [[nodiscard]] PresentationDecision update();
+  // Evaluate at an explicit source/playback position without using this session's transport as clock authority.
+  [[nodiscard]] PresentationDecision update_at(PlaybackPosition source_position);
 
   [[nodiscard]] PlaybackIntent intent() const noexcept {
     return intent_;
@@ -69,6 +71,8 @@ private:
   void handle_event(PlaybackWorkerEvent event);
   void handle_seek_complete(PlaybackWorkerSeekComplete complete);
   void request_read_if_needed(const PresentationDecision& decision);
+  [[nodiscard]] PresentationDecision update_at_impl(PlaybackPosition source_position,
+                                                    bool drive_transport);
   void request_seek_for_position(PlaybackPosition position, PlaybackAvailability availability);
   void set_error(std::string message);
   [[nodiscard]] StreamTimestamp stream_target_for(PlaybackPosition position) const;

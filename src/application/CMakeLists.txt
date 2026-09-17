@@ -9,6 +9,7 @@ add_library(pulsar_application
   src/playback/playback_time.cpp
   src/playback/playback_transport.cpp
   src/playback/playback_session.cpp
+  src/playback/timeline_playback_coordinator.cpp
   src/playback/presentation_scheduler.cpp
   src/playback/video_source.cpp
 )
