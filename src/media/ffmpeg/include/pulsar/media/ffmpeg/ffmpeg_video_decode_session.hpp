@@ -1,6 +1,7 @@
 #pragma once
 
 #include <pulsar/media/ffmpeg/decoded_video_frame_info.hpp>
+#include <pulsar/media/ffmpeg/decoded_visual_video_frame.hpp>
 #include <pulsar/media/ffmpeg/video_presentation_seek_result.hpp>
 #include <pulsar/media/ffmpeg/video_seek_result.hpp>
 
@@ -25,6 +26,10 @@ public:
   // The session owns one FFmpeg demuxer/decoder state machine. Use it from one thread at a time;
   // playback orchestration must not retain pointers/iterators into mutable Timeline data.
   [[nodiscard]] std::optional<DecodedVideoFrameInfo> decode_next();
+  // Returns a refcounted FFmpeg-backed visual frame lease. The lease remains valid after the
+  // next decode call and after this session is destroyed; callers still must not treat it as a
+  // general engine frame abstraction or hide CPU/GPU mapping behind implicit accessors.
+  [[nodiscard]] std::optional<DecodedVisualVideoFrame> decode_next_visual();
   [[nodiscard]] VideoSeekResult seek_to_stream_timestamp(domain::MediaTime target);
   [[nodiscard]] VideoPresentationSeekResult seek_to_presentation_timestamp(domain::MediaTime target);
   [[nodiscard]] int stream_index() const noexcept;

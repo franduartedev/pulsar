@@ -3,6 +3,7 @@
 #include <pulsar/application/playback/playback_session.hpp>
 #include <pulsar/domain/time/media_time.hpp>
 #include <pulsar/domain/time/rational.hpp>
+#include <pulsar/media/ffmpeg/decoded_visual_video_frame.hpp>
 #include <pulsar/media/ffmpeg/ffmpeg_playback_worker.hpp>
 #include <pulsar/media/ffmpeg/ffmpeg_video_decode_session.hpp>
 #include <pulsar/media/ffmpeg/media_decode_error.hpp>
@@ -41,6 +42,7 @@ using pulsar::application::PlaybackSession;
 using pulsar::application::PresentSample;
 using pulsar::application::PresentationDecision;
 using pulsar::application::StreamTimestamp;
+using pulsar::media::ffmpeg::DecodedVisualVideoFrame;
 using pulsar::media::ffmpeg::FFmpegPlaybackWorker;
 using pulsar::media::ffmpeg::FFmpegVideoDecodeSession;
 using pulsar::media::ffmpeg::MediaDecodeError;
@@ -368,6 +370,87 @@ bool ppm_decode_test(const std::filesystem::path& root) {
   return !session.decode_next().has_value();
 }
 
+bool visual_frame_lease_test(const std::filesystem::path& root) {
+  const auto ppm_path = root / "visual lease fixture.ppm";
+  write_ppm_fixture(ppm_path);
+
+  pulsar::media::ffmpeg::FFmpegVideoFrameLease retained_lease;
+  {
+    auto session = FFmpegVideoDecodeSession{ppm_path, 0};
+    const auto frame = session.decode_next_visual();
+    if (!frame.has_value()) {
+      return false;
+    }
+    if (frame->stream_index != 0 || !frame->frame.valid()) {
+      return false;
+    }
+    if (frame->image.coded_width != 16 || frame->image.coded_height != 16 ||
+        frame->image.visible_width != 16 || frame->image.visible_height != 16) {
+      return false;
+    }
+    if (!frame->image.pixel_format_name.has_value() || frame->image.pixel_format_name->empty()) {
+      return false;
+    }
+    if (frame->image.color_range.empty() || frame->image.color_primaries.empty() ||
+        frame->image.color_transfer.empty() || frame->image.color_matrix.empty()) {
+      return false;
+    }
+    if (frame->presentation_timestamp.has_value() &&
+        frame->presentation_timestamp->seconds() < pulsar::domain::Rational{0, 1}) {
+      return false;
+    }
+
+    retained_lease = frame->frame;
+    if (session.decode_next_visual().has_value()) {
+      return false;
+    }
+    if (!retained_lease.valid()) {
+      return false;
+    }
+  }
+
+  return retained_lease.valid();
+}
+
+bool visual_frame_timestamp_alignment_test(const std::filesystem::path& root) {
+  const auto fixture_path = root / "visual-timestamp-h264.mkv";
+  write_non_zero_start_h264_fixture(fixture_path);
+  const auto fixture = inspect_non_zero_start_fixture(fixture_path);
+
+  auto session = FFmpegVideoDecodeSession{fixture.path, 0};
+  const auto frame = session.decode_next_visual();
+  if (!frame.has_value() || !frame->frame.valid()) {
+    return false;
+  }
+  if (!frame->presentation_timestamp.has_value() ||
+      *frame->presentation_timestamp != fixture.timestamps.front()) {
+    return false;
+  }
+  if (frame->image.coded_width != fixture.width || frame->image.coded_height != fixture.height ||
+      frame->image.visible_width != fixture.width || frame->image.visible_height != fixture.height) {
+    return false;
+  }
+  if (!frame->image.pixel_format_name.has_value() || *frame->image.pixel_format_name != "yuv420p") {
+    return false;
+  }
+
+  DecodedVisualVideoFrame previous = *frame;
+  for (int index = 1; index < 20; ++index) {
+    const auto next = session.decode_next_visual();
+    if (!next.has_value() || !next->frame.valid() ||
+        !next->presentation_timestamp.has_value() ||
+        *next->presentation_timestamp != fixture.timestamps.at(static_cast<std::size_t>(index))) {
+      return false;
+    }
+    if (!previous.frame.valid()) {
+      return false;
+    }
+    previous = *next;
+  }
+
+  return previous.frame.valid();
+}
+
 bool audio_only_error_test(const std::filesystem::path& root) {
   const auto wav_path = root / "tiny audio fixture.wav";
   write_wav_fixture(wav_path);
@@ -676,6 +759,12 @@ int main() {
 
   if (!ppm_decode_test(root)) {
     return fail("ppm decode test");
+  }
+  if (!visual_frame_lease_test(root)) {
+    return fail("visual frame lease test");
+  }
+  if (!visual_frame_timestamp_alignment_test(root)) {
+    return fail("visual frame timestamp alignment test");
   }
   if (!audio_only_error_test(root)) {
     return fail("audio-only error test");

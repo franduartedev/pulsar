@@ -1,5 +1,7 @@
 #include <pulsar/media/ffmpeg/ffmpeg_video_decode_session.hpp>
 
+#include <pulsar/media/ffmpeg/decoded_visual_video_frame.hpp>
+
 #include <pulsar/media/ffmpeg/media_decode_error.hpp>
 
 #include "internal/ffmpeg_common.hpp"
@@ -121,6 +123,60 @@ using WideInt = __int128_t;
   return std::string{name};
 }
 
+[[nodiscard]] std::string color_range_name(AVColorRange range) {
+  const char* name = av_color_range_name(range);
+  if (name == nullptr) {
+    return "unknown";
+  }
+  return std::string{name};
+}
+
+[[nodiscard]] std::string color_primaries_name(AVColorPrimaries primaries) {
+  const char* name = av_color_primaries_name(primaries);
+  if (name == nullptr) {
+    return "unknown";
+  }
+  return std::string{name};
+}
+
+[[nodiscard]] std::string color_transfer_name(AVColorTransferCharacteristic transfer) {
+  const char* name = av_color_transfer_name(transfer);
+  if (name == nullptr) {
+    return "unknown";
+  }
+  return std::string{name};
+}
+
+[[nodiscard]] std::string color_matrix_name(AVColorSpace color_space) {
+  const char* name = av_color_space_name(color_space);
+  if (name == nullptr) {
+    return "unknown";
+  }
+  return std::string{name};
+}
+
+[[nodiscard]] std::optional<domain::Rational> sample_aspect_ratio(const AVFrame& frame) {
+  if (frame.sample_aspect_ratio.num <= 0 || frame.sample_aspect_ratio.den <= 0) {
+    return std::nullopt;
+  }
+  return domain::Rational{frame.sample_aspect_ratio.num, frame.sample_aspect_ratio.den};
+}
+
+[[nodiscard]] FFmpegVideoImageDescriptor image_descriptor(const AVFrame& frame) {
+  return FFmpegVideoImageDescriptor{
+      frame.width,
+      frame.height,
+      frame.width,
+      frame.height,
+      pixel_format_name(frame.format),
+      sample_aspect_ratio(frame),
+      color_range_name(frame.color_range),
+      color_primaries_name(frame.color_primaries),
+      color_transfer_name(frame.color_trc),
+      color_matrix_name(frame.colorspace),
+  };
+}
+
 [[nodiscard]] std::int64_t checked_to_int64(WideInt value) {
   if (value < static_cast<WideInt>(std::numeric_limits<std::int64_t>::min()) ||
       value > static_cast<WideInt>(std::numeric_limits<std::int64_t>::max())) {
@@ -194,6 +250,33 @@ using WideInt = __int128_t;
 
 } // namespace
 
+class FFmpegVideoFrameLease::Impl {
+public:
+  explicit Impl(FramePtr frame) noexcept : frame_{std::move(frame)} {}
+
+  [[nodiscard]] bool valid() const noexcept {
+    return frame_ != nullptr;
+  }
+
+private:
+  FramePtr frame_;
+};
+
+FFmpegVideoFrameLease::FFmpegVideoFrameLease() = default;
+FFmpegVideoFrameLease::~FFmpegVideoFrameLease() = default;
+FFmpegVideoFrameLease::FFmpegVideoFrameLease(const FFmpegVideoFrameLease&) noexcept = default;
+FFmpegVideoFrameLease& FFmpegVideoFrameLease::operator=(const FFmpegVideoFrameLease&) noexcept =
+    default;
+FFmpegVideoFrameLease::FFmpegVideoFrameLease(FFmpegVideoFrameLease&&) noexcept = default;
+FFmpegVideoFrameLease& FFmpegVideoFrameLease::operator=(FFmpegVideoFrameLease&&) noexcept =
+    default;
+FFmpegVideoFrameLease::FFmpegVideoFrameLease(std::shared_ptr<const Impl> impl) noexcept
+    : impl_{std::move(impl)} {}
+
+bool FFmpegVideoFrameLease::valid() const noexcept {
+  return impl_ != nullptr && impl_->valid();
+}
+
 class FFmpegVideoDecodeSession::Impl {
 public:
   Impl(const std::filesystem::path& path, int video_stream_index)
@@ -243,6 +326,34 @@ public:
 
     while (true) {
       if (auto frame = receive_pending_frame()) {
+        return frame;
+      }
+
+      if (state_ == State::Finished) {
+        return std::nullopt;
+      }
+
+      if (state_ == State::Draining) {
+        continue;
+      }
+
+      send_or_read_next_packet();
+    }
+  }
+
+  [[nodiscard]] std::optional<DecodedVisualVideoFrame> decode_next_visual() {
+    if (pending_decoded_frame_.has_value()) {
+      throw MediaDecodeError{
+          MediaDecodeErrorCode::DecodeFailed,
+          "FFmpeg visual decode cannot consume a metadata-only pending presentation seek frame"};
+    }
+
+    if (state_ == State::Finished) {
+      return std::nullopt;
+    }
+
+    while (true) {
+      if (auto frame = receive_pending_visual_frame()) {
         return frame;
       }
 
@@ -401,6 +512,47 @@ private:
                                ffmpeg_error_text(receive_result)};
   }
 
+  [[nodiscard]] std::optional<DecodedVisualVideoFrame> receive_pending_visual_frame() {
+    const int receive_result = avcodec_receive_frame(codec_context_.get(), frame_.get());
+    if (receive_result == 0) {
+      pending_send_was_blocked_ = false;
+      AVFrame* cloned_frame = av_frame_clone(frame_.get());
+      if (cloned_frame == nullptr) {
+        av_frame_unref(frame_.get());
+        throw MediaDecodeError{MediaDecodeErrorCode::DecodeFailed,
+                               "FFmpeg could not create a refcounted video frame lease"};
+      }
+
+      DecodedVisualVideoFrame visual_frame{
+          stream_index_,
+          image_descriptor(*frame_),
+          internal::convert_timestamp(frame_->best_effort_timestamp, stream_time_base_),
+          FFmpegVideoFrameLease{
+              std::make_shared<const FFmpegVideoFrameLease::Impl>(FramePtr{cloned_frame})},
+      };
+      av_frame_unref(frame_.get());
+      return visual_frame;
+    }
+
+    if (receive_result == AVERROR(EAGAIN)) {
+      if (pending_send_was_blocked_) {
+        throw MediaDecodeError{
+            MediaDecodeErrorCode::DecodeFailed,
+            "FFmpeg video decoder could neither receive a frame nor accept the pending packet"};
+      }
+      return std::nullopt;
+    }
+
+    if (receive_result == AVERROR_EOF) {
+      state_ = State::Finished;
+      return std::nullopt;
+    }
+
+    throw MediaDecodeError{MediaDecodeErrorCode::DecodeFailed,
+                           "FFmpeg video decoder failed while receiving visual frame: " +
+                               ffmpeg_error_text(receive_result)};
+  }
+
   void send_or_read_next_packet() {
     if (has_pending_packet_) {
       (void)send_pending_packet();
@@ -511,6 +663,10 @@ FFmpegVideoDecodeSession& FFmpegVideoDecodeSession::operator=(
 
 std::optional<DecodedVideoFrameInfo> FFmpegVideoDecodeSession::decode_next() {
   return impl_->decode_next();
+}
+
+std::optional<DecodedVisualVideoFrame> FFmpegVideoDecodeSession::decode_next_visual() {
+  return impl_->decode_next_visual();
 }
 
 VideoSeekResult FFmpegVideoDecodeSession::seek_to_stream_timestamp(domain::MediaTime target) {
