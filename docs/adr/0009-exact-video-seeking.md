@@ -10,7 +10,7 @@ M6 necesita responder "dame el frame correspondiente a este instante del medio" 
 
 ## Decisión
 
-`FFmpegVideoDecodeSession` expone `seek_to_stream_timestamp(MediaTime)`. El target es un timestamp absoluto en la coordenada temporal del stream de video seleccionado, no tiempo relativo de clip ni tiempo de UI. Esta decisión evita esconder `AVStream::start_time`: si FFmpeg informa start time, PULSAR lo expone como metadata diagnóstica; si es desconocido, queda ausente.
+`FFmpegVideoDecodeSession` expone `seek_to_stream_timestamp(MediaTime)`. El target es un timestamp absoluto de presentación en la coordenada temporal del stream de video seleccionado, no tiempo relativo de clip ni tiempo de UI. El adaptador FFmpeg no normaliza `AVStream::start_time` a cero: si FFmpeg informa start time, PULSAR lo expone como metadata diagnóstica; si es desconocido, queda ausente. Las capas futuras de clip/playback deben mapear su tiempo relativo de source/clip a timestamps absolutos del stream antes de llamar a esta API.
 
 La política de resultado es "primer frame con presentation timestamp mayor o igual al target". Frames sin `best_effort_timestamp` no sirven para decidir que el target fue alcanzado; se descartan lógicamente para la comparación y el decode continúa. Si se llega a EOF sin encontrar un frame adecuado, el resultado contiene `std::nullopt`.
 

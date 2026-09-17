@@ -4,13 +4,24 @@
 #include <pulsar/media/ffmpeg/ffmpeg_video_decode_session.hpp>
 #include <pulsar/media/ffmpeg/media_decode_error.hpp>
 
+extern "C" {
+#include <libavcodec/codec_id.h>
+#include <libavformat/avformat.h>
+}
+
+#include <chrono>
+#include <cstdlib>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <limits>
+#include <memory>
 #include <optional>
+#include <string>
 #include <string_view>
+#include <stdexcept>
+#include <vector>
 
 namespace {
 
@@ -19,6 +30,26 @@ using pulsar::application::MediaProbeErrorCode;
 using pulsar::media::ffmpeg::FFmpegVideoDecodeSession;
 using pulsar::media::ffmpeg::MediaDecodeError;
 using pulsar::media::ffmpeg::MediaDecodeErrorCode;
+
+struct NonZeroStartFixtureInfo {
+  std::filesystem::path path;
+  std::string container;
+  std::string codec;
+  int width;
+  int height;
+  pulsar::domain::Rational stream_time_base;
+  std::int64_t raw_start_time;
+  pulsar::domain::MediaTime stream_start_time;
+  std::vector<pulsar::domain::MediaTime> timestamps;
+};
+
+struct TestFormatContextDeleter {
+  void operator()(AVFormatContext* context) const noexcept {
+    if (context != nullptr) {
+      avformat_close_input(&context);
+    }
+  }
+};
 
 int fail(std::string_view message) {
   std::cerr << "ffmpeg video decode session test failed: " << message << '\n';
@@ -115,10 +146,109 @@ void write_ppm_fixture(const std::filesystem::path& path) {
   }
 }
 
+std::string shell_quote(const std::filesystem::path& path) {
+  std::string quoted{"'"};
+  for (const char character : path.string()) {
+    if (character == '\'') {
+      quoted += "'\\''";
+    } else {
+      quoted += character;
+    }
+  }
+  quoted += "'";
+  return quoted;
+}
+
 std::filesystem::path fixture_root() {
-  const auto root = std::filesystem::temp_directory_path() / "pulsar-ffmpeg-decode-tests";
+  const auto run_id = std::chrono::steady_clock::now().time_since_epoch().count();
+  const auto root = std::filesystem::temp_directory_path() / "pulsar-ffmpeg-decode-tests" /
+                    ("run-" + std::to_string(run_id));
   std::filesystem::create_directories(root);
   return root;
+}
+
+void write_non_zero_start_h264_fixture(const std::filesystem::path& path) {
+  const std::string command =
+      "ffmpeg -y -hide_banner -loglevel error -f lavfi "
+      "-i testsrc2=size=320x180:rate=25:duration=4 "
+      "-vf setpts=PTS+5/TB "
+      "-c:v libx264 -pix_fmt yuv420p -bf 2 -g 25 -keyint_min 25 "
+      "-sc_threshold 0 -preset veryfast -f matroska " +
+      shell_quote(path);
+
+  if (std::system(command.c_str()) != 0) {
+    throw std::runtime_error{"ffmpeg could not create non-zero start-time H.264 fixture"};
+  }
+}
+
+NonZeroStartFixtureInfo inspect_non_zero_start_fixture(const std::filesystem::path& path) {
+  AVFormatContext* raw_context = nullptr;
+  const std::string path_text = path.string();
+  if (avformat_open_input(&raw_context, path_text.c_str(), nullptr, nullptr) < 0) {
+    throw std::runtime_error{"could not open generated non-zero start-time fixture"};
+  }
+
+  std::unique_ptr<AVFormatContext, TestFormatContextDeleter> context{raw_context};
+  if (avformat_find_stream_info(context.get(), nullptr) < 0) {
+    throw std::runtime_error{"could not read generated fixture stream info"};
+  }
+  if (context->nb_streams == 0 || context->streams[0] == nullptr ||
+      context->streams[0]->codecpar == nullptr) {
+    throw std::runtime_error{"generated fixture has no inspectable video stream"};
+  }
+
+  const AVStream& stream = *context->streams[0];
+  const AVCodecParameters& codec_parameters = *stream.codecpar;
+  if (codec_parameters.codec_type != AVMEDIA_TYPE_VIDEO) {
+    throw std::runtime_error{"generated fixture stream is not video"};
+  }
+
+  const pulsar::domain::Rational time_base{stream.time_base.num, stream.time_base.den};
+  if (stream.start_time == AV_NOPTS_VALUE || stream.start_time == 0) {
+    throw std::runtime_error{"generated fixture did not preserve non-zero AVStream::start_time"};
+  }
+
+  auto session = FFmpegVideoDecodeSession{path, 0};
+  std::vector<pulsar::domain::MediaTime> timestamps;
+  while (auto frame = session.decode_next()) {
+    if (frame->presentation_timestamp.has_value()) {
+      timestamps.push_back(*frame->presentation_timestamp);
+    }
+  }
+  if (timestamps.size() < 50) {
+    throw std::runtime_error{"generated fixture did not decode enough timestamped frames"};
+  }
+
+  return NonZeroStartFixtureInfo{
+      path,
+      context->iformat != nullptr && context->iformat->name != nullptr
+          ? std::string{context->iformat->name}
+          : std::string{"unknown"},
+      std::string{avcodec_get_name(codec_parameters.codec_id)},
+      codec_parameters.width,
+      codec_parameters.height,
+      time_base,
+      stream.start_time,
+      pulsar::domain::MediaTime{stream.start_time, time_base},
+      std::move(timestamps),
+  };
+}
+
+pulsar::domain::MediaTime one_stream_tick_after(pulsar::domain::MediaTime time) {
+  return pulsar::domain::MediaTime{time.value() + 1, time.time_base()};
+}
+
+pulsar::domain::MediaTime one_stream_tick_before(pulsar::domain::MediaTime time) {
+  return pulsar::domain::MediaTime{time.value() - 1, time.time_base()};
+}
+
+bool seek_returns_timestamp(const std::filesystem::path& path,
+                            pulsar::domain::MediaTime target,
+                            pulsar::domain::MediaTime expected_timestamp) {
+  auto session = FFmpegVideoDecodeSession{path, 0};
+  const auto result = session.seek_to_stream_timestamp(target);
+  return result.frame.has_value() && result.frame->presentation_timestamp.has_value() &&
+         *result.frame->presentation_timestamp == expected_timestamp;
 }
 
 bool ppm_decode_test(const std::filesystem::path& root) {
@@ -283,6 +413,93 @@ bool invalid_seek_target_test(const std::filesystem::path& root) {
       MediaDecodeErrorCode::InvalidSeekTarget);
 }
 
+bool non_zero_start_time_seek_test(const std::filesystem::path& root) {
+  const auto fixture_path = root / "nonzero-start-time-h264.mkv";
+  write_non_zero_start_h264_fixture(fixture_path);
+  const auto fixture = inspect_non_zero_start_fixture(fixture_path);
+
+  if (fixture.container != "matroska,webm" || fixture.codec != "h264" || fixture.width != 320 ||
+      fixture.height != 180 || fixture.stream_time_base != pulsar::domain::Rational{1, 1000}) {
+    return false;
+  }
+  if (fixture.raw_start_time == 0 || fixture.stream_start_time != fixture.timestamps.front()) {
+    return false;
+  }
+
+  const auto first_timestamp = fixture.timestamps.front();
+  const auto exact_interior = fixture.timestamps.at(37);
+  if (!seek_returns_timestamp(fixture.path, first_timestamp, first_timestamp)) {
+    return false;
+  }
+  if (!seek_returns_timestamp(fixture.path, exact_interior, exact_interior)) {
+    return false;
+  }
+
+  const auto lower_timestamp = fixture.timestamps.at(37);
+  const auto upper_timestamp = fixture.timestamps.at(38);
+  const auto between_frames = one_stream_tick_after(lower_timestamp);
+  if (!(lower_timestamp < between_frames && between_frames < upper_timestamp)) {
+    return false;
+  }
+  if (!seek_returns_timestamp(fixture.path, between_frames, upper_timestamp)) {
+    return false;
+  }
+
+  const auto before_first = one_stream_tick_before(first_timestamp);
+  if (!seek_returns_timestamp(fixture.path, before_first, first_timestamp)) {
+    return false;
+  }
+
+  const auto near_final = fixture.timestamps.at(fixture.timestamps.size() - 3);
+  {
+    auto session = FFmpegVideoDecodeSession{fixture.path, 0};
+    const auto result = session.seek_to_stream_timestamp(near_final);
+    if (!result.frame.has_value() || !result.frame->presentation_timestamp.has_value() ||
+        *result.frame->presentation_timestamp < near_final) {
+      return false;
+    }
+  }
+
+  const auto after_final = one_stream_tick_after(fixture.timestamps.back());
+  {
+    auto session = FFmpegVideoDecodeSession{fixture.path, 0};
+    const auto result = session.seek_to_stream_timestamp(after_final);
+    if (result.frame.has_value() || session.decode_next().has_value()) {
+      return false;
+    }
+  }
+
+  {
+    auto session = FFmpegVideoDecodeSession{fixture.path, 0};
+    const auto no_result = session.seek_to_stream_timestamp(after_final);
+    if (no_result.frame.has_value()) {
+      return false;
+    }
+
+    const auto valid_after_no_result = session.seek_to_stream_timestamp(exact_interior);
+    if (!valid_after_no_result.frame.has_value() ||
+        !valid_after_no_result.frame->presentation_timestamp.has_value() ||
+        *valid_after_no_result.frame->presentation_timestamp != exact_interior) {
+      return false;
+    }
+  }
+
+  {
+    auto session = FFmpegVideoDecodeSession{fixture.path, 0};
+    while (session.decode_next().has_value()) {
+    }
+
+    const auto valid_after_eof = session.seek_to_stream_timestamp(exact_interior);
+    if (!valid_after_eof.frame.has_value() ||
+        !valid_after_eof.frame->presentation_timestamp.has_value() ||
+        *valid_after_eof.frame->presentation_timestamp != exact_interior) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
 } // namespace
 
 int main() {
@@ -317,6 +534,9 @@ int main() {
   }
   if (!invalid_seek_target_test(root)) {
     return fail("invalid seek target test");
+  }
+  if (!non_zero_start_time_seek_test(root)) {
+    return fail("non-zero start-time seek test");
   }
 
   return 0;
