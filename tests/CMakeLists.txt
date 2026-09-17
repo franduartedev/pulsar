@@ -71,6 +71,21 @@ pulsar_apply_compiler_warnings(pulsar_playback_transport_tests)
 
 add_test(NAME pulsar.application.playback_transport COMMAND pulsar_playback_transport_tests)
 
+add_executable(pulsar_presentation_scheduler_tests
+  application/presentation_scheduler_test.cpp
+)
+
+target_link_libraries(pulsar_presentation_scheduler_tests
+  PRIVATE
+    pulsar::application
+    pulsar::domain
+)
+
+pulsar_apply_project_options(pulsar_presentation_scheduler_tests)
+pulsar_apply_compiler_warnings(pulsar_presentation_scheduler_tests)
+
+add_test(NAME pulsar.application.presentation_scheduler COMMAND pulsar_presentation_scheduler_tests)
+
 if(NOT PULSAR_BUILD_FFMPEG)
   return()
 endif()
