@@ -3,6 +3,8 @@ import "../theme/Theme.js" as Theme
 
 // Program transport strip: timeline position with a precise, quiet seek control.
 Panel {
+    border.width: 0
+    radius: 0
     id: strip
 
     Row {

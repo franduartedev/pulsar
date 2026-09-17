@@ -58,7 +58,6 @@ Window {
         anchors.left: parent.left
         anchors.top: header.bottom
         anchors.bottom: scrubber.top
-        anchors.margins: 12
         width: root.mediaWidth
     }
 
@@ -67,9 +66,11 @@ Window {
         anchors.right: parent.right
         anchors.top: header.bottom
         anchors.bottom: scrubber.top
-        anchors.margins: 12
         width: root.inspectorWidth
     }
+
+    Rectangle { anchors.left: mediaPanel.right; anchors.top: header.bottom; anchors.bottom: scrubber.top; width: 1; color: Theme.border; opacity: 0.65; z: 3 }
+    Rectangle { anchors.right: inspector.left; anchors.top: header.bottom; anchors.bottom: scrubber.top; width: 1; color: Theme.border; opacity: 0.65; z: 3 }
 
     Rectangle {
         id: monitor
@@ -77,10 +78,9 @@ Window {
         anchors.right: inspector.left
         anchors.top: header.bottom
         anchors.bottom: scrubber.top
-        anchors.margins: 12
         color: Theme.monitor
-        border.color: Theme.edge
-        radius: Theme.radiusM
+        border.width: 0
+        radius: 0
         Column {
             anchors.fill: parent
             anchors.margins: 1

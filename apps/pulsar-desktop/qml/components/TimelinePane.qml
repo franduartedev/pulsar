@@ -2,6 +2,8 @@ import QtQuick
 import "../theme/Theme.js" as Theme
 
 Panel {
+    border.width: 0
+    radius: 0
     id: pane
     property real gutterWidth: 58
 
