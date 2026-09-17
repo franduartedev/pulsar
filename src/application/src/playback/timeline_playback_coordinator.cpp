@@ -19,6 +19,7 @@ void TimelinePlaybackCoordinator::set_snapshot(ProjectSnapshot snapshot) {
   segment_kind_ = SegmentKind::None;
   current_presentation_.reset();
   source_creation_error_.reset();
+  active_clip_.reset();
   active_missing_.reset();
   segment_end_.reset();
   const auto outcome = resolve_clip_at(*snapshot_, snapshot_->video_track_id, position);

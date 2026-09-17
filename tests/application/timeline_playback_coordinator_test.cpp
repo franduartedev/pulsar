@@ -357,6 +357,32 @@ void rapid_same_source_seek_uses_latest_completion() {
   assert(fixture.requested_targets.back() == time(7) + time(5));
 }
 
+void snapshot_change_resets_active_clip_identity() {
+  Fixture fixture;
+  const domain::ClipId first_id =
+      fixture.processor.add_clip(fixture.media_one, TimeRange{time(0), time(10)}, time(0));
+  FakeClock clock;
+  TimelinePlaybackCoordinator coordinator{clock, fixture.factory()};
+  coordinator.set_snapshot(fixture.document.snapshot());
+  auto presentation = coordinator.update();
+  assert(std::holds_alternative<TimelinePresentSample>(presentation));
+  assert(std::get<TimelinePresentSample>(presentation).clip_id == first_id);
+  assert(fixture.factory_calls == 1);
+
+  // Removing and re-adding consumes a fresh ClipId for the same media (no ID reuse).
+  fixture.processor.remove_clip(first_id);
+  const domain::ClipId second_id =
+      fixture.processor.add_clip(fixture.media_one, TimeRange{time(0), time(10)}, time(0));
+  assert(second_id != first_id);
+  coordinator.set_snapshot(fixture.document.snapshot());
+  presentation = coordinator.update();
+  // The new snapshot must establish the new clip identity with a fresh session:
+  // the stale clip must neither be presented nor have its session reused.
+  assert(std::holds_alternative<TimelinePresentSample>(presentation));
+  assert(std::get<TimelinePresentSample>(presentation).clip_id == second_id);
+  assert(fixture.factory_calls == 2);
+}
+
 } // namespace
 
 int main() {
@@ -369,4 +395,5 @@ int main() {
   snapshot_replacement_invalidates_old_session();
   canonical_end_position_and_snapshot_shrink();
   rapid_same_source_seek_uses_latest_completion();
+  snapshot_change_resets_active_clip_identity();
 }
