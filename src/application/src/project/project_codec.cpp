@@ -133,6 +133,9 @@ domain::MediaTime media_time(const std::vector<Token>& tokens, std::size_t& inde
 }
 
 std::string quote(std::string_view value) {
+  if (value.size() > max_string_size) {
+    throw ProjectCodecError{"quoted string exceeds size limit"};
+  }
   static constexpr char hex[] = "0123456789ABCDEF";
   std::string result{"\""};
   for (const unsigned char byte : value) {
@@ -173,6 +176,13 @@ std::vector<const domain::Track*> sorted_tracks(const domain::Timeline& timeline
 } // namespace
 
 std::string ProjectCodec::encode(const ProjectSnapshot& snapshot) {
+  const std::size_t record_count = 1 + 1 + snapshot.timeline.tracks().size() + 1 +
+                                   snapshot.assets.size();
+  std::size_t clip_count = 0;
+  for (const auto& track : snapshot.timeline.tracks()) clip_count += track.clips().size();
+  if (record_count + clip_count + 2 > max_records) {
+    throw ProjectCodecError{"project exceeds record limit"};
+  }
   std::ostringstream output;
   output << "PULSAR_PROJECT 1\n";
   output << "TIMELINE " << snapshot.timeline.id().value() << "\n";
@@ -227,7 +237,16 @@ std::string ProjectCodec::encode(const ProjectSnapshot& snapshot) {
          << snapshot.allocator_state.next_clip_id << ' '
          << snapshot.allocator_state.next_timeline_id << ' '
          << snapshot.allocator_state.next_track_id << "\nEND\n";
-  return output.str();
+  const std::string encoded = output.str();
+  std::size_t offset = 0;
+  while (offset < encoded.size()) {
+    const auto newline = encoded.find('\n', offset);
+    const auto length = (newline == std::string::npos ? encoded.size() : newline) - offset;
+    if (length > max_line_size) throw ProjectCodecError{"encoded line exceeds size limit"};
+    if (newline == std::string::npos) break;
+    offset = newline + 1;
+  }
+  return encoded;
 }
 
 ProjectRestoreState ProjectCodec::decode(std::string_view bytes) {
@@ -250,7 +269,10 @@ ProjectRestoreState ProjectCodec::decode(std::string_view bytes) {
     offset = last ? bytes.size() + 1 : newline + 1;
     ++line_number;
     if (line.empty()) {
-      if (last || ended) break;
+      if (ended) {
+        if (last) break;
+        continue;
+      }
       parse_fail(line_number, "blank lines are not allowed");
     }
     if (++records > max_records) parse_fail(line_number, "record limit exceeded");
@@ -291,7 +313,7 @@ ProjectRestoreState ProjectCodec::decode(std::string_view bytes) {
         video_track = true;
         section = Section::Assets;
       } else if (tokens[0].text == "ASSET") {
-        if (!video_track || (section != Section::Assets && section != Section::Clips) || (tokens.size() != 14 && tokens.size() != 15)) parse_fail(line_number, "invalid ASSET");
+        if (!video_track || (section != Section::Assets) || (tokens.size() != 14 && tokens.size() != 15)) parse_fail(line_number, "invalid ASSET");
         std::size_t i = 1;
         const auto id = domain::MediaId{unsigned_number(tokens[i++], line_number, "media id")};
         const int stream = int_number(tokens[i++], line_number, "stream index");
@@ -305,7 +327,7 @@ ProjectRestoreState ProjectCodec::decode(std::string_view bytes) {
         const auto tb_den = signed_number(tokens[i++], line_number, "time base denominator");
         domain::Rational time_base{tb_num, tb_den};
         std::optional<domain::FrameRate> fps;
-        if (tokens[i].text != "-") {
+        if (tokens[i].quoted || tokens[i].text != "-") {
           const auto fps_num = signed_number(tokens[i++], line_number, "fps numerator");
           if (i >= tokens.size()) parse_fail(line_number, "missing fps denominator");
           const auto fps_den = signed_number(tokens[i++], line_number, "fps denominator");
@@ -315,7 +337,7 @@ ProjectRestoreState ProjectCodec::decode(std::string_view bytes) {
         }
         std::optional<std::string> container;
         if (i >= tokens.size() || (tokens[i].text != "-" && !tokens[i].quoted)) parse_fail(line_number, "invalid container");
-        if (tokens[i].text != "-") container = tokens[i].text;
+        if (tokens[i].quoted || tokens[i].text != "-") container = tokens[i].text;
         ++i;
         if (i != tokens.size()) parse_fail(line_number, "extra ASSET fields");
         state.assets.emplace_back(id, locator, stream, duration,

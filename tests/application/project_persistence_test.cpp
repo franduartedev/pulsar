@@ -10,6 +10,7 @@
 #include <iterator>
 #include <limits>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -97,6 +98,127 @@ void strict_decode_rejects_malformed_input() {
   }
 }
 
+void strict_m9_5_regressions() {
+  const auto good = ProjectCodec::encode(make_document().snapshot());
+  auto expect_decode_reject = [](const std::string& text) {
+    bool rejected = false;
+    try {
+      (void)ProjectCodec::decode(text);
+    } catch (const ProjectCodecError&) {
+      rejected = true;
+    }
+    assert(rejected);
+  };
+  auto expect_restore_reject = [](const std::string& text) {
+    bool rejected = false;
+    try {
+      (void)ProjectDocument::restore(ProjectCodec::decode(text));
+    } catch (const std::exception&) {
+      rejected = true;
+    }
+    assert(rejected);
+  };
+
+  expect_decode_reject(good + "\nGARBAGE\n");
+  expect_decode_reject(good + "\n\nGARBAGE\n");
+  (void)ProjectCodec::decode(good + "\n\n\n");
+  const auto first_asset = good.find("ASSET ");
+  assert(first_asset != std::string::npos);
+  const auto first_asset_end = good.find('\n', first_asset);
+  assert(first_asset_end != std::string::npos);
+  const auto clip_line = good.find("CLIP ");
+  assert(clip_line != std::string::npos);
+  const auto clip_newline = good.find('\n', clip_line);
+  assert(clip_newline != std::string::npos);
+  const auto asset_after_clip = good.substr(0, first_asset) +
+                                good.substr(first_asset_end + 1, clip_newline - first_asset_end - 1) +
+                                good.substr(first_asset, first_asset_end - first_asset + 1) +
+                                good.substr(clip_newline + 1);
+  expect_decode_reject(asset_after_clip);
+
+  auto duplicate_media = good;
+  const auto second_asset = duplicate_media.find("ASSET ", duplicate_media.find("ASSET ") + 1);
+  assert(second_asset != std::string::npos);
+  duplicate_media.replace(second_asset + 6, 1, "1");
+  expect_restore_reject(duplicate_media);
+
+  auto duplicate_clip = good;
+  const auto second_clip = duplicate_clip.find("CLIP ", duplicate_clip.find("CLIP ") + 1);
+  assert(second_clip != std::string::npos);
+  duplicate_clip.replace(second_clip + 5, 1, "1");
+  expect_restore_reject(duplicate_clip);
+
+  auto overlap = good;
+  const auto second_clip_line = overlap.find("CLIP ", overlap.find("CLIP ") + 1);
+  const auto second_clip_end = overlap.find('\n', second_clip_line);
+  const auto timeline_start = overlap.rfind(" 4 1 1", second_clip_end);
+  assert(timeline_start != std::string::npos);
+  overlap.replace(timeline_start, 6, " 0 1 1");
+  expect_restore_reject(overlap);
+
+  auto unknown_track = good;
+  const auto first_clip = unknown_track.find("CLIP ");
+  assert(first_clip != std::string::npos);
+  unknown_track.replace(first_clip + 7, 1, "9");
+  expect_restore_reject(unknown_track);
+
+  auto unknown_media = good;
+  unknown_media.replace(first_clip + 9, 1, "9");
+  expect_restore_reject(unknown_media);
+
+  auto low_allocator = good;
+  const auto allocator_line = low_allocator.find("ALLOCATOR ");
+  assert(allocator_line != std::string::npos);
+  low_allocator.replace(allocator_line + 10, 1, "2");
+  expect_restore_reject(low_allocator);
+
+  auto quoted_dash = make_document().snapshot();
+  auto metadata = quoted_dash.assets.front().metadata();
+  metadata.container_name = "-";
+  const auto& original = quoted_dash.assets.front();
+  quoted_dash.assets.front() = application::MediaAsset{
+      original.id(), original.source_locator(), original.video_stream_index(),
+      original.playable_duration(), metadata, original.availability(), original.availability_reason()};
+  const auto dash_bytes = ProjectCodec::encode(quoted_dash);
+  assert(dash_bytes.find(" \"-\"") != std::string::npos);
+  assert(ProjectCodec::encode(ProjectDocument::restore(ProjectCodec::decode(dash_bytes)).snapshot()) ==
+         dash_bytes);
+
+  auto oversized = make_document().snapshot();
+  auto oversized_metadata = oversized.assets.front().metadata();
+  oversized.assets.front() = application::MediaAsset{
+      oversized.assets.front().id(), std::string(65 * 1024, 'x'),
+      oversized.assets.front().video_stream_index(), oversized.assets.front().playable_duration(),
+      oversized_metadata};
+  bool limit_rejected = false;
+  try {
+    (void)ProjectCodec::encode(oversized);
+  } catch (const ProjectCodecError&) {
+    limit_rejected = true;
+  }
+  assert(limit_rejected);
+}
+
+void edited_state_and_saved_snapshot_regressions() {
+  ProjectDocument document;
+  CommandProcessor processor{document};
+  FakeProbe probe;
+  const auto media = processor.import_asset("source.mp4", probe);
+  const auto clip = processor.add_clip(media, TimeRange{t(0), t(10)}, t(0));
+  processor.move_clip(clip, document.video_track_id(), t(2));
+  processor.trim_clip_start(clip, t(4));
+  const auto right = processor.split_clip(clip, t(8));
+  assert(right == domain::ClipId{2});
+  const auto snapshot = document.snapshot();
+  const auto roundtrip = ProjectDocument::restore(ProjectCodec::decode(ProjectCodec::encode(snapshot)));
+  assert(ProjectCodec::encode(roundtrip.snapshot()) == ProjectCodec::encode(snapshot));
+  document.mark_history_state_saved(snapshot.history_state_id);
+  processor.move_clip(clip, document.video_track_id(), t(20));
+  assert(document.is_dirty());
+  document.mark_history_state_saved(snapshot.history_state_id);
+  assert(document.is_dirty());
+}
+
 void allocator_high_water_and_restore_validation() {
   auto document = make_document();
   auto snapshot = document.snapshot();
@@ -158,6 +280,24 @@ void repository_atomic_save_and_missing_media_refresh() {
   auto restored = ProjectDocument::restore(missing);
   assert(restored.timeline().find_clip(domain::ClipId{1}) != nullptr);
   assert(restored.timeline().duration() == t(2));
+  const auto relative_root = root / "relative";
+  std::filesystem::create_directories(relative_root / "media");
+  const auto relative_media = relative_root / "media" / "clip.mp4";
+  const auto relative_project = relative_root / "relative.pulsar";
+  { std::ofstream output{relative_media}; output << "media"; }
+  ProjectDocument relative_document;
+  CommandProcessor relative_processor{relative_document};
+  const auto relative_id = relative_processor.import_asset("media/clip.mp4", FakeProbe{});
+  (void)relative_processor.add_clip(relative_id, TimeRange{t(0), t(2)}, t(0));
+  assert(repository.save(relative_project, relative_document.snapshot()).status == ProjectSaveStatus::Durable);
+  const auto relative_loaded = repository.load(relative_project);
+  assert(relative_loaded.assets.front().source_locator() == std::filesystem::path{"media/clip.mp4"});
+  assert(relative_loaded.assets.front().availability() == application::MediaAvailability::Available);
+  std::filesystem::remove(relative_media);
+  const auto relative_missing = repository.load(relative_project);
+  assert(relative_missing.assets.front().source_locator() == std::filesystem::path{"media/clip.mp4"});
+  assert(relative_missing.assets.front().availability() == application::MediaAvailability::Unavailable);
+
   std::filesystem::remove_all(root);
 }
 
@@ -167,6 +307,8 @@ int main() {
   codec_roundtrip_and_canonical_output();
   golden_fixture_decodes();
   strict_decode_rejects_malformed_input();
+  strict_m9_5_regressions();
+  edited_state_and_saved_snapshot_regressions();
   allocator_high_water_and_restore_validation();
   repository_atomic_save_and_missing_media_refresh();
 }
