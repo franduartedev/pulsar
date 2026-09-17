@@ -7,13 +7,13 @@ import "../theme/Theme.js" as Theme
 Item {
     id: pane
 
-    Text { id: originLabel; anchors.left: parent.left; anchors.leftMargin: 12; anchors.verticalCenter: chromeCenter; text: "PROGRAMA"; color: Theme.faint; font.pixelSize: Theme.fontSizeS; font.letterSpacing: 1.5 }
+    Text { id: originLabel; anchors.left: parent.left; anchors.leftMargin: 12; anchors.verticalCenter: chromeCenter.verticalCenter; text: "PROGRAMA"; color: Theme.faint; font.pixelSize: Theme.fontSizeS; font.letterSpacing: 1.5 }
     Text {
         anchors.left: originLabel.right
         anchors.right: badgeRow.left
         anchors.leftMargin: 12
         anchors.rightMargin: 12
-        anchors.verticalCenter: chromeCenter
+        anchors.verticalCenter: chromeCenter.verticalCenter
         text: controller.hasMedia ? controller.mediaName : "SIN SEÑAL"
         color: Theme.muted
         font.pixelSize: Theme.fontSizeS
@@ -23,7 +23,7 @@ Item {
         id: badgeRow
         anchors.right: parent.right
         anchors.rightMargin: 12
-        anchors.verticalCenter: chromeCenter
+        anchors.verticalCenter: chromeCenter.verticalCenter
         spacing: 6
         StatusDot { anchors.verticalCenter: parent.verticalCenter; tone: controller.previewLate ? "error" : (controller.hasMedia ? "live" : "idle") }
         Text { anchors.verticalCenter: parent.verticalCenter; text: controller.previewLate ? "PREVIEW LATE" : "CPU"; color: controller.previewLate ? Theme.danger : Theme.muted; font.pixelSize: Theme.fontSizeS; font.letterSpacing: 1 }
@@ -40,8 +40,9 @@ Item {
         anchors.rightMargin: 10
         anchors.bottomMargin: 10
         color: Theme.viewer
-        border.color: "#000000"
+        border.color: Theme.border
         border.width: 1
+        radius: Theme.radiusS
         clip: true
 
         Image { anchors.fill: parent; anchors.margins: 1; source: controller.previewSource; cache: false; fillMode: Image.PreserveAspectFit; visible: controller.previewSource.length > 0 }

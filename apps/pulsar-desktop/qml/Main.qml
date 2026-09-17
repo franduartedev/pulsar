@@ -108,7 +108,7 @@ Window {
         anchors.leftMargin: 10
         anchors.rightMargin: 10
         anchors.bottomMargin: 10
-        height: 142
+        height: 172
     }
 
     StatusBar {

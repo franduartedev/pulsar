@@ -7,8 +7,8 @@ Item {
     property bool dragging: false
     width: 12
     x: Math.max(0, Math.min(parent.width - width, progress * parent.width - width / 2))
-    Rectangle { anchors.horizontalCenter: parent.horizontalCenter; width: 1; height: parent.height; color: Theme.accentHover }
-    Rectangle { anchors.top: parent.top; anchors.horizontalCenter: parent.horizontalCenter; width: 9; height: 9; color: Theme.accentHover; rotation: 45 }
+    Rectangle { anchors.horizontalCenter: parent.horizontalCenter; width: 2; height: parent.height; color: Theme.accentHover; opacity: 0.95 }
+    Rectangle { anchors.top: parent.top; anchors.horizontalCenter: parent.horizontalCenter; width: 11; height: 11; color: Theme.accentHover; border.color: Theme.textBright; border.width: 1; rotation: 45 }
     MouseArea {
         id: hit
         anchors.fill: parent

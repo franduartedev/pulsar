@@ -25,13 +25,14 @@ Rectangle {
 
     x: canonicalStartX + previewOffset
     width: Math.max(3, canonicalWidth + trimWidthDelta)
-    color: missing ? "#3a2024" : (selected ? Theme.accentDim : Theme.buttonBase)
-    border.color: missing ? Theme.danger : (selected ? Theme.accent : Theme.border)
+    color: missing ? "#302126" : (selected ? Theme.clipSelected : (body.containsMouse ? Theme.clipHover : Theme.clipBase))
+    border.color: missing ? Theme.danger : (selected ? Theme.accent : (body.containsMouse ? Theme.edge : Theme.border))
     border.width: selected ? 2 : 1
-    radius: 3
+    radius: Theme.radiusS
 
-    Text { anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top; anchors.margins: 7; text: block.clipName; color: Theme.textBright; font.pixelSize: Theme.fontSizeS; elide: Text.ElideRight }
-    Text { anchors.left: parent.left; anchors.bottom: parent.bottom; anchors.margins: 7; text: block.missing ? "OFFLINE" : block.startText; color: block.missing ? Theme.danger : Theme.muted; font.pixelSize: Theme.fontSizeXS; font.family: "monospace" }
+    Rectangle { anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top; height: 2; color: missing ? Theme.danger : (selected ? Theme.accent : Theme.edge); opacity: selected || missing ? 0.9 : 0.5 }
+    Text { anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top; anchors.margins: 7; text: block.clipName; color: Theme.textBright; font.pixelSize: Theme.fontSizeS; font.bold: block.selected; elide: Text.ElideRight }
+    Text { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; anchors.leftMargin: 7; anchors.rightMargin: 7; anchors.bottomMargin: 6; text: block.missing ? "OFFLINE  ·  " + block.startText : block.startText + "  →  " + block.endText; color: block.missing ? Theme.danger : Theme.muted; font.pixelSize: Theme.fontSizeXS; font.family: "monospace"; elide: Text.ElideRight }
 
     Rectangle {
         id: leftHandle
@@ -108,6 +109,7 @@ Rectangle {
         anchors.leftMargin: leftHandle.width
         anchors.rightMargin: rightHandle.width
         preventStealing: true
+        hoverEnabled: true
         onPressed: {
             block.pressTimelineX = block.timelineX(parent, mouse)
             block.moveDragging = false

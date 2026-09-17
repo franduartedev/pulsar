@@ -14,7 +14,7 @@ Rectangle {
         spacing: 10
         Text { anchors.verticalCenter: parent.verticalCenter; text: "PULSAR"; color: Theme.text; font.pixelSize: 15; font.bold: true; font.letterSpacing: 2 }
         Rectangle { anchors.verticalCenter: parent.verticalCenter; width: 1; height: 13; color: Theme.border }
-        Text { anchors.verticalCenter: parent.verticalCenter; text: "MEDIA VIEWER"; color: Theme.muted; font.pixelSize: Theme.fontSizeS; font.letterSpacing: 1.5 }
+        Text { anchors.verticalCenter: parent.verticalCenter; text: "EDIT SUITE"; color: Theme.muted; font.pixelSize: Theme.fontSizeS; font.letterSpacing: 1.5 }
     }
     Row {
         anchors.right: parent.right
