@@ -30,6 +30,7 @@ Panel {
         anchors.bottomMargin: 6
 
         property real pos: Math.max(0, Math.min(1, controller.progress))
+        property bool interactive: controller.hasMedia && !controller.busy
 
         Rectangle {
             anchors.left: parent.left
@@ -38,7 +39,7 @@ Panel {
             height: 4
             radius: 2
             color: Theme.track
-            opacity: enabled ? 1.0 : 0.6
+            opacity: track.interactive ? 1.0 : 0.6
         }
         Rectangle {
             anchors.left: parent.left
@@ -46,26 +47,26 @@ Panel {
             width: Math.max(0, Math.min(parent.width, parent.width * track.pos))
             height: 4
             radius: 2
-            color: enabled ? Theme.accent : Theme.muted
-            opacity: enabled ? 0.85 : 0.5
+            color: track.interactive ? Theme.accent : Theme.muted
+            opacity: track.interactive ? 0.85 : 0.5
         }
         Rectangle {
             x: Math.max(0, Math.min(parent.width - width, parent.width * track.pos - width / 2))
             anchors.verticalCenter: parent.verticalCenter
-            width: enabled && (hit.containsMouse || hit.pressed) ? 10 : 2
-            height: enabled && (hit.containsMouse || hit.pressed) ? 10 : 14
-            radius: enabled && (hit.containsMouse || hit.pressed) ? 5 : 1
-            color: enabled ? Theme.textBright : Theme.muted
-            opacity: enabled ? 1.0 : 0.5
-            border.color: enabled && (hit.containsMouse || hit.pressed) ? Theme.accent : "transparent"
-            border.width: enabled && (hit.containsMouse || hit.pressed) ? 2 : 0
+            width: track.interactive && (hit.containsMouse || hit.pressed) ? 10 : 2
+            height: track.interactive && (hit.containsMouse || hit.pressed) ? 10 : 14
+            radius: track.interactive && (hit.containsMouse || hit.pressed) ? 5 : 1
+            color: track.interactive ? Theme.textBright : Theme.muted
+            opacity: track.interactive ? 1.0 : 0.5
+            border.color: track.interactive && (hit.containsMouse || hit.pressed) ? Theme.accent : "transparent"
+            border.width: track.interactive && (hit.containsMouse || hit.pressed) ? 2 : 0
         }
 
         MouseArea {
             id: hit
             anchors.fill: parent
             hoverEnabled: true
-            enabled: controller.hasMedia && !controller.busy
+            enabled: track.interactive
             onPressed: seek(mouse.x)
             onPositionChanged: if (pressed) seek(mouse.x)
             function seek(px) {

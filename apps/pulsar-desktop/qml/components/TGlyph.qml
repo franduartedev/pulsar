@@ -53,4 +53,5 @@ Item {
     }
 
     onKindChanged: canvas.requestPaint()
+    onInkChanged: canvas.requestPaint()
 }
