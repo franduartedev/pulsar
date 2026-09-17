@@ -6,6 +6,7 @@
 #include <pulsar/media/ffmpeg/decoded_visual_video_frame.hpp>
 #include <pulsar/media/ffmpeg/ffmpeg_playback_worker.hpp>
 #include <pulsar/media/ffmpeg/ffmpeg_playback_visual_mailbox.hpp>
+#include <pulsar/media/ffmpeg/detail/playback_worker_event_queue.hpp>
 #include <pulsar/media/ffmpeg/ffmpeg_preview_converter.hpp>
 #include <pulsar/media/ffmpeg/ffmpeg_video_decode_session.hpp>
 #include <pulsar/media/ffmpeg/media_decode_error.hpp>
@@ -15,6 +16,7 @@ extern "C" {
 #include <libavformat/avformat.h>
 }
 
+#include <atomic>
 #include <chrono>
 #include <cstdlib>
 #include <cstdint>
@@ -348,6 +350,42 @@ pulsar::domain::MediaTime playback_position_for_stream_time(pulsar::domain::Medi
   return stream_time - origin;
 }
 
+
+
+bool queue_contract_test() {
+  using Queue = pulsar::media::ffmpeg::detail::PlaybackWorkerEventQueue;
+  using namespace pulsar::application;
+  const auto sample = [](std::uint64_t ordinal) {
+    return PlaybackWorkerEvent{PlaybackWorkerSample{1, VideoSample{ordinal, std::nullopt, std::nullopt}}};
+  };
+  const auto seek = [] { return PlaybackWorkerEvent{PlaybackWorkerSeekComplete{1, VideoSeekBeforeFirst{std::nullopt}}}; };
+  const auto error = [] { return PlaybackWorkerEvent{PlaybackWorkerError{1, VideoSourceError{"error"}}}; };
+  const auto eof = [] { return PlaybackWorkerEvent{PlaybackWorkerEndOfStream{1, VideoSourceEndOfStream{std::nullopt, true}}}; };
+  const auto cancelled = [] { return PlaybackWorkerEvent{PlaybackWorkerCancelled{1}}; };
+
+  { Queue q{1}; q.enqueue(sample(1)); q.enqueue(sample(2)); const auto e = q.pop();
+    if (!e || !std::holds_alternative<PlaybackWorkerSample>(*e) || std::get<PlaybackWorkerSample>(*e).sample.ordinal != 2 || q.stats().high_water_mark > 1) return false; }
+  { Queue q{1}; q.enqueue(seek()); q.enqueue(sample(2)); const auto e = q.pop();
+    if (!e || !std::holds_alternative<PlaybackWorkerSeekComplete>(*e) || q.stats().samples_dropped != 1) return false; }
+  for (int control_index = 0; control_index < 4; ++control_index) {
+    Queue q{1}; q.enqueue(sample(1));
+    if (control_index == 0) q.enqueue(error());
+    if (control_index == 1) q.enqueue(eof());
+    if (control_index == 2) q.enqueue(seek());
+    if (control_index == 3) q.enqueue(cancelled());
+    if (q.size() != 1 || q.stats().samples_dropped != 1) return false;
+  }
+  { Queue q{2}; q.enqueue(sample(1)); q.enqueue(seek()); q.enqueue(sample(2));
+    if (q.size() != 2 || q.stats().high_water_mark > 2 || !q.pop().has_value()) return false; }
+  { Queue q{1}; q.enqueue(seek()); std::atomic<bool> started{false}; std::thread producer([&] { started = true; q.enqueue(error()); });
+    while (!started.load() || q.stats().control_wait_count == 0) std::this_thread::yield();
+    const auto first = q.pop(); producer.join(); const auto second = q.pop();
+    if (!first || !std::holds_alternative<PlaybackWorkerSeekComplete>(*first) || !second || !std::holds_alternative<PlaybackWorkerError>(*second) || q.size() > 1) return false; }
+  { Queue q{1}; q.enqueue(seek()); std::atomic<bool> started{false}; std::thread producer([&] { started = true; if (q.enqueue(error())) std::abort(); });
+    while (!started.load() || q.stats().control_wait_count == 0) std::this_thread::yield();
+    q.stop(); producer.join(); if (q.size() > 1 || !q.stopped()) return false; }
+  return true;
+}
 
 bool visual_mailbox_test() {
   using pulsar::media::ffmpeg::DecodedVisualVideoFrame;
@@ -908,6 +946,9 @@ bool non_zero_start_time_seek_test(const std::filesystem::path& root) {
 } // namespace
 
 int main() {
+  for (int i = 0; i < 100; ++i) {
+    if (!queue_contract_test()) return fail("queue contract test");
+  }
   if (!visual_mailbox_test()) {
     return fail("visual mailbox test");
   }

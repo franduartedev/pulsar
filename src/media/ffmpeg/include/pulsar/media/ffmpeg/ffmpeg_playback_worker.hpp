@@ -3,12 +3,12 @@
 #include <pulsar/application/playback/playback_worker.hpp>
 #include <pulsar/media/ffmpeg/ffmpeg_video_decode_session.hpp>
 #include <pulsar/media/ffmpeg/ffmpeg_playback_visual_mailbox.hpp>
+#include <pulsar/media/ffmpeg/detail/playback_worker_event_queue.hpp>
 
 #include <algorithm>
 #include <chrono>
 #include <condition_variable>
 #include <cstddef>
-#include <deque>
 #include <filesystem>
 #include <memory>
 #include <mutex>
@@ -78,12 +78,11 @@ private:
   application::VideoSourceDescriptor descriptor_;
   mutable std::mutex mutex_;
   std::condition_variable wake_;
-  std::condition_variable event_space_;
   bool stop_{false};
   bool cancel_requested_{false};
   std::optional<ReadRequest> pending_read_;
   std::optional<SeekRequest> pending_seek_;
-  std::deque<application::PlaybackWorkerEvent> events_;
+  detail::PlaybackWorkerEventQueue events_;
   FFmpegPlaybackWorkerStats stats_;
   std::uint64_t next_ordinal_{1};
   std::shared_ptr<FFmpegPlaybackVisualMailbox> visual_mailbox_;

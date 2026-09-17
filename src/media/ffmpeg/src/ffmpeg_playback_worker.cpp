@@ -40,6 +40,7 @@ FFmpegPlaybackWorker::FFmpegPlaybackWorker(
       video_stream_index_{video_stream_index},
       limits_{limits},
       descriptor_{describe_source(path_, video_stream_index_, &descriptor_latency_)},
+      events_{limits.event_queue_capacity},
       visual_mailbox_{std::move(visual_mailbox)} {
   if (limits_.event_queue_capacity == 0) {
     throw std::invalid_argument{"playback worker event queue capacity must be positive"};
@@ -60,7 +61,7 @@ FFmpegPlaybackWorker::~FFmpegPlaybackWorker() {
     pending_seek_.reset();
   }
   wake_.notify_one();
-  event_space_.notify_all();
+  events_.stop();
   if (visual_mailbox_) {
     visual_mailbox_->deactivate(source_epoch_);
   }
@@ -94,6 +95,11 @@ void FFmpegPlaybackWorker::request_seek_for_presentation(application::PlaybackGe
 }
 
 void FFmpegPlaybackWorker::cancel_pending() {
+  // Cancellation invalidates queued requests. The request generation is cleared
+  // before the worker observes it, so this adapter deliberately emits no
+  // synthetic Cancelled event; generation invalidation remains the application
+  // layer's responsibility. Cancellation events in the bounded queue remain
+  // non-disposable when produced by a worker operation that can identify one.
   {
     std::lock_guard lock{mutex_};
     cancel_requested_ = true;
@@ -104,25 +110,22 @@ void FFmpegPlaybackWorker::cancel_pending() {
 }
 
 std::optional<application::PlaybackWorkerEvent> FFmpegPlaybackWorker::poll_event() {
-  std::lock_guard lock{mutex_};
-  if (events_.empty()) {
-    return std::nullopt;
-  }
-
-  auto event = std::move(events_.front());
-  events_.pop_front();
-  event_space_.notify_one();
-  return event;
+  return events_.pop();
 }
 
 std::size_t FFmpegPlaybackWorker::event_queue_high_water_mark() const noexcept {
-  std::lock_guard lock{mutex_};
-  return stats_.event_queue_high_water_mark;
+  return events_.stats().high_water_mark;
 }
 
 FFmpegPlaybackWorkerStats FFmpegPlaybackWorker::stats() const noexcept {
+  const auto queue_stats = events_.stats();
   std::lock_guard lock{mutex_};
-  return stats_;
+  auto result = stats_;
+  result.events_dropped_due_to_capacity = queue_stats.events_dropped;
+  result.samples_dropped_due_to_capacity = queue_stats.samples_dropped;
+  result.control_wait_count = queue_stats.control_wait_count;
+  result.event_queue_high_water_mark = queue_stats.high_water_mark;
+  return result;
 }
 
 void FFmpegPlaybackWorker::run() {
@@ -229,33 +232,13 @@ void FFmpegPlaybackWorker::run() {
 }
 
 void FFmpegPlaybackWorker::enqueue_event(application::PlaybackWorkerEvent event) {
-  const bool sample = std::holds_alternative<application::PlaybackWorkerSample>(event);
-  std::unique_lock lock{mutex_};
-  while (events_.size() >= limits_.event_queue_capacity && !stop_) {
-    auto disposable = std::find_if(events_.begin(), events_.end(), [](const auto& queued) {
-      return std::holds_alternative<application::PlaybackWorkerSample>(queued);
-    });
-    if (disposable != events_.end()) {
-      events_.erase(disposable);
-      ++stats_.events_dropped_due_to_capacity;
-      ++stats_.samples_dropped_due_to_capacity;
-      break;
-    }
-    if (sample) {
-      ++stats_.events_dropped_due_to_capacity;
-      ++stats_.samples_dropped_due_to_capacity;
-      return;
-    }
-    ++stats_.control_wait_count;
-    event_space_.wait(lock);
-  }
-  if (stop_) {
-    return;
-  }
-  events_.push_back(std::move(event));
-  if (events_.size() > stats_.event_queue_high_water_mark) {
-    stats_.event_queue_high_water_mark = events_.size();
-  }
+  events_.enqueue(std::move(event));
+  const auto queue_stats = events_.stats();
+  std::lock_guard lock{mutex_};
+  stats_.events_dropped_due_to_capacity = queue_stats.events_dropped;
+  stats_.samples_dropped_due_to_capacity = queue_stats.samples_dropped;
+  stats_.control_wait_count = queue_stats.control_wait_count;
+  stats_.event_queue_high_water_mark = queue_stats.high_water_mark;
 }
 
 application::VideoSample FFmpegPlaybackWorker::to_sample(const DecodedVisualVideoFrame& frame) {
