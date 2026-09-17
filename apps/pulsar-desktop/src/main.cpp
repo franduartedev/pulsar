@@ -18,7 +18,7 @@ int main(int argc, char** argv) {
   DesktopController controller{*image_provider};
 
   QQmlApplicationEngine engine;
-  engine.addImportPath(QStringLiteral(PULSAR_DESKTOP_QML_IMPORT_PATH));
+  engine.addImportPath(QStringLiteral("qrc:/pulsar/imports"));
   engine.addImageProvider(QStringLiteral("pulsar-preview"), image_provider);
   engine.rootContext()->setContextProperty(QStringLiteral("controller"), &controller);
 

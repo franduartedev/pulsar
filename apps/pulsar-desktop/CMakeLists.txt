@@ -14,15 +14,23 @@ qt_add_resources(pulsar_desktop pulsar_desktop_qml
     qml/Main.qml
 )
 
+set_source_files_properties(imports/QtQml/WorkerScript/qmldir
+  PROPERTIES QT_RESOURCE_ALIAS qmldir
+)
+set_source_files_properties(imports/QtQml/WorkerScript/WorkerScript.qml
+  PROPERTIES QT_RESOURCE_ALIAS WorkerScript.qml
+)
+qt_add_resources(pulsar_desktop pulsar_desktop_qml_import_fallbacks
+  PREFIX "/pulsar/imports/QtQml/WorkerScript"
+  FILES
+    imports/QtQml/WorkerScript/qmldir
+    imports/QtQml/WorkerScript/WorkerScript.qml
+)
+
 set_target_properties(pulsar_desktop
   PROPERTIES
     OUTPUT_NAME pulsar-desktop
     AUTOMOC ON
-)
-
-target_compile_definitions(pulsar_desktop
-  PRIVATE
-    PULSAR_DESKTOP_QML_IMPORT_PATH="${CMAKE_CURRENT_SOURCE_DIR}/imports"
 )
 
 target_link_libraries(pulsar_desktop
@@ -46,5 +54,5 @@ add_test(NAME pulsar.desktop.smoke
          COMMAND pulsar_desktop --smoke-exit-ms 250)
 set_tests_properties(pulsar.desktop.smoke
   PROPERTIES
-    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QML2_IMPORT_PATH=/dev/shm/m8-sysroot/usr/lib/x86_64-linux-gnu/qt6/qml;QT_PLUGIN_PATH=/dev/shm/m8-sysroot/usr/lib/x86_64-linux-gnu/qt6/plugins;LD_LIBRARY_PATH=/dev/shm/m8-sysroot/usr/lib/x86_64-linux-gnu"
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
 )
