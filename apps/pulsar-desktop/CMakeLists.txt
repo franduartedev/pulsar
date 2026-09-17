@@ -12,6 +12,12 @@ qt_add_resources(pulsar_desktop pulsar_desktop_qml
   PREFIX "/"
   FILES
     qml/Main.qml
+    qml/theme/Theme.js
+    qml/components/Panel.qml
+    qml/components/PButton.qml
+    qml/components/PText.qml
+    qml/components/PMuted.qml
+    qml/components/PSlider.qml
 )
 
 set_source_files_properties(imports/QtQml/WorkerScript/qmldir
