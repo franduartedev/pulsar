@@ -18,11 +18,15 @@ Los commands son value types concretos almacenados en `std::variant`, no una jer
 
 `CommandProcessor` opera sobre una `Timeline&` no propietaria. Esto mantiene ownership claro: quien crea la timeline conserva su lifetime, y el processor coordina mutaciones e historial sobre esa instancia.
 
+Para M7 se hace explícito que cada documento/timeline tiene un único escritor editorial y una única historia activa. `CommandProcessor` no es copiable ni movible: dos historiales independientes no deben mutar la misma `Timeline`. La `Timeline` debe vivir más que el processor; reemplazar el documento implica construir un nuevo processor y empezar una nueva historia.
+
 Cada command ejecutado exitosamente se almacena como una operación forward junto con su operación inversa exacta. Undo ejecuta la inversa y mueve la entrada al redo stack. Redo ejecuta la operación forward y la devuelve al undo stack.
 
 El historial tiene una capacidad máxima simple, por defecto 256 operaciones. Cuando se excede, se descarta la operación deshacible más antigua. Una capacidad de `0` significa que la edición se ejecuta, pero el historial queda deshabilitado. Este límite es por cantidad de entries, no por bytes; límites basados en memoria vendrán cuando existan payloads grandes.
 
 Los entries del historial no contienen punteros, referencias, iteradores ni referencias a elementos internos de `std::vector`. Solo contienen IDs y value types.
+
+El código externo no debe retener punteros o referencias devueltos por consultas del dominio a través de mutaciones para usarlos luego desde commands, playback o background work. Los commands derivan su inversa desde el estado actual de la timeline al ejecutarse y luego almacenan valores.
 
 `Timeline` expone mutaciones globales mínimas para `insert_clip`, `remove_clip` y `move_clip`. Estas operaciones preservan invariantes como unicidad global de `ClipId`, no-overlap por track y orden temporal.
 

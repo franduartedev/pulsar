@@ -48,21 +48,23 @@ std::filesystem::path canonical_local_regular_file(const std::filesystem::path& 
   }
 
   std::error_code error;
-  if (!std::filesystem::exists(path, error)) {
-    throw MediaProbeError{MediaProbeErrorCode::FileNotFound, "media file does not exist"};
-  }
+  const bool path_exists = std::filesystem::exists(path, error);
   if (error) {
     throw MediaProbeError{MediaProbeErrorCode::ProbeFailed,
                           "failed to inspect media path: " + error.message()};
   }
-
-  if (!std::filesystem::is_regular_file(path, error)) {
-    throw MediaProbeError{MediaProbeErrorCode::NotRegularFile,
-                          "media path is not a regular file"};
+  if (!path_exists) {
+    throw MediaProbeError{MediaProbeErrorCode::FileNotFound, "media file does not exist"};
   }
+
+  const bool path_is_regular = std::filesystem::is_regular_file(path, error);
   if (error) {
     throw MediaProbeError{MediaProbeErrorCode::ProbeFailed,
                           "failed to inspect media file type: " + error.message()};
+  }
+  if (!path_is_regular) {
+    throw MediaProbeError{MediaProbeErrorCode::NotRegularFile,
+                          "media path is not a regular file"};
   }
 
   const std::filesystem::path canonical_path = std::filesystem::canonical(path, error);
@@ -71,13 +73,14 @@ std::filesystem::path canonical_local_regular_file(const std::filesystem::path& 
                           "failed to resolve local media path: " + error.message()};
   }
 
-  if (!std::filesystem::is_regular_file(canonical_path, error)) {
-    throw MediaProbeError{MediaProbeErrorCode::NotRegularFile,
-                          "resolved media path is not a regular file"};
-  }
+  const bool canonical_path_is_regular = std::filesystem::is_regular_file(canonical_path, error);
   if (error) {
     throw MediaProbeError{MediaProbeErrorCode::ProbeFailed,
                           "failed to inspect resolved media path: " + error.message()};
+  }
+  if (!canonical_path_is_regular) {
+    throw MediaProbeError{MediaProbeErrorCode::NotRegularFile,
+                          "resolved media path is not a regular file"};
   }
 
   return canonical_path;

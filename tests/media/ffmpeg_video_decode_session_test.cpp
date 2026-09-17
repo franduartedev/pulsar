@@ -168,8 +168,17 @@ std::filesystem::path fixture_root() {
 }
 
 void write_non_zero_start_h264_fixture(const std::filesystem::path& path) {
+  const std::string encoder_check_command =
+      shell_quote(PULSAR_TEST_FFMPEG_CLI) +
+      " -hide_banner -loglevel error -h encoder=libx264 >/dev/null 2>&1";
+  if (std::system(encoder_check_command.c_str()) != 0) {
+    throw std::runtime_error{
+        "ffmpeg CLI is available, but the required libx264 encoder is not"};
+  }
+
   const std::string command =
-      "ffmpeg -y -hide_banner -loglevel error -f lavfi "
+      shell_quote(PULSAR_TEST_FFMPEG_CLI) +
+      " -y -hide_banner -loglevel error -f lavfi "
       "-i testsrc2=size=320x180:rate=25:duration=4 "
       "-vf setpts=PTS+5/TB "
       "-c:v libx264 -pix_fmt yuv420p -bf 2 -g 25 -keyint_min 25 "
@@ -177,7 +186,8 @@ void write_non_zero_start_h264_fixture(const std::filesystem::path& path) {
       shell_quote(path);
 
   if (std::system(command.c_str()) != 0) {
-    throw std::runtime_error{"ffmpeg could not create non-zero start-time H.264 fixture"};
+    throw std::runtime_error{
+        "ffmpeg CLI could not create the required non-zero start-time H.264/B-frame fixture"};
   }
 }
 
@@ -215,8 +225,9 @@ NonZeroStartFixtureInfo inspect_non_zero_start_fixture(const std::filesystem::pa
       timestamps.push_back(*frame->presentation_timestamp);
     }
   }
-  if (timestamps.size() < 50) {
-    throw std::runtime_error{"generated fixture did not decode enough timestamped frames"};
+  if (timestamps.size() != 100) {
+    throw std::runtime_error{
+        "generated fixture did not decode the expected 100 timestamped frames"};
   }
 
   return NonZeroStartFixtureInfo{

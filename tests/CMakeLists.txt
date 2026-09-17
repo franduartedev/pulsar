@@ -56,6 +56,12 @@ pulsar_apply_compiler_warnings(pulsar_command_history_tests)
 
 add_test(NAME pulsar.application.command_history COMMAND pulsar_command_history_tests)
 
+if(NOT PULSAR_BUILD_FFMPEG)
+  return()
+endif()
+
+find_program(PULSAR_TEST_FFMPEG_CLI ffmpeg REQUIRED)
+
 add_executable(pulsar_ffmpeg_probe_tests
   media/ffmpeg_probe_test.cpp
 )
@@ -74,6 +80,11 @@ add_test(NAME pulsar.media.ffmpeg_probe COMMAND pulsar_ffmpeg_probe_tests)
 
 add_executable(pulsar_ffmpeg_video_decode_session_tests
   media/ffmpeg_video_decode_session_test.cpp
+)
+
+target_compile_definitions(pulsar_ffmpeg_video_decode_session_tests
+  PRIVATE
+    PULSAR_TEST_FFMPEG_CLI="${PULSAR_TEST_FFMPEG_CLI}"
 )
 
 target_link_libraries(pulsar_ffmpeg_video_decode_session_tests

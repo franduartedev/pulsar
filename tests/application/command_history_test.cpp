@@ -12,6 +12,7 @@
 #include <iostream>
 #include <stdexcept>
 #include <string_view>
+#include <type_traits>
 
 namespace {
 
@@ -224,6 +225,11 @@ bool capacity_edge_tests() {
 
   return true;
 }
+
+static_assert(!std::is_copy_constructible_v<CommandProcessor>);
+static_assert(!std::is_copy_assignable_v<CommandProcessor>);
+static_assert(!std::is_move_constructible_v<CommandProcessor>);
+static_assert(!std::is_move_assignable_v<CommandProcessor>);
 
 bool empty_history_tests() {
   Timeline timeline = base_timeline();

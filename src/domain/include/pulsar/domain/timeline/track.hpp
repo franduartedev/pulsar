@@ -27,6 +27,7 @@ public:
 
   void insert_clip(Clip clip);
 
+  // Returned pointers/references are observations only. Do not retain them across mutation.
   [[nodiscard]] const Clip* find_clip(ClipId id) const noexcept;
   [[nodiscard]] MediaTime duration() const;
 

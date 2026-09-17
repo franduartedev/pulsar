@@ -19,6 +19,10 @@ bool TimeRange::contains(MediaTime time) const {
 }
 
 bool TimeRange::overlaps(TimeRange other) const {
+  if (start_ == end_ || other.start_ == other.end_) {
+    return false;
+  }
+
   return start_ < other.end_ && other.start_ < end_;
 }
 

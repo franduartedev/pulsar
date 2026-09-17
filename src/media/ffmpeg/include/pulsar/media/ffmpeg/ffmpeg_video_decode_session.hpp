@@ -21,6 +21,8 @@ public:
   FFmpegVideoDecodeSession(FFmpegVideoDecodeSession&&) noexcept;
   FFmpegVideoDecodeSession& operator=(FFmpegVideoDecodeSession&&) noexcept;
 
+  // The session owns one FFmpeg demuxer/decoder state machine. Use it from one thread at a time;
+  // playback orchestration must not retain pointers/iterators into mutable Timeline data.
   [[nodiscard]] std::optional<DecodedVideoFrameInfo> decode_next();
   [[nodiscard]] VideoSeekResult seek_to_stream_timestamp(domain::MediaTime target);
   [[nodiscard]] int stream_index() const noexcept;

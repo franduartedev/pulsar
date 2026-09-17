@@ -12,8 +12,16 @@ class CommandProcessor {
 public:
   static constexpr std::size_t default_history_capacity = 256;
 
+  // A processor is the single active editorial writer/history for its Timeline.
+  // The Timeline/document must outlive the processor; replacing it creates a new history.
   explicit CommandProcessor(domain::Timeline& timeline,
                             std::size_t history_capacity = default_history_capacity);
+
+  CommandProcessor(const CommandProcessor&) = delete;
+  CommandProcessor& operator=(const CommandProcessor&) = delete;
+  CommandProcessor(CommandProcessor&&) = delete;
+  CommandProcessor& operator=(CommandProcessor&&) = delete;
+  ~CommandProcessor() = default;
 
   void execute(Command command);
 

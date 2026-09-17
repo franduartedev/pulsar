@@ -20,6 +20,8 @@ Una `Track` contiene clips ordenados por posición temporal y no permite solapam
 
 Cuando una `Track` pertenece a una `Timeline`, la timeline es dueña de esa instancia y solo expone acceso read-only a sus tracks y clips. Cualquier mutación que pueda afectar invariantes globales debe pasar por `Timeline`.
 
+Los punteros, referencias y referencias a vectores devueltos por `Timeline` o `Track` son observaciones únicamente. Mutaciones posteriores pueden invalidarlos por reallocations de vectores, erase de elementos o reemplazo de tracks copiados. Application, playback y la futura UI deben conservar IDs o datos de presentación copiados a través de mutaciones, no punteros del dominio retenidos.
+
 `ClipId` es único dentro de toda la `Timeline`, no solo dentro de una `Track`. En M2 esta invariante se comprueba con búsqueda lineal para evitar caches e índices prematuros. Al agregar una `Track` pre-poblada, la timeline valida todos sus clips antes de incorporarla.
 
 `TrackKind` distingue inicialmente `Video` y `Audio`, pero no valida compatibilidad con streams multimedia porque todavía no existe probing ni catálogo de media.

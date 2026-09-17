@@ -14,6 +14,8 @@ M6 necesita responder "dame el frame correspondiente a este instante del medio" 
 
 La política de resultado es "primer frame con presentation timestamp mayor o igual al target". Frames sin `best_effort_timestamp` no sirven para decidir que el target fue alcanzado; se descartan lógicamente para la comparación y el decode continúa. Si se llega a EOF sin encontrar un frame adecuado, el resultado contiene `std::nullopt`.
 
+Esta API sigue siendo una primitiva M6 de seek en coordenadas de stream. No es el contrato de presentation seek de M7. Playback necesita una operación separada que devuelva el frame cuyo intervalo de presentación contiene el target; envolver `seek_to_stream_timestamp()` no alcanza porque la política actual puede descartar intencionalmente el frame precedente.
+
 El target `MediaTime` se convierte al time base del stream con aritmética entera exacta. Cuando el target cae entre ticks del stream, se redondea hacia abajo antes de llamar a FFmpeg. Ese redondeo favorece no saltarse el frame requerido, porque el seek físico se hace hacia un punto decodificable anterior y la selección final se decide con PTS de presentación del frame decodificado.
 
 La estrategia usa `av_seek_frame(format_context, stream_index, timestamp, AVSEEK_FLAG_BACKWARD)`. No se usa `AVSEEK_FLAG_ANY` por defecto, para preservar reconstrucción correcta en codecs inter-frame. Después de un seek exitoso se llama a `avcodec_flush_buffers`, se descarta cualquier packet pendiente, se limpia el `AVFrame` reusable y el estado lógico vuelve a `Reading`.
@@ -30,4 +32,4 @@ Timestamps negativos no se rechazan automáticamente porque la API trabaja en co
 
 No hay cache ni índice propio de keyframes. La latencia depende de GOP, demuxer, codec y distancia desde el punto decodificable elegido por FFmpeg.
 
-Las pruebas automáticas cubren seek/reset en una fixture simple. La validación frame-accurate con H.264+B-frames se ejecuta manualmente con un clip sintético generado por FFmpeg CLI para no convertir el encoder externo en dependencia de CTest.
+Las pruebas automáticas cubren seek/reset en fixtures simples y en una fixture H.264 con non-zero `AVStream::start_time` generada por FFmpeg CLI con `libx264` y B-frames. Por lo tanto la suite de medios requiere explícitamente las bibliotecas FFmpeg, el ejecutable `ffmpeg` y el encoder `libx264`; si faltan, la configuración o el test falla con un diagnóstico claro. Una fixture redistribuible con checksums y oráculos independientes sigue pendiente para M7.4.

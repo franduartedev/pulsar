@@ -26,6 +26,8 @@ public:
   void remove_clip(ClipId clip_id);
   void move_clip(ClipId clip_id, TrackId destination_track_id, MediaTime timeline_start);
 
+  // Returned pointers/references are observations only. Do not retain them across
+  // Timeline or Track mutation; vector storage and copied replacement tracks may invalidate them.
   [[nodiscard]] const Track* find_track(TrackId id) const noexcept;
   [[nodiscard]] const Clip* find_clip(ClipId id) const noexcept;
   [[nodiscard]] MediaTime duration() const;

@@ -130,10 +130,28 @@ bool time_range_tests() {
   if (empty.overlaps(empty)) {
     return false;
   }
+  if (empty.overlaps(TimeRange{seconds(0), seconds(10)})) {
+    return false;
+  }
+  if (TimeRange{seconds(0), seconds(10)}.overlaps(empty)) {
+    return false;
+  }
   if (empty.overlaps(TimeRange{seconds(5), seconds(10)})) {
     return false;
   }
   if (empty.overlaps(TimeRange{seconds(0), seconds(5)})) {
+    return false;
+  }
+  if (TimeRange{seconds(0), seconds(5)}.overlaps(empty)) {
+    return false;
+  }
+  if (TimeRange{seconds(5), seconds(5)}.overlaps(TimeRange{seconds(5), seconds(5)})) {
+    return false;
+  }
+  if (!TimeRange{seconds(0), seconds(10)}.overlaps(TimeRange{seconds(4), seconds(6)})) {
+    return false;
+  }
+  if (TimeRange{seconds(0), seconds(5)}.overlaps(TimeRange{seconds(5), seconds(10)})) {
     return false;
   }
 

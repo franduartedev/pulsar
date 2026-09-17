@@ -14,6 +14,8 @@ Se agrega `FFmpegVideoDecodeSession` dentro de `pulsar::media::ffmpeg` como una 
 
 `decode_next()` devuelve `std::optional<DecodedVideoFrameInfo>`. El value type contiene solamente metadata segura: stream index, dimensiones reales del frame, nombre diagnóstico de pixel format y presentation timestamp opcional. No expone `AVFrame`, punteros, buffers, `data[]`, `linesize[]` ni ownership de memoria del decoder.
 
+`FFmpegVideoDecodeSession` posee una única state machine de demuxer/decoder y es un objeto de uso exclusivo. Los llamadores deben usar una sesión desde un solo hilo a la vez. Un futuro worker de playback puede ser dueño de una sesión, pero application no debe compartirla concurrentemente ni retener punteros a storage mutable de timeline/dominio mientras emite trabajos de decode o seek.
+
 El timestamp sale de `AVFrame::best_effort_timestamp` cuando FFmpeg lo informa. Se convierte exactamente a `pulsar::domain::MediaTime` usando el `time_base` del stream. No se reconstruyen PTS desde FPS nominal, frame index ni `double`.
 
 La sesión usa la API moderna `avcodec_send_packet` / `avcodec_receive_frame`, con flujo receive-first. Al EOF de demux se envía un packet NULL una única vez, se drena el decoder hasta `AVERROR_EOF`, y las llamadas posteriores a `decode_next()` devuelven EOF estable.
