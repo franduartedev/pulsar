@@ -96,7 +96,7 @@ signals:
   void diagnosticsChanged(); void timelineChanged(); void timelinePlayheadChanged(); void editActionStateChanged(); void focusImportPathRequested();
 private:
   struct WorkerCommand { std::filesystem::path path; std::uint64_t generation; };
-  struct VisualIdentity { std::uint64_t session_epoch; std::uint64_t document_generation; pulsar::domain::MediaId media_id; std::uint64_t source_epoch; std::uint64_t ordinal; };
+  struct VisualIdentity { std::uint64_t session_epoch; std::uint64_t document_generation; pulsar::domain::ClipId clip_id; pulsar::domain::MediaId media_id; std::uint64_t source_epoch; std::uint64_t ordinal; };
   void workerLoop();
   void postOpen(std::filesystem::path path, std::uint64_t generation);
   [[nodiscard]] std::unique_ptr<pulsar::desktop::EditorSession> makeEditorSession() const;

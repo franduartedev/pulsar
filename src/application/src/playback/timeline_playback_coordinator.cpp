@@ -158,7 +158,7 @@ void TimelinePlaybackCoordinator::enter_clip(const ResolvedClip& clip, bool forc
   active_missing_.reset();
   segment_end_ = clip.timeline_range.end();
   segment_kind_ = SegmentKind::Clip;
-  current_presentation_ = TimelineStarvedPresentation{};
+  current_presentation_ = TimelineStarvedPresentation{clip.clip_id, clip.media_id, clip.timeline_range.start()};
 }
 
 void TimelinePlaybackCoordinator::enter_gap(const TimelineGap& gap, bool force_transition) {
@@ -221,7 +221,7 @@ TimelinePresentation TimelinePlaybackCoordinator::evaluate_clip(const ResolvedCl
   }
   if (source_session_ == nullptr) {
     transport_.pause();
-    current_presentation_ = TimelineStarvedPresentation{};
+    current_presentation_ = TimelineStarvedPresentation{clip.clip_id, clip.media_id, position};
     return *current_presentation_;
   }
 
@@ -253,7 +253,7 @@ TimelinePresentation TimelinePlaybackCoordinator::evaluate_clip(const ResolvedCl
     current_presentation_ = TimelineSourceGapPresentation{clip.clip_id, clip.media_id, position};
   } else if (std::holds_alternative<PresentationStarved>(decision)) {
     transport_.pause();
-    current_presentation_ = TimelineStarvedPresentation{};
+    current_presentation_ = TimelineStarvedPresentation{clip.clip_id, clip.media_id, position};
   } else if (std::holds_alternative<PresentationEnded>(decision)) {
     if (intent_ == PlaybackIntent::Playing) {
       transport_.play();

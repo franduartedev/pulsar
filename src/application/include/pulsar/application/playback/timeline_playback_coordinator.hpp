@@ -44,7 +44,11 @@ struct TimelineMissingMediaPresentation {
   std::optional<std::string> reason;
 };
 
-struct TimelineStarvedPresentation {};
+struct TimelineStarvedPresentation {
+  domain::ClipId clip_id;
+  domain::MediaId media_id;
+  domain::MediaTime timeline_position;
+};
 
 struct TimelineSourceEndedEarlyPresentation {
   domain::ClipId clip_id;

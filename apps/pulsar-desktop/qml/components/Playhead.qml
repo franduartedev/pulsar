@@ -12,8 +12,12 @@ Item {
     MouseArea {
         anchors.fill: parent
         drag.target: null
-        onPressed: head.dragging = true
+        onPressed: { head.dragging = true; seekAt(mouse) }
         onReleased: head.dragging = false
-        onPositionChanged: if (pressed) controller.seekTimelineAt(mouse.x + head.x, parent.width)
+        onPositionChanged: if (pressed) seekAt(mouse)
+        function seekAt(point) {
+            var p = hit.mapToItem(head.parent, point.x, point.y)
+            controller.seekTimelineAt(p.x, head.parent.width)
+        }
     }
 }
