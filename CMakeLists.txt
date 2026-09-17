@@ -29,6 +29,7 @@ endif()
 
 add_subdirectory(src/domain)
 add_subdirectory(src/application)
+add_subdirectory(src/project_file)
 if(PULSAR_BUILD_FFMPEG)
   add_subdirectory(src/media/ffmpeg)
   add_subdirectory(apps/engine-lab)

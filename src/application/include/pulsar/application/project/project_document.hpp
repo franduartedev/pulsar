@@ -2,6 +2,7 @@
 
 #include <pulsar/application/media/media_probe.hpp>
 #include <pulsar/application/project/project_snapshot.hpp>
+#include <pulsar/application/project/project_restore_state.hpp>
 #include <pulsar/domain/timeline/timeline.hpp>
 
 #include <cstdint>
@@ -16,6 +17,7 @@ class CommandProcessor;
 class ProjectDocument {
 public:
   ProjectDocument();
+  [[nodiscard]] static ProjectDocument restore(const ProjectRestoreState& state);
 
   [[nodiscard]] domain::TrackId video_track_id() const noexcept { return video_track_id_; }
   [[nodiscard]] std::vector<MediaAsset> assets() const { return assets_; }
@@ -35,8 +37,12 @@ public:
     return document_generation_;
   }
 
-  // Transitional marker only; no filesystem save is performed.
-  void mark_current_state_saved() noexcept { saved_history_state_id_ = current_history_state_id_; }
+  // Marks exactly the history state represented by a persisted snapshot.
+  void mark_history_state_saved(HistoryStateId state_id) noexcept {
+    saved_history_state_id_ = state_id;
+  }
+  // Transitional marker retained for callers that save the current snapshot.
+  void mark_current_state_saved() noexcept { mark_history_state_saved(current_history_state_id_); }
 
 private:
   friend class CommandProcessor;

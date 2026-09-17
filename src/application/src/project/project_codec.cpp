@@ -1,0 +1,370 @@
+#include <pulsar/application/project/project_codec.hpp>
+
+#include <algorithm>
+#include <charconv>
+#include <cstdint>
+#include <limits>
+#include <sstream>
+#include <string>
+#include <string_view>
+#include <utility>
+#include <vector>
+
+namespace pulsar::application {
+namespace {
+
+constexpr std::size_t max_line_size = 1024 * 1024;
+constexpr std::size_t max_string_size = 64 * 1024;
+constexpr std::size_t max_records = 100'000;
+
+struct Token {
+  std::string text;
+  bool quoted{false};
+};
+
+[[noreturn]] void parse_fail(std::size_t line, std::string_view message) {
+  throw ProjectCodecError{"line " + std::to_string(line) + ": " + std::string{message}};
+}
+
+int hex_digit(char value) {
+  if (value >= '0' && value <= '9') return value - '0';
+  if (value >= 'A' && value <= 'F') return value - 'A' + 10;
+  if (value >= 'a' && value <= 'f') return value - 'a' + 10;
+  return -1;
+}
+
+std::vector<Token> tokenize(std::string_view line, std::size_t line_number) {
+  if (line.size() > max_line_size) parse_fail(line_number, "line exceeds size limit");
+  if (!line.empty() && line.back() == '\r') parse_fail(line_number, "CRLF is not canonical");
+  std::vector<Token> tokens;
+  std::size_t index = 0;
+  while (index < line.size()) {
+    while (index < line.size() && (line[index] == ' ' || line[index] == '\t')) ++index;
+    if (index == line.size()) break;
+    if (line[index] == '"') {
+      ++index;
+      std::string value;
+      while (index < line.size() && line[index] != '"') {
+        char current = line[index++];
+        if (current != '\\') {
+          value.push_back(current);
+        } else {
+          if (index == line.size()) parse_fail(line_number, "unterminated escape");
+          const char escaped = line[index++];
+          switch (escaped) {
+          case '\\': value.push_back('\\'); break;
+          case '"': value.push_back('"'); break;
+          case 'n': value.push_back('\n'); break;
+          case 'r': value.push_back('\r'); break;
+          case 't': value.push_back('\t'); break;
+          case 'x':
+            if (index + 1 >= line.size()) parse_fail(line_number, "short hex escape");
+            {
+              const int high = hex_digit(line[index]);
+              const int low = hex_digit(line[index + 1]);
+              if (high < 0 || low < 0) parse_fail(line_number, "invalid hex escape");
+              value.push_back(static_cast<char>((high << 4) | low));
+              index += 2;
+            }
+            break;
+          default: parse_fail(line_number, "unknown escape");
+          }
+        }
+        if (value.size() > max_string_size) parse_fail(line_number, "quoted string exceeds size limit");
+      }
+      if (index == line.size()) parse_fail(line_number, "unterminated quoted string");
+      ++index;
+      if (index < line.size() && line[index] != ' ' && line[index] != '\t') {
+        parse_fail(line_number, "quoted token must be separated");
+      }
+      tokens.push_back(Token{std::move(value), true});
+    } else {
+      const std::size_t start = index;
+      while (index < line.size() && line[index] != ' ' && line[index] != '\t') ++index;
+      tokens.push_back(Token{std::string{line.substr(start, index - start)}, false});
+    }
+  }
+  return tokens;
+}
+
+std::int64_t signed_number(const Token& token, std::size_t line, std::string_view field) {
+  if (token.quoted || token.text.empty() || token.text.front() == '+') {
+    parse_fail(line, "invalid " + std::string{field});
+  }
+  std::int64_t value = 0;
+  const auto result = std::from_chars(token.text.data(), token.text.data() + token.text.size(), value);
+  if (result.ec != std::errc{} || result.ptr != token.text.data() + token.text.size()) {
+    parse_fail(line, "invalid " + std::string{field});
+  }
+  return value;
+}
+
+std::uint64_t unsigned_number(const Token& token, std::size_t line, std::string_view field) {
+  if (token.quoted || token.text.empty() || token.text.front() == '-') {
+    parse_fail(line, "invalid " + std::string{field});
+  }
+  std::uint64_t value = 0;
+  const auto result = std::from_chars(token.text.data(), token.text.data() + token.text.size(), value);
+  if (result.ec != std::errc{} || result.ptr != token.text.data() + token.text.size()) {
+    parse_fail(line, "invalid " + std::string{field});
+  }
+  return value;
+}
+
+int int_number(const Token& token, std::size_t line, std::string_view field) {
+  const auto value = signed_number(token, line, field);
+  if (value < std::numeric_limits<int>::min() || value > std::numeric_limits<int>::max()) {
+    parse_fail(line, "invalid " + std::string{field});
+  }
+  return static_cast<int>(value);
+}
+
+domain::MediaTime media_time(const std::vector<Token>& tokens, std::size_t& index,
+                             std::size_t line, std::string_view field) {
+  if (index + 2 >= tokens.size()) parse_fail(line, "missing " + std::string{field});
+  const auto value = signed_number(tokens[index++], line, field);
+  const auto numerator = signed_number(tokens[index++], line, std::string{field} + " numerator");
+  const auto denominator = signed_number(tokens[index++], line, std::string{field} + " denominator");
+  try {
+    return domain::MediaTime{value, domain::Rational{numerator, denominator}};
+  } catch (const std::exception& error) {
+    parse_fail(line, error.what());
+  }
+}
+
+std::string quote(std::string_view value) {
+  static constexpr char hex[] = "0123456789ABCDEF";
+  std::string result{"\""};
+  for (const unsigned char byte : value) {
+    switch (byte) {
+    case '\\': result += "\\\\"; break;
+    case '"': result += "\\\""; break;
+    case '\n': result += "\\n"; break;
+    case '\r': result += "\\r"; break;
+    case '\t': result += "\\t"; break;
+    default:
+      if (byte < 0x20 || byte >= 0x7F) {
+        result += "\\x";
+        result.push_back(hex[byte >> 4]);
+        result.push_back(hex[byte & 0xF]);
+      } else {
+        result.push_back(static_cast<char>(byte));
+      }
+    }
+  }
+  result.push_back('"');
+  return result;
+}
+
+void append_time(std::ostringstream& output, domain::MediaTime value) {
+  output << value.value() << ' ' << value.time_base().numerator() << ' '
+         << value.time_base().denominator();
+}
+
+std::vector<const domain::Track*> sorted_tracks(const domain::Timeline& timeline) {
+  std::vector<const domain::Track*> tracks;
+  for (const auto& track : timeline.tracks()) tracks.push_back(&track);
+  std::sort(tracks.begin(), tracks.end(), [](const auto* lhs, const auto* rhs) {
+    return lhs->id().value() < rhs->id().value();
+  });
+  return tracks;
+}
+
+} // namespace
+
+std::string ProjectCodec::encode(const ProjectSnapshot& snapshot) {
+  std::ostringstream output;
+  output << "PULSAR_PROJECT 1\n";
+  output << "TIMELINE " << snapshot.timeline.id().value() << "\n";
+  const auto tracks = sorted_tracks(snapshot.timeline);
+  for (const auto* track : tracks) {
+    output << "TRACK " << track->id().value() << ' '
+           << (track->kind() == domain::TrackKind::Video ? "VIDEO" : "AUDIO") << "\n";
+  }
+  output << "VIDEO_TRACK " << snapshot.video_track_id.value() << "\n";
+
+  std::vector<const MediaAsset*> assets;
+  for (const auto& asset : snapshot.assets) assets.push_back(&asset);
+  std::sort(assets.begin(), assets.end(), [](const auto* lhs, const auto* rhs) {
+    return lhs->id().value() < rhs->id().value();
+  });
+  for (const auto* asset : assets) {
+    output << "ASSET " << asset->id().value() << ' ' << asset->video_stream_index() << ' ';
+    append_time(output, asset->playable_duration());
+    output << ' ' << quote(asset->source_locator().string()) << ' '
+           << quote(asset->metadata().codec_name) << ' ' << asset->metadata().width << ' '
+           << asset->metadata().height << ' ' << asset->metadata().time_base.numerator() << ' '
+           << asset->metadata().time_base.denominator() << ' ';
+    if (asset->metadata().nominal_frame_rate.has_value()) {
+      output << asset->metadata().nominal_frame_rate->rational().numerator() << ' '
+             << asset->metadata().nominal_frame_rate->rational().denominator();
+    } else {
+      output << '-';
+    }
+    output << ' ';
+    if (asset->metadata().container_name.has_value()) {
+      output << quote(*asset->metadata().container_name);
+    } else {
+      output << '-';
+    }
+    output << "\n";
+  }
+
+  for (const auto* track : tracks) {
+    for (const auto& clip : track->clips()) {
+      output << "CLIP " << clip.id().value() << ' ' << track->id().value() << ' '
+             << clip.media_id().value() << ' ';
+      append_time(output, clip.source_range().start());
+      output << ' ';
+      append_time(output, clip.source_range().end());
+      output << ' ';
+      append_time(output, clip.timeline_start());
+      output << "\n";
+    }
+  }
+
+  output << "ALLOCATOR " << snapshot.allocator_state.next_media_id << ' '
+         << snapshot.allocator_state.next_clip_id << ' '
+         << snapshot.allocator_state.next_timeline_id << ' '
+         << snapshot.allocator_state.next_track_id << "\nEND\n";
+  return output.str();
+}
+
+ProjectRestoreState ProjectCodec::decode(std::string_view bytes) {
+  ProjectRestoreState state{domain::TimelineId{1}, {}, domain::TrackId{1}, {}, {}};
+  bool header = false;
+  bool timeline = false;
+  bool video_track = false;
+  bool allocator = false;
+  bool ended = false;
+  enum class Section { Header, Timeline, Tracks, VideoTrack, Assets, Clips, Allocator, End };
+  Section section = Section::Header;
+  std::size_t line_number = 0;
+  std::size_t records = 0;
+  std::size_t offset = 0;
+
+  while (offset <= bytes.size()) {
+    const std::size_t newline = bytes.find('\n', offset);
+    const bool last = newline == std::string_view::npos;
+    const std::string_view line = bytes.substr(offset, last ? bytes.size() - offset : newline - offset);
+    offset = last ? bytes.size() + 1 : newline + 1;
+    ++line_number;
+    if (line.empty()) {
+      if (last || ended) break;
+      parse_fail(line_number, "blank lines are not allowed");
+    }
+    if (++records > max_records) parse_fail(line_number, "record limit exceeded");
+    const auto tokens = tokenize(line, line_number);
+    if (tokens.empty()) {
+      if (ended) {
+        if (last) break;
+        continue;
+      }
+      parse_fail(line_number, "empty record");
+    }
+    if (ended) parse_fail(line_number, "data after END");
+
+    try {
+      if (tokens[0].text == "PULSAR_PROJECT") {
+        if (header || tokens.size() != 2 || tokens[1].text != "1") parse_fail(line_number, "invalid header/version");
+        header = true;
+        section = Section::Timeline;
+      } else if (!header) {
+        parse_fail(line_number, "header required");
+      } else if (tokens[0].text == "TIMELINE") {
+        if (timeline || section != Section::Timeline || tokens.size() != 2) parse_fail(line_number, "invalid TIMELINE");
+        state.timeline_id = domain::TimelineId{unsigned_number(tokens[1], line_number, "timeline id")};
+        timeline = true;
+        section = Section::Tracks;
+      } else if (tokens[0].text == "TRACK") {
+        if (!timeline || (section != Section::Tracks && section != Section::VideoTrack) || tokens.size() != 3) parse_fail(line_number, "invalid TRACK");
+        const auto id = domain::TrackId{unsigned_number(tokens[1], line_number, "track id")};
+        domain::TrackKind kind;
+        if (tokens[2].text == "VIDEO") kind = domain::TrackKind::Video;
+        else if (tokens[2].text == "AUDIO") kind = domain::TrackKind::Audio;
+        else parse_fail(line_number, "invalid track kind");
+        state.tracks.push_back(ProjectRestoreTrack{id, kind, {}});
+        section = Section::Tracks;
+      } else if (tokens[0].text == "VIDEO_TRACK") {
+        if (video_track || state.tracks.empty() || (section != Section::Tracks && section != Section::VideoTrack) || tokens.size() != 2) parse_fail(line_number, "invalid VIDEO_TRACK");
+        state.video_track_id = domain::TrackId{unsigned_number(tokens[1], line_number, "video track id")};
+        video_track = true;
+        section = Section::Assets;
+      } else if (tokens[0].text == "ASSET") {
+        if (!video_track || (section != Section::Assets && section != Section::Clips) || (tokens.size() != 14 && tokens.size() != 15)) parse_fail(line_number, "invalid ASSET");
+        std::size_t i = 1;
+        const auto id = domain::MediaId{unsigned_number(tokens[i++], line_number, "media id")};
+        const int stream = int_number(tokens[i++], line_number, "stream index");
+        const auto duration = media_time(tokens, i, line_number, "duration");
+        if (i + 7 >= tokens.size() || !tokens[i].quoted || !tokens[i + 1].quoted) parse_fail(line_number, "asset strings must be quoted");
+        const std::filesystem::path locator{tokens[i++].text};
+        const std::string codec = tokens[i++].text;
+        const int width = int_number(tokens[i++], line_number, "width");
+        const int height = int_number(tokens[i++], line_number, "height");
+        const auto tb_num = signed_number(tokens[i++], line_number, "time base numerator");
+        const auto tb_den = signed_number(tokens[i++], line_number, "time base denominator");
+        domain::Rational time_base{tb_num, tb_den};
+        std::optional<domain::FrameRate> fps;
+        if (tokens[i].text != "-") {
+          const auto fps_num = signed_number(tokens[i++], line_number, "fps numerator");
+          if (i >= tokens.size()) parse_fail(line_number, "missing fps denominator");
+          const auto fps_den = signed_number(tokens[i++], line_number, "fps denominator");
+          fps = domain::FrameRate{fps_num, fps_den};
+        } else {
+          ++i;
+        }
+        std::optional<std::string> container;
+        if (i >= tokens.size() || (tokens[i].text != "-" && !tokens[i].quoted)) parse_fail(line_number, "invalid container");
+        if (tokens[i].text != "-") container = tokens[i].text;
+        ++i;
+        if (i != tokens.size()) parse_fail(line_number, "extra ASSET fields");
+        state.assets.emplace_back(id, locator, stream, duration,
+                                  VideoAssetMetadata{codec, width, height, time_base, fps, container});
+        section = Section::Assets;
+      } else if (tokens[0].text == "CLIP") {
+        if (!video_track || (section != Section::Assets && section != Section::Clips) || tokens.size() != 13) parse_fail(line_number, "invalid CLIP");
+        std::size_t i = 1;
+        const auto clip_id = domain::ClipId{unsigned_number(tokens[i++], line_number, "clip id")};
+        const auto track_id = domain::TrackId{unsigned_number(tokens[i++], line_number, "clip track id")};
+        const auto media_id = domain::MediaId{unsigned_number(tokens[i++], line_number, "clip media id")};
+        const auto source_start = media_time(tokens, i, line_number, "source start");
+        const auto source_end = media_time(tokens, i, line_number, "source end");
+        const auto timeline_start = media_time(tokens, i, line_number, "timeline start");
+        if (i != tokens.size()) parse_fail(line_number, "extra CLIP fields");
+        const auto track = std::find_if(state.tracks.begin(), state.tracks.end(),
+                                        [track_id](const auto& item) { return item.id == track_id; });
+        if (track == state.tracks.end()) parse_fail(line_number, "unknown clip track id");
+        if (std::none_of(state.assets.begin(), state.assets.end(),
+                         [media_id](const auto& item) { return item.id() == media_id; })) {
+          parse_fail(line_number, "unknown clip media id");
+        }
+        track->clips.emplace_back(clip_id, media_id, domain::TimeRange{source_start, source_end}, timeline_start);
+        section = Section::Clips;
+      } else if (tokens[0].text == "ALLOCATOR") {
+        if (allocator || !video_track || (section != Section::Clips && section != Section::Assets) || tokens.size() != 5) parse_fail(line_number, "invalid ALLOCATOR");
+        state.allocator_state.next_media_id = unsigned_number(tokens[1], line_number, "next media id");
+        state.allocator_state.next_clip_id = unsigned_number(tokens[2], line_number, "next clip id");
+        state.allocator_state.next_timeline_id = unsigned_number(tokens[3], line_number, "next timeline id");
+        state.allocator_state.next_track_id = unsigned_number(tokens[4], line_number, "next track id");
+        allocator = true;
+        section = Section::Allocator;
+      } else if (tokens[0].text == "END") {
+        if (!header || !timeline || !video_track || !allocator || tokens.size() != 1 || section != Section::Allocator) parse_fail(line_number, "incomplete project");
+        ended = true;
+        section = Section::End;
+      } else {
+        parse_fail(line_number, "unknown record");
+      }
+    } catch (const ProjectCodecError&) {
+      throw;
+    } catch (const std::exception& error) {
+      parse_fail(line_number, error.what());
+    }
+    if (last) break;
+  }
+
+  if (!ended) throw ProjectCodecError{"missing END record"};
+  return state;
+}
+
+} // namespace pulsar::application

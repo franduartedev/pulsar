@@ -148,6 +148,23 @@ pulsar_apply_compiler_warnings(pulsar_playback_session_tests)
 
 add_test(NAME pulsar.application.playback_session COMMAND pulsar_playback_session_tests)
 
+add_executable(pulsar_project_persistence_tests
+  application/project_persistence_test.cpp
+)
+
+target_link_libraries(pulsar_project_persistence_tests
+  PRIVATE
+    pulsar::project_file
+    pulsar::application
+    pulsar::domain
+)
+
+pulsar_apply_project_options(pulsar_project_persistence_tests)
+pulsar_apply_compiler_warnings(pulsar_project_persistence_tests)
+target_compile_definitions(pulsar_project_persistence_tests PRIVATE PULSAR_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+
+add_test(NAME pulsar.application.project_persistence COMMAND pulsar_project_persistence_tests)
+
 if(NOT PULSAR_BUILD_FFMPEG)
   return()
 endif()

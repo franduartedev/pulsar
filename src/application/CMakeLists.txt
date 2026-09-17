@@ -4,6 +4,7 @@ add_library(pulsar_application
   src/media/media_probe_error.cpp
   src/project/media_asset.cpp
   src/project/project_document.cpp
+  src/project/project_codec.cpp
   src/timeline/timeline_clip_resolver.cpp
   src/playback/monotonic_clock.cpp
   src/playback/playback_time.cpp

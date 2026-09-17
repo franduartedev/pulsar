@@ -3,6 +3,7 @@
 #include <pulsar/domain/timeline/track_kind.hpp>
 
 #include <algorithm>
+#include <unordered_set>
 #include <limits>
 #include <stdexcept>
 #include <string>
@@ -53,6 +54,97 @@ ProjectDocument::ProjectDocument()
   allocator_.consume_timeline();
   allocator_.consume_track();
   timeline_.add_track(domain::Track{video_track_id_, domain::TrackKind::Video});
+}
+ProjectDocument ProjectDocument::restore(const ProjectRestoreState& state) {
+  ProjectDocument restored;
+  domain::Timeline timeline{state.timeline_id};
+  std::unordered_set<std::uint64_t> media_ids;
+  std::unordered_set<std::uint64_t> clip_ids;
+  std::unordered_set<std::uint64_t> track_ids;
+
+  std::uint64_t max_media_id = 0;
+  for (const auto& asset : state.assets) {
+    if (!media_ids.insert(asset.id().value()).second) {
+      throw std::invalid_argument{"duplicate media id in project restore state"};
+    }
+    max_media_id = std::max(max_media_id, asset.id().value());
+  }
+
+  bool designated_video_found = false;
+  std::size_t video_track_count = 0;
+  std::uint64_t max_track_id = 0;
+  std::uint64_t max_clip_id = 0;
+  for (const auto& restore_track : state.tracks) {
+    if (!track_ids.insert(restore_track.id.value()).second) {
+      throw std::invalid_argument{"duplicate track id in project restore state"};
+    }
+    if (restore_track.kind == domain::TrackKind::Video) {
+      ++video_track_count;
+    }
+    if (restore_track.id == state.video_track_id) {
+      if (restore_track.kind != domain::TrackKind::Video) {
+        throw std::invalid_argument{"designated video track is not a video track"};
+      }
+      designated_video_found = true;
+    }
+    max_track_id = std::max(max_track_id, restore_track.id.value());
+    domain::Track track{restore_track.id, restore_track.kind};
+    for (const auto& clip : restore_track.clips) {
+      if (!clip_ids.insert(clip.id().value()).second) {
+        throw std::invalid_argument{"duplicate clip id in project restore state"};
+      }
+      if (!media_ids.contains(clip.media_id().value())) {
+        throw std::invalid_argument{"clip references unknown media id"};
+      }
+      const auto asset = std::find_if(state.assets.begin(), state.assets.end(),
+                                      [&clip](const MediaAsset& item) {
+                                        return item.id() == clip.media_id();
+                                      });
+      if (asset == state.assets.end() || clip.source_range().end() > asset->playable_duration()) {
+        throw std::invalid_argument{"clip source range exceeds stored media duration"};
+      }
+      max_clip_id = std::max(max_clip_id, clip.id().value());
+      track.insert_clip(clip);
+    }
+    timeline.add_track(std::move(track));
+  }
+
+  if (!designated_video_found) {
+    throw std::invalid_argument{"designated video track is absent"};
+  }
+  if (video_track_count != 1) {
+    throw std::invalid_argument{"M9 project must contain exactly one video track"};
+  }
+  if (state.allocator_state.next_media_id == 0 ||
+      state.allocator_state.next_media_id <= max_media_id ||
+      state.allocator_state.next_media_id == std::numeric_limits<std::uint64_t>::max()) {
+    throw std::invalid_argument{"invalid next media allocator high-water mark"};
+  }
+  if (state.allocator_state.next_clip_id == 0 ||
+      state.allocator_state.next_clip_id <= max_clip_id ||
+      state.allocator_state.next_clip_id == std::numeric_limits<std::uint64_t>::max()) {
+    throw std::invalid_argument{"invalid next clip allocator high-water mark"};
+  }
+  if (state.allocator_state.next_timeline_id == 0 ||
+      state.allocator_state.next_timeline_id <= state.timeline_id.value() ||
+      state.allocator_state.next_timeline_id == std::numeric_limits<std::uint64_t>::max()) {
+    throw std::invalid_argument{"invalid next timeline allocator high-water mark"};
+  }
+  if (state.allocator_state.next_track_id == 0 ||
+      state.allocator_state.next_track_id <= max_track_id ||
+      state.allocator_state.next_track_id == std::numeric_limits<std::uint64_t>::max()) {
+    throw std::invalid_argument{"invalid next track allocator high-water mark"};
+  }
+
+  restored.timeline_ = std::move(timeline);
+  restored.video_track_id_ = state.video_track_id;
+  restored.assets_ = state.assets;
+  restored.allocator_.state = state.allocator_state;
+  restored.current_history_state_id_ = 1;
+  restored.saved_history_state_id_ = 1;
+  restored.next_history_state_id_ = 2;
+  restored.document_generation_ = 0;
+  return restored;
 }
 
 std::optional<MediaAsset> ProjectDocument::find_asset(domain::MediaId id) const {
