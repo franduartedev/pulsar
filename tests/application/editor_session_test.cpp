@@ -1,6 +1,7 @@
 #include "editor_session.hpp"
 
 #include <pulsar/application/media/media_probe.hpp>
+#include <pulsar/application/playback/playback_worker.hpp>
 
 #include <cassert>
 #include <cmath>
@@ -18,6 +19,23 @@ using application::VideoStreamInfo;
 using domain::MediaTime;
 using domain::Rational;
 using domain::TimeRange;
+
+
+class CountingWorker final : public application::PlaybackMediaWorker {
+public:
+  explicit CountingWorker(int& count) : count_{count} { ++count_; }
+  application::VideoSourceDescriptor describe() const override {
+    return application::VideoSourceDescriptor{application::StreamTimestamp{MediaTime::zero()},
+                                              Rational{1, 1}, MediaTime{100, Rational{1, 1}}, true};
+  }
+  void request_read(application::PlaybackGeneration) override {}
+  void request_seek_for_presentation(application::PlaybackGeneration,
+                                     application::StreamTimestamp) override {}
+  void cancel_pending() override {}
+  std::optional<application::PlaybackWorkerEvent> poll_event() override { return std::nullopt; }
+private:
+  int& count_;
+};
 
 class Probe final : public MediaProbe {
 public:
@@ -86,6 +104,23 @@ void session_read_model_and_selection() {
   assert(project.document().assets().size() == 2);
   assert(project.document().timeline().find_clip(first_clip) != nullptr);
   (void)second;
+
+  int worker_creations = 0;
+  EditorSession playback_session{[&worker_creations](const std::filesystem::path&, int) {
+    return std::make_unique<CountingWorker>(worker_creations);
+  }};
+  const auto playback_media = playback_session.processor().import_asset("playback.mp4", probe);
+  const auto playback_clip = playback_session.processor().add_clip(
+      playback_media, TimeRange{MediaTime::zero(), MediaTime{5, Rational{1, 1}}}, MediaTime::zero());
+  playback_session.synchronize_document_state();
+  playback_session.seek(MediaTime{1, Rational{1, 1}});
+  assert(worker_creations == 1);
+  const auto generation_before = playback_session.document().document_generation();
+  playback_session.select_clip(playback_clip);
+  playback_session.select_clip(std::nullopt);
+  playback_session.select_clip(playback_clip);
+  assert(worker_creations == 1);
+  assert(playback_session.document().document_generation() == generation_before);
 }
 
 } // namespace
