@@ -56,6 +56,21 @@ pulsar_apply_compiler_warnings(pulsar_command_history_tests)
 
 add_test(NAME pulsar.application.command_history COMMAND pulsar_command_history_tests)
 
+add_executable(pulsar_project_document_tests
+  application/project_document_test.cpp
+)
+
+target_link_libraries(pulsar_project_document_tests
+  PRIVATE
+    pulsar::application
+    pulsar::domain
+)
+
+pulsar_apply_project_options(pulsar_project_document_tests)
+pulsar_apply_compiler_warnings(pulsar_project_document_tests)
+
+add_test(NAME pulsar.application.project_document COMMAND pulsar_project_document_tests)
+
 add_executable(pulsar_playback_transport_tests
   application/playback_transport_test.cpp
 )
