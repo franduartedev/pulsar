@@ -16,6 +16,19 @@
 // (440 Hz left, 660 Hz right), stream 2 = AAC mono 22050 Hz (880 Hz).
 // AAC decodes natively to planar float (fltp), so the fixture exercises the
 // libswresample planar-to-interleaved normalization path.
+//
+// Multichannel fixture: tests/fixtures/audio_multichannel_s16p.nut,
+// generated once with the system ffmpeg 6.1.1 CLI and committed.
+// DC constant (k+1)*0.05 on each of 16 channels, 0.1 s at 8000 Hz,
+// encoded as planar s16le. Generation:
+//
+//   ffmpeg -y -f lavfi -i "aevalsrc=0.05:d=0.1:s=8000[a0];...[a15];
+//     [a0]...[a15]amerge=inputs=16" -c:a pcm_s16le_planar
+//     audio_multichannel_s16p.nut
+//
+// (One aevalsrc source per channel, values 0.05, 0.10, ..., 0.80.)
+// Stream 0 decodes natively to 16-plane s16p, which exceeds the 8 inline
+// AVFrame data pointers and must be collected via extended_data.
 #include <pulsar/application/commands/command_processor.hpp>
 #include <pulsar/application/media/audio_block.hpp>
 #include <pulsar/application/project/project_document.hpp>
@@ -277,6 +290,61 @@ void a0_identity_integration() {
   assert(blocks > 0);
 }
 
+// Regression for the fixed input-plane array: planar audio with more
+// channels than AV_NUM_DATA_POINTERS inline pointers must keep every
+// channel. Each channel carries a distinct DC level ((k+1)*0.05).
+void multichannel_planar_beyond_inline_planes() {
+  const std::filesystem::path path{std::filesystem::path{PULSAR_SOURCE_DIR} / "tests" /
+                                   "fixtures" / "audio_multichannel_s16p.nut"};
+  FFmpegAudioDecodeSession session{path, 0};
+  assert(session.stream_index() == 0);
+  assert(session.sample_rate() == 8000);
+  assert(session.channel_count() == 16);
+  assert(session.channel_count() > AV_NUM_DATA_POINTERS);
+
+  std::size_t total_frames = 0;
+  std::vector<double> channel_sums(16, 0.0);
+  std::size_t blocks = 0;
+  while (auto block = session.decode_next()) {
+    assert(block->channel_count() == 16);
+    assert(block->frame_count() > 0);
+    assert(block->samples().size() ==
+           block->frame_count() * static_cast<std::size_t>(16));
+    ++blocks;
+    total_frames += block->frame_count();
+    const auto& samples = block->samples();
+    for (std::size_t i = 0; i < samples.size(); ++i) {
+      assert(std::isfinite(samples[i]));
+      channel_sums[i % 16] += samples[i];
+    }
+  }
+  assert(blocks > 0);
+  // Exact PCM length: 0.1 s at 8000 Hz, no codec priming or padding.
+  assert(total_frames == 800);
+  for (int channel = 0; channel < 16; ++channel) {
+    const double mean =
+        channel_sums[static_cast<std::size_t>(channel)] / static_cast<double>(total_frames);
+    const double expected = 0.05 * static_cast<double>(channel + 1);
+    // s16 quantization step is ~3e-5; tolerance stays far below the 0.05
+    // spacing between adjacent channels, so every channel is distinguished.
+    assert(std::fabs(mean - expected) < 2e-3);
+  }
+  // High-index channels (beyond the old inline limit) carry their own
+  // signal: channel 15 is ~0.8, not zero, null, or a copy of a low channel.
+  const double high_mean = channel_sums[15] / static_cast<double>(total_frames);
+  assert(high_mean > 0.79);
+  for (int channel = 0; channel + 1 < 16; ++channel) {
+    const double mean = channel_sums[static_cast<std::size_t>(channel)] /
+                        static_cast<double>(total_frames);
+    const double next = channel_sums[static_cast<std::size_t>(channel + 1)] /
+                        static_cast<double>(total_frames);
+    assert(next > mean);
+  }
+  for (int i = 0; i < 3; ++i) {
+    assert(!session.decode_next().has_value());
+  }
+}
+
 // Timestamp contract: block timing uses the audio stream time base,
 // is nondecreasing, and is never compared against video timing.
 void timestamp_contract() {
@@ -307,4 +375,5 @@ int main() {
   invalid_stream_selection();
   a0_identity_integration();
   timestamp_contract();
+  multichannel_planar_beyond_inline_planes();
 }

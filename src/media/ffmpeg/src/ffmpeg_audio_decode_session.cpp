@@ -295,14 +295,22 @@ private:
     }
     std::vector<float> samples(checked_sample_capacity(out_capacity, channel_count_));
     std::uint8_t* output = reinterpret_cast<std::uint8_t*>(samples.data());
-    const std::uint8_t* input_planes[AV_NUM_DATA_POINTERS] = {nullptr};
+    // Plane pointers scale with the decoded channel count: planar audio
+    // with more than AV_NUM_DATA_POINTERS channels exposes the extra planes
+    // through AVFrame::extended_data only.
     const int plane_count =
         av_sample_fmt_is_planar(input_sample_format_) != 0 ? channel_count_ : 1;
-    for (int plane = 0; plane < plane_count && plane < AV_NUM_DATA_POINTERS; ++plane) {
-      input_planes[plane] = frame.extended_data[plane];
+    std::vector<const std::uint8_t*> input_planes(static_cast<std::size_t>(plane_count));
+    for (int plane = 0; plane < plane_count; ++plane) {
+      const std::uint8_t* data = frame.extended_data[static_cast<std::size_t>(plane)];
+      if (data == nullptr) {
+        throw MediaDecodeError{MediaDecodeErrorCode::DecodeFailed,
+                               "FFmpeg audio frame is missing a channel plane"};
+      }
+      input_planes[static_cast<std::size_t>(plane)] = data;
     }
-    const int converted = swr_convert(resampler_.get(), &output, out_capacity, input_planes,
-                                      frame.nb_samples);
+    const int converted = swr_convert(resampler_.get(), &output, out_capacity,
+                                      input_planes.data(), frame.nb_samples);
     if (converted < 0) {
       throw MediaDecodeError{MediaDecodeErrorCode::DecodeFailed,
                              "libswresample could not convert audio samples: " +
