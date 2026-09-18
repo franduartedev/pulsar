@@ -181,6 +181,21 @@ target_compile_definitions(pulsar_audio_model_tests PRIVATE PULSAR_SOURCE_DIR="$
 
 add_test(NAME pulsar.application.audio_model COMMAND pulsar_audio_model_tests)
 
+add_executable(pulsar_audio_output_engine_tests
+  application/audio_output_engine_test.cpp
+)
+
+target_link_libraries(pulsar_audio_output_engine_tests
+  PRIVATE
+    pulsar::application
+    pulsar::domain
+)
+
+pulsar_apply_project_options(pulsar_audio_output_engine_tests)
+pulsar_apply_compiler_warnings(pulsar_audio_output_engine_tests)
+
+add_test(NAME pulsar.application.audio_output_engine COMMAND pulsar_audio_output_engine_tests)
+
 add_executable(pulsar_editor_session_tests
   application/editor_session_test.cpp
   ${CMAKE_SOURCE_DIR}/apps/pulsar-desktop/src/editor_session.cpp
@@ -214,6 +229,32 @@ pulsar_apply_project_options(pulsar_ffmpeg_probe_tests)
 pulsar_apply_compiler_warnings(pulsar_ffmpeg_probe_tests)
 
 add_test(NAME pulsar.media.ffmpeg_probe COMMAND pulsar_ffmpeg_probe_tests)
+
+if(PULSAR_BUILD_QT_AUDIO)
+  find_package(Qt6 REQUIRED COMPONENTS Core Multimedia)
+
+  add_executable(pulsar_qt_audio_output_tests
+    media/qt_audio_output_test.cpp
+  )
+
+  set_target_properties(pulsar_qt_audio_output_tests PROPERTIES
+    AUTOMOC ON
+  )
+
+  target_link_libraries(pulsar_qt_audio_output_tests
+    PRIVATE
+      pulsar::media_qt_audio
+      pulsar::application
+      pulsar::domain
+      Qt6::Core
+      Qt6::Multimedia
+  )
+
+  pulsar_apply_project_options(pulsar_qt_audio_output_tests)
+  pulsar_apply_compiler_warnings(pulsar_qt_audio_output_tests)
+
+  add_test(NAME pulsar.media.qt_audio_output COMMAND pulsar_qt_audio_output_tests)
+endif()
 
 add_executable(pulsar_ffmpeg_audio_decode_session_tests
   media/ffmpeg_audio_decode_session_test.cpp
