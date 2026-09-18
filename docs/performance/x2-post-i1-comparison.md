@@ -19,7 +19,7 @@ accurate FFmpeg 6.1 declarations plus a `.pc` file, linked against the real
 system `libswscale.so.7`. Product code, CMake files and flags are untouched;
 `CMAKE_BUILD_TYPE=Debug` as in X1.
 
-## Fixtures (byte-identical to X1)
+## Fixtures (same generation commands and file sizes as X1)
 
 ```sh
 /usr/bin/ffmpeg -hide_banner -loglevel error -y -f lavfi \
@@ -211,8 +211,8 @@ Main phase: X1 RED (C2 at ~tick 4) → X2 healthy 300/300 with 150/150
 sustained reads, latencies p50/p95/max 8776/10704/12432 µs (first real
 distribution; ~3.7× the 1080p p50 — resolution scaling now measurable).
 Seek epoch: X1 all-zero incomplete → X2 all-zero incomplete (stable across
-two runs); newly confirmed as harness-budget artifact on heavy media, not
-evidence for or against I1. Desktop/conversion: blocked in both.
+two runs); consistent with the same harness-budget limitation observed in X1 —
+incomplete data, not a product verdict. Desktop/conversion: blocked in both.
 
 ## X2 decision: **A. I1 CONFIRMED BY CONTROLLED X2**
 
@@ -232,7 +232,9 @@ evidence for or against I1. Desktop/conversion: blocked in both.
 
 ## Limitations
 
-Debug build; synthetic fixtures; two D3 runs; fake-clock harness (counts
-deterministic, wall/latency observational); 2160p seek budget artifact;
+Debug build; synthetic fixtures (same commands and sizes as X1; byte identity
+not hash-verified); two D3 runs; fake-clock harness (counts
+deterministic, wall/latency observational); 2160p seek data incomplete (same
+signature as X1, no verdict);
 no desktop coverage; no "fast/slow" claims — X1 throughput numbers were
 error-limited and are not compared as performance.
