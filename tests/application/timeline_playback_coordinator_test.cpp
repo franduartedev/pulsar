@@ -539,6 +539,35 @@ void seek_preserves_intent_tests() {
   assert(paused.timeline_position() == time(13));
 }
 
+void edit_shrinking_timeline_reanchors_stale_playhead() {
+  Fixture fixture;
+  const domain::ClipId clip =
+      fixture.processor.add_clip(fixture.media_one, TimeRange{time(0), time(10)}, time(0));
+  FakeClock clock;
+  TimelinePlaybackCoordinator coordinator{clock, fixture.factory()};
+  coordinator.set_snapshot(fixture.document.snapshot());
+  (void)coordinator.update();
+  coordinator.play();
+  clock.advance(time(8));
+  assert(coordinator.timeline_position() == time(8));
+  // Edit shrinks the timeline below the live playhead: the next update must
+  // canonically reanchor to the new exact duration instead of oscillating.
+  fixture.processor.remove_clip(clip);
+  coordinator.set_snapshot(fixture.document.snapshot());
+  auto presentation = coordinator.update();
+  assert(std::holds_alternative<TimelineEndedPresentation>(presentation));
+  assert(coordinator.timeline_position() == time(0));
+  assert(coordinator.intent() == application::PlaybackIntent::Playing);
+  assert(std::holds_alternative<TimelineEndedPresentation>(coordinator.update()));
+  // Undo restores the clips; the preserved position resolves back to Present.
+  assert(fixture.processor.undo());
+  coordinator.set_snapshot(fixture.document.snapshot());
+  presentation = coordinator.update();
+  assert(std::holds_alternative<TimelinePresentSample>(presentation));
+  assert(coordinator.timeline_position() == time(0));
+  assert(coordinator.intent() == application::PlaybackIntent::Playing);
+}
+
 } // namespace
 
 int main() {
@@ -556,4 +585,5 @@ int main() {
   advance_permission_matrix_tests();
   pause_overrides_advance_tests();
   seek_preserves_intent_tests();
+  edit_shrinking_timeline_reanchors_stale_playhead();
 }
