@@ -357,6 +357,8 @@ void save_project_failure_marks_nothing_saved() {
   const auto current = session.document().history_state_id();
   const auto saved_before = session.document().saved_history_state_id();
   const auto generation = session.document().document_generation();
+  const bool had_undo = session.can_undo();
+  const bool had_redo = session.can_redo();
 
   FakeProjectRepository repository;
   repository.throw_on_save = true;
@@ -371,6 +373,8 @@ void save_project_failure_marks_nothing_saved() {
   assert(session.document().history_state_id() == current);
   assert(session.document().is_dirty());
   assert(session.document().document_generation() == generation);
+  assert(session.can_undo() == had_undo);
+  assert(session.can_redo() == had_redo);
 }
 
 void save_project_marks_captured_snapshot_not_current_state() {
