@@ -449,6 +449,30 @@ void await_settled(pulsar::application::PlaybackSession& session) {
   }
 }
 
+// Single-line form for key=value output; error text must not break the schema.
+std::string single_line(std::string text) {
+  for (char& c : text) {
+    if (c == '\n' || c == '\r') {
+      c = ' ';
+    }
+  }
+  return text;
+}
+
+// Terminal product error visible after one evaluated update, or empty.
+std::string update_error(const pulsar::application::PresentationDecision& decision,
+                         const pulsar::application::PlaybackSession& session) {
+  if (const auto* temporal =
+          std::get_if<pulsar::application::PresentationTemporalError>(&decision)) {
+    return single_line(temporal->message);
+  }
+  if (session.availability() == pulsar::application::PlaybackAvailability::Error) {
+    const auto message = session.error_message();
+    return message.has_value() ? single_line(*message) : std::string{"session error"};
+  }
+  return "";
+}
+
 int run_playback_metrics(const std::filesystem::path& path, int ticks) {
   if (ticks <= 0) {
     std::cerr << "Playback metrics failed: tick count must be positive\n";
@@ -478,18 +502,29 @@ int run_playback_metrics(const std::filesystem::path& path, int ticks) {
 
   // Phase A: main playback. Exactly one scheduler evaluation per fake tick;
   // newly issued reads settle cooperatively without advancing fake time.
+  // A terminal session error stops the workload immediately; metrics gathered
+  // so far are preserved and reported.
   VisualConsumer consumer;
   session.play();
   const pulsar::domain::MediaTime tick_step{1, pulsar::domain::Rational{1, 60}};
+  int main_completed_ticks = 0;
+  std::string main_error;
   for (int i = 0; i < ticks; ++i) {
     const auto reads_before = observed->stats().read_request_count;
     const auto completions_before = observed->stats().read_completion_count;
     clock.advance(tick_step);
-    consumer.consider_decision(*mailbox, observed->source_epoch(), session.update());
+    const auto decision = session.update();
+    consumer.consider_decision(*mailbox, observed->source_epoch(), decision);
     if (observed->stats().read_request_count > reads_before) {
       (void)await_read_completion(*observed, completions_before);
     }
+    ++main_completed_ticks;
+    main_error = update_error(decision, session);
+    if (!main_error.empty()) {
+      break;
+    }
   }
+  const bool main_healthy = main_error.empty();
 
   // Main snapshot is captured BEFORE the seek experiment below, so top-level
   // fields describe main playback only.
@@ -519,6 +554,9 @@ int run_playback_metrics(const std::filesystem::path& path, int ticks) {
   }
 
   bool seek_completed = false;
+  bool seek_read_exercised = false;
+  bool seek_healthy = false;
+  std::string seek_error;
   pulsar::application::PresentationSchedulerStats epoch_sched{};
   std::uint64_t epoch_read_delta = 0;
   std::uint64_t epoch_completion_delta = 0;
@@ -537,19 +575,35 @@ int run_playback_metrics(const std::filesystem::path& path, int ticks) {
     consumer.consider_decision(*mailbox, observed->source_epoch(), session.update());
     // Advance fake time tick by tick until one normal post-seek read has been
     // both issued and completed (seek hit/lookahead settling included).
+    // A terminal error stops the workload; metrics so far are preserved.
     for (int i = 0; i < 3000; ++i) {
       const auto tick_reads = observed->stats().read_request_count;
       const auto tick_completions = observed->stats().read_completion_count;
       clock.advance(tick_step);
-      consumer.consider_decision(*mailbox, observed->source_epoch(), session.update());
+      const auto decision = session.update();
+      consumer.consider_decision(*mailbox, observed->source_epoch(), decision);
       if (observed->stats().read_request_count > tick_reads) {
         (void)await_read_completion(*observed, tick_completions);
+      }
+      seek_error = update_error(decision, session);
+      if (!seek_error.empty()) {
+        break;
       }
       if (observed->stats().read_request_count > reads_before &&
           observed->stats().read_completion_count > completions_before) {
         seek_completed = true;
         break;
       }
+    }
+    if (seek_completed) {
+      // Deliberate ingestion update for the completed read: no clock advance,
+      // exactly one scheduler evaluation, fed through the visual consumer.
+      // This is what reveals a duplicate-timestamp defect if present.
+      const auto decision = session.update();
+      consumer.consider_decision(*mailbox, observed->source_epoch(), decision);
+      seek_error = update_error(decision, session);
+      seek_read_exercised = true;
+      seek_healthy = seek_error.empty();
     }
     epoch_sched = session.scheduler_stats();
     epoch_read_delta = observed->stats().read_request_count - reads_before;
@@ -569,6 +623,10 @@ int run_playback_metrics(const std::filesystem::path& path, int ticks) {
   std::cout << "media=" << path.filename().string() << '\n';
   std::cout << "ticks=" << ticks << '\n';
   std::cout << "wall_ms=" << main_wall_ms << '\n';
+  std::cout << "main.requested_ticks=" << ticks << '\n';
+  std::cout << "main.completed_ticks=" << main_completed_ticks << '\n';
+  std::cout << "main.healthy=" << (main_healthy ? 1 : 0) << '\n';
+  std::cout << "main.error_message=" << main_error << '\n';
   std::cout << "session.stale_event_count=" << main_session.stale_event_count << '\n';
   std::cout << "session.control_accept_count=" << main_session.control_accept_count << '\n';
   std::cout << "scheduler.starvation_count=" << main_scheduler.starvation_count << '\n';
@@ -592,6 +650,9 @@ int run_playback_metrics(const std::filesystem::path& path, int ticks) {
   std::cout << "harness.visual_misses=" << main_misses << '\n';
   std::cout << "seek_epoch.available=" << (seek_available ? 1 : 0) << '\n';
   std::cout << "seek_epoch.completed=" << (seek_completed ? 1 : 0) << '\n';
+  std::cout << "seek_epoch.read_exercised=" << (seek_read_exercised ? 1 : 0) << '\n';
+  std::cout << "seek_epoch.healthy=" << (seek_healthy ? 1 : 0) << '\n';
+  std::cout << "seek_epoch.error_message=" << seek_error << '\n';
   std::cout << "seek_epoch.target_num=" << target_seconds.numerator() << '\n';
   std::cout << "seek_epoch.target_den=" << target_seconds.denominator() << '\n';
   std::cout << "seek_epoch.starvation_count=" << epoch_sched.starvation_count << '\n';
@@ -605,8 +666,12 @@ int run_playback_metrics(const std::filesystem::path& path, int ticks) {
             << (epoch_mail_after.evicted - epoch_mail_before.evicted) << '\n';
   std::cout << "seek_epoch.mailbox_current_size=" << epoch_mail_after.current_size << '\n';
   std::cout << "seek_epoch.visual_misses=" << epoch_misses << '\n';
-  if (seek_available && !seek_completed) {
-    std::cerr << "Playback metrics failed: seek epoch did not settle\n";
+  if (!main_healthy) {
+    std::cerr << "Playback metrics failed: main playback entered error: " << main_error << '\n';
+    return 2;
+  }
+  if (seek_available && (!seek_read_exercised || !seek_healthy)) {
+    std::cerr << "Playback metrics failed: seek epoch not healthy\n";
     return 2;
   }
   return 0;
