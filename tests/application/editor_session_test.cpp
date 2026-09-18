@@ -519,6 +519,15 @@ void missing_media_survives_restore_without_workers() {
          std::filesystem::path{"media/offline.mp4"});
   const auto* clip = loaded.document().timeline().find_clip(domain::ClipId{9});
   assert(clip != nullptr);
+  assert(clip->id() == domain::ClipId{9});
+  assert(clip->media_id() == domain::MediaId{7});
+  assert((clip->source_range().start() == MediaTime::zero()));
+  assert((clip->source_range().end() == MediaTime{4, Rational{1, 1}}));
+  assert((clip->timeline_start() == MediaTime::zero()));
+  const auto restored_asset = loaded.document().find_asset(domain::MediaId{7});
+  assert(restored_asset.has_value());
+  assert(restored_asset->availability() == application::MediaAvailability::Unavailable);
+  assert(restored_asset->availability_reason() == std::optional<std::string>{"gone"});
   assert((clip->timeline_range().start() == MediaTime::zero()));
   assert((loaded.document().timeline().duration() == MediaTime{4, Rational{1, 1}}));
   assert(loaded.timeline_views().size() == 1);
@@ -540,10 +549,23 @@ void failed_candidate_preserves_active_session() {
       media, TimeRange{MediaTime::zero(), MediaTime{4, Rational{1, 1}}}, MediaTime::zero());
   active->synchronize_document_state();
   active->select_clip(clip);
+  // One more edit undone immediately: redo becomes non-empty while the
+  // document stays dirty from earlier unsaved work.
+  active->processor().move_clip(clip, active->document().video_track_id(),
+                                MediaTime{1, Rational{1, 1}});
+  assert(active->undo());
+  assert(active->processor().undo_size() > 0);
+  assert(active->processor().redo_size() > 0);
+
+  const auto editorial_before = application::ProjectCodec::encode(active->document().snapshot());
   const auto history_before = active->document().history_state_id();
+  const auto saved_before = active->document().saved_history_state_id();
+  const auto generation_before = active->document().document_generation();
+  const auto selection_before = active->selected_clip();
+  const auto undo_before = active->processor().undo_size();
+  const auto redo_before = active->processor().redo_size();
   assert(active->document().is_dirty());
-  assert(active->selected_clip() == clip);
-  assert(active->can_undo());
+  assert(selection_before == clip);
 
   application::VideoAssetMetadata metadata{"h264", 1920, 1080, Rational{1, 90000}, std::nullopt,
                                            std::nullopt};
@@ -565,10 +587,15 @@ void failed_candidate_preserves_active_session() {
     rejected = true;
   }
   assert(rejected);
+  assert(application::ProjectCodec::encode(active->document().snapshot()) == editorial_before);
   assert(active->document().timeline().find_clip(clip) != nullptr);
   assert(active->document().history_state_id() == history_before);
+  assert(active->document().saved_history_state_id() == saved_before);
+  assert(active->document().document_generation() == generation_before);
   assert(active->document().is_dirty());
-  assert(active->selected_clip() == clip);
+  assert(active->selected_clip() == selection_before);
+  assert(active->processor().undo_size() == undo_before);
+  assert(active->processor().redo_size() == redo_before);
   assert(active->can_undo());
 }
 
