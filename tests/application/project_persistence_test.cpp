@@ -318,7 +318,9 @@ void repository_normalizes_codec_failures() {
     (void)repository.load(malformed);
   } catch (const application::ProjectRepositoryError& error) {
     load_rejected = true;
-    assert(std::string{error.what()}.find("cannot decode project file") != std::string::npos);
+    const std::string message{error.what()};
+    assert(message.find("cannot decode project file") != std::string::npos);
+    assert(message.find("invalid header/version") != std::string::npos);
   }
   assert(load_rejected);
 
@@ -336,7 +338,9 @@ void repository_normalizes_codec_failures() {
     (void)repository.save(destination, oversized);
   } catch (const application::ProjectRepositoryError& error) {
     save_rejected = true;
-    assert(std::string{error.what()}.find("cannot encode project") != std::string::npos);
+    const std::string message{error.what()};
+    assert(message.find("cannot encode project") != std::string::npos);
+    assert(message.find("quoted string exceeds size limit") != std::string::npos);
   }
   assert(save_rejected);
   {
