@@ -118,7 +118,7 @@ void DesktopController::publishTimeline() {
   const bool old_has_media = has_media_;
   const QString old_duration = duration_text_;
   timeline_clips_.clear();
-  if (!active_session_) { selected_clip_key_.clear(); emit timelineChanged(); return; }
+  if (!active_session_) { selected_clip_key_.clear(); emit timelineChanged(); publishProjectDirty(); return; }
   selected_clip_key_ = active_session_->selected_clip() ? QString::number(active_session_->selected_clip()->value()) : QString{};
   for (const auto& view : active_session_->timeline_views()) {
     const auto* clip = active_session_->document().timeline().find_clip(view.id); if (!clip) continue;
@@ -143,6 +143,7 @@ void DesktopController::publishTimeline() {
   timeline_playhead_progress_ = active_session_->pixel_at(active_session_->playback_position(), 1.0);
   emit timelineChanged();
   emit editActionStateChanged();
+  publishProjectDirty();
   if (old_has_media != has_media_ || old_duration != duration_text_) emit mediaChanged();
 }
 void DesktopController::installTimelineAsset(const pulsar::application::MediaProbeResult& result) {
@@ -177,6 +178,7 @@ void DesktopController::saveProject(const QString& path) {
       setStatus(QStringLiteral("Proyecto guardado (durabilidad no confirmada)"));
     }
     clearError();
+    publishProjectDirty();
   } catch (const pulsar::application::ProjectRepositoryError& error) {
     setError(QString::fromUtf8(error.what()));
   }
@@ -266,6 +268,14 @@ void DesktopController::displayLease(const pulsar::application::TimelinePresentS
 void DesktopController::clearProgram(QString state){const bool changed=viewer_state_!=state||!preview_source_.isEmpty();image_provider_.clear();preview_source_.clear();displayed_identity_.reset();viewer_state_=std::move(state);if(changed)emit previewChanged();}
 void DesktopController::updateTick(){if(!active_session_||!has_media_){return;}const auto presentation=active_session_->update_playback();presentTimeline(presentation);const bool now_playing=active_session_->playback_intent()==pulsar::application::PlaybackIntent::Playing;if(now_playing!=playing_){playing_=now_playing;emit playbackChanged();}updatePositionProperties();updateDiagnostics();}
 void DesktopController::updatePositionProperties(){if(!active_session_)return;const auto position=active_session_->playback_position();const auto duration=active_session_->timeline_duration();position_text_=formatTime(position);duration_text_=formatTime(duration);progress_=duration>MediaTime::zero()?std::clamp(secondsAsDouble(position)/secondsAsDouble(duration),0.0,1.0):0.0;timeline_playhead_progress_=active_session_->pixel_at(position,1.0);emit positionChanged();emit timelinePlayheadChanged();emit editActionStateChanged();}
+void DesktopController::publishProjectDirty() {
+  const bool now = projectDirty();
+  if (now == published_project_dirty_) {
+    return;
+  }
+  published_project_dirty_ = now;
+  emit projectDirtyChanged();
+}
 void DesktopController::updateDiagnostics(){debug_metrics_=QString("program_frames=%1 visual_misses=%2 conversion_ms=%3").arg(displayed_frames_).arg(visual_misses_).arg(std::chrono::duration_cast<std::chrono::milliseconds>(last_conversion_time_).count());emit diagnosticsChanged();}
 QString DesktopController::performanceSnapshot() const {
   auto summarize = [](const DurationSampleRing& ring) {

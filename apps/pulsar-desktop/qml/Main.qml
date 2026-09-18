@@ -13,7 +13,7 @@ Window {
     minimumWidth: 960
     minimumHeight: 600
     visible: true
-    title: "PULSAR"
+    title: controller.projectDirty ? "PULSAR *" : "PULSAR"
     color: Theme.workspace
 
     // Viewer stays dominant: side panels take bounded relative slices.

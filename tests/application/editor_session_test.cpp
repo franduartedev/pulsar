@@ -402,6 +402,27 @@ void save_project_marks_captured_snapshot_not_current_state() {
   assert(session.document().history_state_id() != state_a);
   assert(session.document().saved_history_state_id() == state_a);
   assert(session.document().is_dirty());
+  assert(session.is_dirty());
+}
+
+void editor_session_dirty_mirrors_saved_identity() {
+  Probe probe;
+  EditorSession session;
+  assert(!session.is_dirty());
+  (void)session.processor().import_asset("dirty.mp4", probe);
+  assert(session.is_dirty());
+  FakeProjectRepository repository;
+  (void)session.save_project("project.pulsar", repository);
+  assert(!session.is_dirty());
+  (void)session.processor().add_clip(
+      session.document().find_asset(domain::MediaId{1}).value().id(),
+      domain::TimeRange{domain::MediaTime::zero(), domain::MediaTime{1, domain::Rational{1, 1}}},
+      domain::MediaTime::zero());
+  assert(session.is_dirty());
+  assert(session.undo());
+  assert(!session.is_dirty());
+  assert(session.redo());
+  assert(session.is_dirty());
 }
 
 void duration_ring_wraparound() {
@@ -620,6 +641,7 @@ int main() {
   save_project_uncertain_durability_still_commits();
   save_project_failure_marks_nothing_saved();
   save_project_marks_captured_snapshot_not_current_state();
+  editor_session_dirty_mirrors_saved_identity();
   restored_session_matches_persisted_editorial_state();
   missing_media_survives_restore_without_workers();
   failed_candidate_preserves_active_session();

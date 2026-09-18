@@ -125,6 +125,51 @@ void snapshot_isolated_and_clip_candidate_is_observation() {
   assert(document.next_clip_id() == domain::ClipId{2});
 }
 
+void dirty_follows_saved_history_identity() {
+  application::ProjectDocument document;
+  application::CommandProcessor processor{document};
+  FakeProbe probe{probe_result()};
+  assert(!document.is_dirty());
+  assert(document.history_state_id() == 1);
+
+  const auto media = processor.import_asset("media/identity.mp4", probe);
+  assert(document.history_state_id() == 2);
+  assert(document.is_dirty());
+  document.mark_history_state_saved(2);
+  assert(!document.is_dirty());
+
+  (void)processor.add_clip(
+      media,
+      domain::TimeRange{domain::MediaTime::zero(), domain::MediaTime{1, domain::Rational{1, 1}}},
+      domain::MediaTime::zero());
+  assert(document.history_state_id() == 3);
+  assert(document.is_dirty());
+
+  assert(processor.undo());
+  assert(document.history_state_id() == 2);
+  assert(!document.is_dirty());
+  assert(processor.redo());
+  assert(document.history_state_id() == 3);
+  assert(document.is_dirty());
+  assert(processor.undo());
+  assert(document.history_state_id() == 2);
+  assert(!document.is_dirty());
+
+  // Branching from the saved state mints a fresh identity: dirty again,
+  // redo cleared, and undo returns exactly to the saved state.
+  (void)processor.add_clip(
+      media,
+      domain::TimeRange{domain::MediaTime::zero(), domain::MediaTime{1, domain::Rational{1, 1}}},
+      domain::MediaTime{10, domain::Rational{1, 1}});
+  const auto branched = document.history_state_id();
+  assert(branched != 2 && branched != 3);
+  assert(document.is_dirty());
+  assert(!processor.can_redo());
+  assert(processor.undo());
+  assert(document.history_state_id() == 2);
+  assert(!document.is_dirty());
+}
+
 } // namespace
 
 int main() {
@@ -133,4 +178,5 @@ int main() {
   unavailable_asset_is_valid_value_data();
   failed_import_does_not_mutate_document();
   snapshot_isolated_and_clip_candidate_is_observation();
+  dirty_follows_saved_history_identity();
 }

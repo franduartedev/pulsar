@@ -38,6 +38,7 @@ class DesktopController final : public QObject {
   Q_PROPERTY(bool hasMedia READ hasMedia NOTIFY mediaChanged)
   Q_PROPERTY(bool playing READ playing NOTIFY playbackChanged)
   Q_PROPERTY(bool busy READ busy NOTIFY busyChanged)
+  Q_PROPERTY(bool projectDirty READ projectDirty NOTIFY projectDirtyChanged)
   Q_PROPERTY(bool previewLate READ previewLate NOTIFY technicalStatusChanged)
   Q_PROPERTY(QString debugMetrics READ debugMetrics NOTIFY diagnosticsChanged)
   Q_PROPERTY(QVariantList timelineClips READ timelineClips NOTIFY timelineChanged)
@@ -64,6 +65,9 @@ public:
   [[nodiscard]] bool hasMedia() const { return has_media_; }
   [[nodiscard]] bool playing() const { return playing_; }
   [[nodiscard]] bool busy() const { return busy_; }
+  [[nodiscard]] bool projectDirty() const noexcept {
+    return active_session_ && active_session_->is_dirty();
+  }
   [[nodiscard]] bool previewLate() const { return preview_late_; }
   [[nodiscard]] QString debugMetrics() const { return debug_metrics_; }
   // On-demand desktop performance snapshot for D3 evidence. Calculates
@@ -102,6 +106,7 @@ public:
 signals:
   void statusChanged(); void technicalStatusChanged(); void mediaChanged(); void errorChanged();
   void previewChanged(); void positionChanged(); void playbackChanged(); void busyChanged();
+  void projectDirtyChanged();
   void diagnosticsChanged(); void timelineChanged(); void timelinePlayheadChanged(); void editActionStateChanged(); void focusImportPathRequested();
 private:
   struct WorkerCommand { std::filesystem::path path; std::uint64_t generation; };
@@ -121,6 +126,7 @@ private:
   void updatePositionProperties();
   void updateDiagnostics();
   void publishTimeline();
+  void publishProjectDirty();
   void installTimelineAsset(const pulsar::application::MediaProbeResult&);
   void presentTimeline(const pulsar::application::TimelinePresentation&);
   void clearProgram(QString state);
@@ -138,7 +144,7 @@ private:
   std::uint64_t import_request_generation_{0};
   std::thread worker_; mutable std::mutex mutex_; std::condition_variable wake_; bool stop_worker_{false}; std::optional<WorkerCommand> pending_command_;
   QString status_{"Vacío"}; QString technical_status_{"Preview CPU"}; QString media_name_; QString metadata_; QString error_message_; QString preview_source_; QString viewer_state_{"empty"}; QString position_text_{"00:00:00.000"}; QString duration_text_{"--:--:--.---"}; QString debug_metrics_; QVariantList timeline_clips_; QVariantList timeline_ruler_ticks_; QString timeline_duration_text_{"00:00:00.000"}; QString selected_clip_key_;
-  double timeline_playhead_progress_{0.0}; double progress_{0.0}; bool has_media_{false}; bool playing_{false}; bool busy_{false}; bool preview_late_{false};
+  double timeline_playhead_progress_{0.0}; double progress_{0.0}; bool has_media_{false}; bool playing_{false}; bool busy_{false}; bool preview_late_{false}; bool published_project_dirty_{false};
   std::optional<VisualIdentity> displayed_identity_; std::uint64_t preview_revision_{0}; std::uint64_t stale_visual_frames_{0}; std::uint64_t displayed_frames_{0}; std::uint64_t visual_misses_{0}; std::uint64_t seek_count_{0}; std::uint64_t read_count_{0}; std::chrono::nanoseconds last_conversion_time_{0};
   // Bounded D3 diagnostics. Single-writer (GUI/control thread); no locks.
   std::uint64_t worker_construction_count_{0};
