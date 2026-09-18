@@ -10,10 +10,28 @@ TimelinePlaybackCoordinator::TimelinePlaybackCoordinator(const MonotonicClock& c
                                                          PlaybackWorkerFactory worker_factory)
     : clock_{clock}, worker_factory_{std::move(worker_factory)}, transport_{clock} {}
 
-void TimelinePlaybackCoordinator::set_snapshot(ProjectSnapshot snapshot) {
-  const domain::MediaTime position = timeline_position();
+void TimelinePlaybackCoordinator::set_advance_permission(TimelineAdvancePermission permission) {
+  advance_permission_ = permission;
+}
+
+void TimelinePlaybackCoordinator::synchronize_transport() {
+  if (intent_ == PlaybackIntent::Playing &&
+      advance_permission_ == TimelineAdvancePermission::Advance) {
+    transport_.play();
+  } else {
+    transport_.pause();
+  }
+}
+
+void TimelinePlaybackCoordinator::reanchor_transport(domain::MediaTime position) {
   transport_.pause();
   transport_.seek(PlaybackPosition{position});
+}
+
+void TimelinePlaybackCoordinator::set_snapshot(ProjectSnapshot snapshot) {
+  const domain::MediaTime position = timeline_position();
+  set_advance_permission(TimelineAdvancePermission::Hold);
+  reanchor_transport(position);
   reset_source();
   snapshot_ = std::move(snapshot);
   segment_kind_ = SegmentKind::None;
@@ -24,6 +42,7 @@ void TimelinePlaybackCoordinator::set_snapshot(ProjectSnapshot snapshot) {
   segment_end_.reset();
   const auto outcome = resolve_clip_at(*snapshot_, snapshot_->video_track_id, position);
   reconcile(outcome, position, true);
+  synchronize_transport();
 }
 
 void TimelinePlaybackCoordinator::play() {
@@ -31,17 +50,12 @@ void TimelinePlaybackCoordinator::play() {
   if (!snapshot_.has_value()) {
     return;
   }
-  if (segment_kind_ == SegmentKind::Gap || segment_kind_ == SegmentKind::Missing) {
-    transport_.play();
-  } else if (segment_kind_ == SegmentKind::Clip && source_session_ != nullptr &&
-             source_session_->availability() == PlaybackAvailability::Ready) {
-    transport_.play();
-  }
+  synchronize_transport();
 }
 
 void TimelinePlaybackCoordinator::pause() {
   intent_ = PlaybackIntent::Paused;
-  transport_.pause();
+  synchronize_transport();
 }
 
 void TimelinePlaybackCoordinator::seek(domain::MediaTime timeline_position_value) {
@@ -51,11 +65,11 @@ void TimelinePlaybackCoordinator::seek(domain::MediaTime timeline_position_value
   if (!snapshot_.has_value()) {
     throw std::invalid_argument{"cannot seek without a project snapshot"};
   }
-  transport_.pause();
-  transport_.seek(PlaybackPosition{timeline_position_value});
+  reanchor_transport(timeline_position_value);
   const auto outcome = resolve_clip_at(*snapshot_, snapshot_->video_track_id,
                                        timeline_position_value);
   reconcile(outcome, timeline_position_value, true);
+  synchronize_transport();
 }
 
 TimelinePresentation TimelinePlaybackCoordinator::update() {
@@ -129,10 +143,10 @@ void TimelinePlaybackCoordinator::enter_clip(const ResolvedClip& clip, bool forc
     return;
   }
 
-  transport_.pause();
+  set_advance_permission(TimelineAdvancePermission::Hold);
+  synchronize_transport();
   source_creation_error_.reset();
-  const PlaybackPosition source_position{clip.source_time};
-  const bool reuse_session = source_session_ != nullptr && active_clip_.has_value() &&
+  const PlaybackPosition source_position{clip.source_time};  const bool reuse_session = source_session_ != nullptr && active_clip_.has_value() &&
                              active_clip_->media_id == clip.media_id;
   if (reuse_session) {
     source_session_->seek(source_position);
@@ -173,9 +187,8 @@ void TimelinePlaybackCoordinator::enter_gap(const TimelineGap& gap, bool force_t
   segment_end_ = next_gap_boundary(gap.position);
   segment_kind_ = SegmentKind::Gap;
   current_presentation_ = make_gap(gap);
-  if (intent_ == PlaybackIntent::Playing) {
-    transport_.play();
-  }
+  set_advance_permission(TimelineAdvancePermission::Advance);
+  synchronize_transport();
 }
 
 void TimelinePlaybackCoordinator::enter_missing(const MissingClipMedia& missing,
@@ -191,9 +204,8 @@ void TimelinePlaybackCoordinator::enter_missing(const MissingClipMedia& missing,
   segment_end_ = missing.timeline_range.end();
   segment_kind_ = SegmentKind::Missing;
   current_presentation_ = make_missing(missing);
-  if (intent_ == PlaybackIntent::Playing) {
-    transport_.play();
-  }
+  set_advance_permission(TimelineAdvancePermission::Advance);
+  synchronize_transport();
 }
 
 void TimelinePlaybackCoordinator::enter_ended(const TimelineEnded& ended, bool force_transition) {
@@ -205,8 +217,8 @@ void TimelinePlaybackCoordinator::enter_ended(const TimelineEnded& ended, bool f
   active_missing_.reset();
   source_creation_error_.reset();
   segment_end_ = ended.duration;
-  transport_.pause();
-  transport_.seek(PlaybackPosition{ended.duration});
+  set_advance_permission(TimelineAdvancePermission::Hold);
+  reanchor_transport(ended.duration);
   segment_kind_ = SegmentKind::Ended;
   current_presentation_ = make_ended(ended);
 }
@@ -214,14 +226,16 @@ void TimelinePlaybackCoordinator::enter_ended(const TimelineEnded& ended, bool f
 TimelinePresentation TimelinePlaybackCoordinator::evaluate_clip(const ResolvedClip& clip,
                                                                 domain::MediaTime position) {
   if (source_creation_error_.has_value()) {
-    transport_.pause();
+    set_advance_permission(TimelineAdvancePermission::Hold);
+    synchronize_transport();
     segment_kind_ = SegmentKind::SourceError;
     current_presentation_ = TimelineSourceErrorPresentation{
         clip.clip_id, clip.media_id, *source_creation_error_};
     return *current_presentation_;
   }
   if (source_session_ == nullptr) {
-    transport_.pause();
+    set_advance_permission(TimelineAdvancePermission::Hold);
+    synchronize_transport();
     current_presentation_ = TimelineStarvedPresentation{clip.clip_id, clip.media_id, position};
     return *current_presentation_;
   }
@@ -232,38 +246,34 @@ TimelinePresentation TimelinePlaybackCoordinator::evaluate_clip(const ResolvedCl
       source_session_->update_at(PlaybackPosition{source_time});
 
   if (std::holds_alternative<PresentSample>(decision)) {
-    if (intent_ == PlaybackIntent::Playing &&
-        source_session_->availability() == PlaybackAvailability::Ready) {
-      transport_.play();
-    }
+    set_advance_permission(TimelineAdvancePermission::Advance);
+    synchronize_transport();
     const auto& present = std::get<PresentSample>(decision);
     current_presentation_ = TimelinePresentSample{clip.clip_id, clip.media_id, position,
                                                    present.sample};
   } else if (std::holds_alternative<HoldPresentation>(decision)) {
-    if (intent_ == PlaybackIntent::Playing &&
-        source_session_->availability() == PlaybackAvailability::Ready) {
-      transport_.play();
-    }
+    set_advance_permission(TimelineAdvancePermission::Advance);
+    synchronize_transport();
     const auto& hold = std::get<HoldPresentation>(decision);
     current_presentation_ = TimelineHoldPresentation{clip.clip_id, clip.media_id, position,
                                                      hold.sample};
   } else if (std::holds_alternative<PresentationGap>(decision)) {
-    if (intent_ == PlaybackIntent::Playing) {
-      transport_.play();
-    }
+    set_advance_permission(TimelineAdvancePermission::Advance);
+    synchronize_transport();
     current_presentation_ = TimelineSourceGapPresentation{clip.clip_id, clip.media_id, position};
   } else if (std::holds_alternative<PresentationStarved>(decision)) {
-    transport_.pause();
+    set_advance_permission(TimelineAdvancePermission::Hold);
+    synchronize_transport();
     current_presentation_ = TimelineStarvedPresentation{clip.clip_id, clip.media_id, position};
   } else if (std::holds_alternative<PresentationEnded>(decision)) {
-    if (intent_ == PlaybackIntent::Playing) {
-      transport_.play();
-    }
+    set_advance_permission(TimelineAdvancePermission::Advance);
+    synchronize_transport();
     current_presentation_ = TimelineSourceEndedEarlyPresentation{clip.clip_id, clip.media_id,
                                                                   position};
   } else {
     const auto& error = std::get<PresentationTemporalError>(decision);
-    transport_.pause();
+    set_advance_permission(TimelineAdvancePermission::Hold);
+    synchronize_transport();
     segment_kind_ = SegmentKind::SourceError;
     current_presentation_ = TimelineSourceErrorPresentation{clip.clip_id, clip.media_id,
                                                             error.message};

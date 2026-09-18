@@ -402,6 +402,143 @@ void fatal_worker_error_propagates() {
   assert(!std::holds_alternative<TimelineStarvedPresentation>(presentation));
 }
 
+void advance_permission_matrix_tests() {
+  // A. Editorial gap + Playing: the clock advances.
+  {
+    Fixture fixture;
+    (void)fixture.processor.add_clip(fixture.media_one, TimeRange{time(0), time(5)}, time(5));
+    (void)fixture.processor.add_clip(fixture.media_one, TimeRange{time(0), time(5)}, time(15));
+    FakeClock clock;
+    TimelinePlaybackCoordinator coordinator{clock, fixture.factory()};
+    coordinator.set_snapshot(fixture.document.snapshot());
+    coordinator.seek(time(12));
+    assert(std::holds_alternative<TimelineGapPresentation>(coordinator.update()));
+    coordinator.play();
+    assert(coordinator.intent() == application::PlaybackIntent::Playing);
+    clock.advance(time(2));
+    assert(coordinator.timeline_position() == time(14));
+  }
+  // B. Missing media + Playing: the clock advances, no worker needed.
+  {
+    Fixture fixture;
+    (void)fixture.processor.add_clip(fixture.media_one, TimeRange{time(0), time(5)}, time(0));
+    auto snapshot = fixture.document.snapshot();
+    snapshot.assets.front() = application::MediaAsset{
+        snapshot.assets.front().id(), snapshot.assets.front().source_locator(),
+        snapshot.assets.front().video_stream_index(), snapshot.assets.front().playable_duration(),
+        snapshot.assets.front().metadata(), application::MediaAvailability::Unavailable, "offline"};
+    FakeClock clock;
+    TimelinePlaybackCoordinator coordinator{clock, fixture.factory()};
+    coordinator.set_snapshot(snapshot);
+    coordinator.seek(time(2));
+    assert(std::holds_alternative<TimelineMissingMediaPresentation>(coordinator.update()));
+    coordinator.play();
+    clock.advance(time(1));
+    assert(coordinator.timeline_position() == time(3));
+  }
+  // C. Starved/preparing clip + Playing intent: intent stays Playing, frozen clock.
+  {
+    Fixture fixture;
+    (void)fixture.processor.add_clip(fixture.media_one, TimeRange{time(0), time(5)}, time(0));
+    FakeClock clock;
+    fixture.config->emit_seek = false;
+    TimelinePlaybackCoordinator coordinator{clock, fixture.factory()};
+    coordinator.set_snapshot(fixture.document.snapshot());
+    coordinator.play();
+    assert(std::holds_alternative<TimelineStarvedPresentation>(coordinator.update()));
+    assert(coordinator.intent() == application::PlaybackIntent::Playing);
+    clock.advance(time(2));
+    assert(coordinator.timeline_position() == time(0));
+  }
+  // D. Source error + play attempt: frozen clock.
+  {
+    Fixture fixture;
+    (void)fixture.processor.add_clip(fixture.media_one, TimeRange{time(0), time(5)}, time(0));
+    fixture.config->emit_error_on_seek = true;
+    FakeClock clock;
+    TimelinePlaybackCoordinator coordinator{clock, fixture.factory()};
+    coordinator.set_snapshot(fixture.document.snapshot());
+    assert(std::holds_alternative<TimelineSourceErrorPresentation>(coordinator.update()));
+    coordinator.play();
+    assert(coordinator.intent() == application::PlaybackIntent::Playing);
+    clock.advance(time(2));
+    assert(coordinator.timeline_position() == time(0));
+  }
+  // E. Timeline ended + play: frozen at the exact duration.
+  {
+    Fixture fixture;
+    (void)fixture.processor.add_clip(fixture.media_one, TimeRange{time(0), time(5)}, time(0));
+    FakeClock clock;
+    TimelinePlaybackCoordinator coordinator{clock, fixture.factory()};
+    coordinator.set_snapshot(fixture.document.snapshot());
+    coordinator.seek(time(20));
+    assert(std::holds_alternative<TimelineEndedPresentation>(coordinator.update()));
+    coordinator.play();
+    clock.advance(time(1));
+    assert(coordinator.timeline_position() == time(5));
+  }
+  // F. Source early EOF + Playing: the timeline continues past the source end.
+  // A naive "Ready == may advance" rule would freeze here instead.
+  {
+    Fixture fixture;
+    (void)fixture.processor.add_clip(fixture.media_one, TimeRange{time(0), time(5)}, time(0));
+    fixture.config->emit_end_on_seek = true;
+    FakeClock clock;
+    TimelinePlaybackCoordinator coordinator{clock, fixture.factory()};
+    coordinator.set_snapshot(fixture.document.snapshot());
+    assert(std::holds_alternative<TimelineSourceEndedEarlyPresentation>(coordinator.update()));
+    coordinator.play();
+    clock.advance(time(2));
+    assert(coordinator.timeline_position() == time(2));
+  }
+}
+
+void pause_overrides_advance_tests() {
+  Fixture fixture;
+  (void)fixture.processor.add_clip(fixture.media_one, TimeRange{time(0), time(5)}, time(5));
+  (void)fixture.processor.add_clip(fixture.media_one, TimeRange{time(0), time(5)}, time(15));
+  FakeClock clock;
+  TimelinePlaybackCoordinator coordinator{clock, fixture.factory()};
+  coordinator.set_snapshot(fixture.document.snapshot());
+  coordinator.seek(time(12));
+  (void)coordinator.update();
+  coordinator.play();
+  clock.advance(time(2));
+  assert(coordinator.timeline_position() == time(14));
+  coordinator.pause();
+  clock.advance(time(3));
+  assert(coordinator.timeline_position() == time(14));
+  coordinator.play();
+  clock.advance(time(1));
+  assert(coordinator.timeline_position() == time(15));
+}
+
+void seek_preserves_intent_tests() {
+  Fixture fixture;
+  (void)fixture.processor.add_clip(fixture.media_one, TimeRange{time(0), time(5)}, time(5));
+  (void)fixture.processor.add_clip(fixture.media_one, TimeRange{time(0), time(5)}, time(15));
+  const auto snapshot = fixture.document.snapshot();
+
+  FakeClock playing_clock;
+  TimelinePlaybackCoordinator playing{playing_clock, fixture.factory()};
+  playing.set_snapshot(snapshot);
+  playing.play();
+  playing.seek(time(13));
+  assert(playing.intent() == application::PlaybackIntent::Playing);
+  assert(std::holds_alternative<TimelineGapPresentation>(playing.update()));
+  playing_clock.advance(time(1));
+  assert(playing.timeline_position() == time(14));
+
+  FakeClock paused_clock;
+  TimelinePlaybackCoordinator paused{paused_clock, fixture.factory()};
+  paused.set_snapshot(snapshot);
+  paused.seek(time(13));
+  assert(paused.intent() == application::PlaybackIntent::Paused);
+  assert(std::holds_alternative<TimelineGapPresentation>(paused.update()));
+  paused_clock.advance(time(5));
+  assert(paused.timeline_position() == time(13));
+}
+
 } // namespace
 
 int main() {
@@ -416,4 +553,7 @@ int main() {
   rapid_same_source_seek_uses_latest_completion();
   snapshot_change_resets_active_clip_identity();
   fatal_worker_error_propagates();
+  advance_permission_matrix_tests();
+  pause_overrides_advance_tests();
+  seek_preserves_intent_tests();
 }

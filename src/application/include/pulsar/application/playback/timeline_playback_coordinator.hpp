@@ -103,6 +103,18 @@ private:
     SourceError,
   };
 
+  // M9-only rule: whether the timeline clock may currently advance.
+  // Separate from user intent: Playing intent with Hold permission keeps the
+  // position frozen (e.g. preparing source). This is not an audio/master-clock
+  // policy; that remains M10.
+  enum class TimelineAdvancePermission {
+    Hold,
+    Advance,
+  };
+
+  void set_advance_permission(TimelineAdvancePermission permission);
+  void synchronize_transport();
+  void reanchor_transport(domain::MediaTime position);
   void reconcile(const TimelineResolveOutcome& outcome, domain::MediaTime position,
                  bool force_transition);
   void enter_clip(const ResolvedClip& clip, bool force_transition);
@@ -129,6 +141,7 @@ private:
   std::optional<std::string> source_creation_error_;
   PlaybackIntent intent_{PlaybackIntent::Paused};
   SegmentKind segment_kind_{SegmentKind::None};
+  TimelineAdvancePermission advance_permission_{TimelineAdvancePermission::Hold};
 };
 
 } // namespace pulsar::application

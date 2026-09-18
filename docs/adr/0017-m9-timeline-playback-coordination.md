@@ -47,6 +47,10 @@ The M7 `VideoSample` contract remains metadata-only. Pixel/frame-lease
 integration and replacement of the M8 desktop decoder path are deferred to
 M9.6; the desktop must not run a third independent playback path.
 
+M9 transport mutations are centralized through one coordinator gate that
+combines user intent with current timeline advance permission.
+This is not an audio/master-clock policy; that remains M10.
+
 ## Consequences
 
 M9 playback is deterministic and backend-neutral, with bounded ownership
