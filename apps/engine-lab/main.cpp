@@ -639,6 +639,8 @@ int run_playback_metrics(const std::filesystem::path& path, int ticks) {
   std::cout << "worker.read_latency_p95_us=" << to_us(percentile_sorted(latencies, 0.95)) << '\n';
   std::cout << "worker.read_latency_max_us="
             << to_us(latencies.empty() ? std::chrono::nanoseconds{0} : latencies.back()) << '\n';
+  std::cout << "worker.descriptor_latency_us=" << to_us(main_worker.descriptor_latency) << '\n';
+  std::cout << "worker.open_latency_us=" << to_us(main_worker.open_latency) << '\n';
   std::cout << "worker.queue_high_water=" << main_worker.event_queue_high_water_mark << '\n';
   std::cout << "worker.events_dropped=" << main_worker.events_dropped_due_to_capacity << '\n';
   std::cout << "worker.samples_dropped=" << main_worker.samples_dropped_due_to_capacity << '\n';

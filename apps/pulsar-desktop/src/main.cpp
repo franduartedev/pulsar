@@ -7,6 +7,7 @@
 #include <QTimer>
 #include <QUrl>
 
+#include <iostream>
 #include <optional>
 
 int main(int argc, char** argv) {
@@ -33,6 +34,7 @@ int main(int argc, char** argv) {
 
   std::optional<QString> initial_path;
   std::optional<int> smoke_exit_ms;
+  bool dump_performance_on_exit = false;
   for (int index = 1; index < argc; ++index) {
     const QString argument = QString::fromLocal8Bit(argv[index]);
     if (argument == QStringLiteral("--smoke-exit-ms") && index + 1 < argc) {
@@ -41,6 +43,8 @@ int main(int argc, char** argv) {
       if (ok && value >= 0) {
         smoke_exit_ms = value;
       }
+    } else if (argument == QStringLiteral("--dump-performance-on-exit")) {
+      dump_performance_on_exit = true;
     } else if (!argument.startsWith(QLatin1String("--")) && !initial_path.has_value()) {
       initial_path = argument;
     }
@@ -55,5 +59,9 @@ int main(int argc, char** argv) {
     QTimer::singleShot(*smoke_exit_ms, &app, &QCoreApplication::quit);
   }
 
-  return app.exec();
+  const int exit_code = app.exec();
+  if (dump_performance_on_exit) {
+    std::cout << controller.performanceSnapshot().toStdString() << '\n';
+  }
+  return exit_code;
 }

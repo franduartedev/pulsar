@@ -5,6 +5,7 @@
 #include <pulsar/media/ffmpeg/ffmpeg_preview_converter.hpp>
 
 #include <QMetaObject>
+#include <QStringList>
 #include <QVariantMap>
 
 #include <algorithm>
@@ -15,7 +16,28 @@
 #include <iomanip>
 #include <limits>
 #include <sstream>
+#include <tuple>
 #include <utility>
+#include <vector>
+
+namespace {
+// Nearest-rank percentile over a sorted copy; on-demand reporting only.
+std::chrono::nanoseconds percentile_sorted(const std::vector<std::chrono::nanoseconds>& sorted,
+                                           double rank) {
+  if (sorted.empty()) {
+    return std::chrono::nanoseconds{0};
+  }
+  std::size_t index = static_cast<std::size_t>(rank * static_cast<double>(sorted.size()));
+  if (index >= sorted.size()) {
+    index = sorted.size() - 1;
+  }
+  return sorted[index];
+}
+
+std::int64_t to_microseconds(std::chrono::nanoseconds value) {
+  return std::chrono::duration_cast<std::chrono::microseconds>(value).count();
+}
+} // namespace
 
 namespace {
 using pulsar::domain::MediaTime;
@@ -139,11 +161,16 @@ void DesktopController::deleteSelectedClip(){if(!active_session_)return;try{acti
 void DesktopController::undoEdit(){if(active_session_&&active_session_->undo()){clearProgram("loading");publishTimeline();}}
 void DesktopController::redoEdit(){if(active_session_&&active_session_->redo()){clearProgram("loading");publishTimeline();}}
 
-std::unique_ptr<pulsar::desktop::EditorSession> DesktopController::makeEditorSession() const {
+std::unique_ptr<pulsar::desktop::EditorSession> DesktopController::makeEditorSession() {
   auto mailbox = visual_mailbox_;
   return std::make_unique<pulsar::desktop::EditorSession>(
-      [mailbox](const std::filesystem::path& path, int stream) {
-        return std::make_unique<FFmpegPlaybackWorker>(path, stream, FFmpegPlaybackWorker::Limits{8}, mailbox);
+      [this, mailbox](const std::filesystem::path& path, int stream) {
+        const auto start = std::chrono::steady_clock::now();
+        auto worker = std::make_unique<FFmpegPlaybackWorker>(path, stream, FFmpegPlaybackWorker::Limits{8}, mailbox);
+        worker_ctor_durations_.push(std::chrono::steady_clock::now() - start);
+        worker_descriptor_durations_.push(worker->stats().descriptor_latency);
+        ++worker_construction_count_;
+        return worker;
       });
 }
 void DesktopController::postOpen(std::filesystem::path path, std::uint64_t generation) { setBusy(true); setStatus("Preparando…"); setTechnicalStatus("Probing"); clearError(); enqueue(WorkerCommand{std::move(path),generation}); }
@@ -159,11 +186,58 @@ void DesktopController::presentTimeline(const pulsar::application::TimelinePrese
                     viewer_state_ == "frame";
   if (!same) clearProgram("loading");
 }else if constexpr(std::is_same_v<T,pulsar::application::TimelineSourceEndedEarlyPresentation>||std::is_same_v<T,pulsar::application::TimelineSourceErrorPresentation>){clearProgram("error");}else if constexpr(std::is_same_v<T,pulsar::application::TimelineEndedPresentation>){clearProgram("ended");}},presentation);}
-void DesktopController::displayLease(const pulsar::application::TimelinePresentSample& present){const auto source_epoch=visual_mailbox_->active_epoch();const auto generation=active_session_->document().document_generation();VisualIdentity identity{editor_session_epoch_,generation,present.clip_id,present.media_id,source_epoch,present.sample.ordinal};if(displayed_identity_&&displayed_identity_.value().session_epoch==identity.session_epoch&&displayed_identity_->document_generation==identity.document_generation&&displayed_identity_->clip_id==identity.clip_id&&displayed_identity_->media_id==identity.media_id&&displayed_identity_->source_epoch==identity.source_epoch&&displayed_identity_->ordinal==identity.ordinal&&viewer_state_=="frame")return;auto lease=visual_mailbox_->take(source_epoch,present.sample.ordinal);if(!lease){++visual_misses_;clearProgram("loading");return;}try{FFmpegPreviewConverter converter;auto preview=converter.convert(*lease);image_provider_.setImage(imageFromPreview(preview));last_conversion_time_=preview.conversion_time;displayed_identity_=identity;viewer_state_="frame";++displayed_frames_;++preview_revision_;preview_source_=QString("image://pulsar-preview/current?rev=%1").arg(preview_revision_);emit previewChanged();}catch(const std::exception& error){setError(QString::fromUtf8(error.what()));clearProgram("error");}}
+void DesktopController::displayLease(const pulsar::application::TimelinePresentSample& present){const auto source_epoch=visual_mailbox_->active_epoch();const auto generation=active_session_->document().document_generation();VisualIdentity identity{editor_session_epoch_,generation,present.clip_id,present.media_id,source_epoch,present.sample.ordinal};if(displayed_identity_&&displayed_identity_.value().session_epoch==identity.session_epoch&&displayed_identity_->document_generation==identity.document_generation&&displayed_identity_->clip_id==identity.clip_id&&displayed_identity_->media_id==identity.media_id&&displayed_identity_->source_epoch==identity.source_epoch&&displayed_identity_->ordinal==identity.ordinal&&viewer_state_=="frame")return;auto lease=visual_mailbox_->take(source_epoch,present.sample.ordinal);if(!lease){++visual_misses_;clearProgram("loading");return;}try{FFmpegPreviewConverter converter;auto preview=converter.convert(*lease);image_provider_.setImage(imageFromPreview(preview));last_conversion_time_=preview.conversion_time;conversion_durations_.push(preview.conversion_time);++conversion_count_;displayed_identity_=identity;viewer_state_="frame";++displayed_frames_;++preview_revision_;preview_source_=QString("image://pulsar-preview/current?rev=%1").arg(preview_revision_);emit previewChanged();}catch(const std::exception& error){setError(QString::fromUtf8(error.what()));clearProgram("error");}}
 void DesktopController::clearProgram(QString state){const bool changed=viewer_state_!=state||!preview_source_.isEmpty();image_provider_.clear();preview_source_.clear();displayed_identity_.reset();viewer_state_=std::move(state);if(changed)emit previewChanged();}
 void DesktopController::updateTick(){if(!active_session_||!has_media_){return;}const auto presentation=active_session_->update_playback();presentTimeline(presentation);const bool now_playing=active_session_->playback_intent()==pulsar::application::PlaybackIntent::Playing;if(now_playing!=playing_){playing_=now_playing;emit playbackChanged();}updatePositionProperties();updateDiagnostics();}
 void DesktopController::updatePositionProperties(){if(!active_session_)return;const auto position=active_session_->playback_position();const auto duration=active_session_->timeline_duration();position_text_=formatTime(position);duration_text_=formatTime(duration);progress_=duration>MediaTime::zero()?std::clamp(secondsAsDouble(position)/secondsAsDouble(duration),0.0,1.0):0.0;timeline_playhead_progress_=active_session_->pixel_at(position,1.0);emit positionChanged();emit timelinePlayheadChanged();emit editActionStateChanged();}
 void DesktopController::updateDiagnostics(){debug_metrics_=QString("program_frames=%1 visual_misses=%2 conversion_ms=%3").arg(displayed_frames_).arg(visual_misses_).arg(std::chrono::duration_cast<std::chrono::milliseconds>(last_conversion_time_).count());emit diagnosticsChanged();}
+QString DesktopController::performanceSnapshot() const {
+  auto summarize = [](const DurationSampleRing& ring) {
+    auto sorted = ring.snapshot();
+    std::sort(sorted.begin(), sorted.end());
+    return std::make_tuple(percentile_sorted(sorted, 0.50), percentile_sorted(sorted, 0.95),
+                           sorted.empty() ? std::chrono::nanoseconds{0} : sorted.back());
+  };
+  const auto [sync_p50, sync_p95, sync_max] = summarize(
+      active_session_ != nullptr ? active_session_->synchronization_diagnostics().recent_durations
+                                 : DurationSampleRing{});
+  std::uint64_t sync_performed = 0;
+  std::uint64_t sync_skipped = 0;
+  if (active_session_ != nullptr) {
+    const auto sync = active_session_->synchronization_diagnostics();
+    sync_performed = sync.performed_count;
+    sync_skipped = sync.skipped_count;
+  }
+  const auto [ctor_p50, ctor_p95, ctor_max] = summarize(worker_ctor_durations_);
+  const auto [desc_p50, desc_p95, desc_max] = summarize(worker_descriptor_durations_);
+  const auto [conv_p50, conv_p95, conv_max] = summarize(conversion_durations_);
+  const auto mailbox = visual_mailbox_ != nullptr ? visual_mailbox_->stats()
+                                                  : pulsar::media::ffmpeg::FFmpegPlaybackVisualMailbox::Stats{};
+  QStringList lines;
+  lines << QStringLiteral("desktop.sync_performed_count=%1").arg(sync_performed);
+  lines << QStringLiteral("desktop.sync_skipped_count=%1").arg(sync_skipped);
+  lines << QStringLiteral("desktop.sync_p50_us=%1").arg(to_microseconds(sync_p50));
+  lines << QStringLiteral("desktop.sync_p95_us=%1").arg(to_microseconds(sync_p95));
+  lines << QStringLiteral("desktop.sync_max_us=%1").arg(to_microseconds(sync_max));
+  lines << QStringLiteral("desktop.worker_construction_count=%1").arg(worker_construction_count_);
+  lines << QStringLiteral("desktop.worker_ctor_p50_us=%1").arg(to_microseconds(ctor_p50));
+  lines << QStringLiteral("desktop.worker_ctor_p95_us=%1").arg(to_microseconds(ctor_p95));
+  lines << QStringLiteral("desktop.worker_ctor_max_us=%1").arg(to_microseconds(ctor_max));
+  lines << QStringLiteral("desktop.descriptor_p50_us=%1").arg(to_microseconds(desc_p50));
+  lines << QStringLiteral("desktop.descriptor_p95_us=%1").arg(to_microseconds(desc_p95));
+  lines << QStringLiteral("desktop.descriptor_max_us=%1").arg(to_microseconds(desc_max));
+  lines << QStringLiteral("desktop.conversion_count=%1").arg(conversion_count_);
+  lines << QStringLiteral("desktop.conversion_p50_us=%1").arg(to_microseconds(conv_p50));
+  lines << QStringLiteral("desktop.conversion_p95_us=%1").arg(to_microseconds(conv_p95));
+  lines << QStringLiteral("desktop.conversion_max_us=%1").arg(to_microseconds(conv_max));
+  lines << QStringLiteral("desktop.displayed_frames=%1").arg(displayed_frames_);
+  lines << QStringLiteral("desktop.visual_misses=%1").arg(visual_misses_);
+  lines << QStringLiteral("desktop.mailbox_published=%1").arg(mailbox.published);
+  lines << QStringLiteral("desktop.mailbox_evicted=%1").arg(mailbox.evicted);
+  lines << QStringLiteral("desktop.mailbox_high_water=%1").arg(mailbox.high_water_mark);
+  lines << QStringLiteral("desktop.mailbox_current_size=%1").arg(mailbox.current_size);
+  return lines.join(QLatin1Char('\n'));
+}
 void DesktopController::setBusy(bool value){if(busy_==value)return;busy_=value;emit busyChanged();}void DesktopController::setStatus(QString value){if(status_==value)return;status_=std::move(value);emit statusChanged();}void DesktopController::setTechnicalStatus(QString value){if(technical_status_==value)return;technical_status_=std::move(value);emit technicalStatusChanged();}void DesktopController::setPreviewLate(bool value){if(preview_late_==value)return;preview_late_=value;emit technicalStatusChanged();}void DesktopController::setError(QString value){error_message_=std::move(value);emit errorChanged();}void DesktopController::clearError(){if(error_message_.isEmpty())return;error_message_.clear();emit errorChanged();}
 QString DesktopController::formatTime(MediaTime time){auto sec=time.seconds();auto whole=sec.numerator()/sec.denominator();auto rem=sec.numerator()%sec.denominator();auto ms=static_cast<std::int64_t>(std::llround(static_cast<long double>(rem)*1000.0L/static_cast<long double>(sec.denominator())));if(ms>=1000){++whole;ms=0;}return QString("%1:%2:%3.%4").arg(whole/3600,2,10,QChar('0')).arg((whole/60)%60,2,10,QChar('0')).arg(whole%60,2,10,QChar('0')).arg(ms,3,10,QChar('0'));}
 MediaTime DesktopController::mediaTimeFromSeconds(double seconds){if(!std::isfinite(seconds)||seconds<=0)return MediaTime::zero();const auto q=std::llround(seconds*1'000'000.0);return MediaTime{q,Rational{1,1'000'000}};}

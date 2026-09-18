@@ -1,9 +1,12 @@
 #pragma once
 
+#include "duration_sample_ring.hpp"
+
 #include <pulsar/application/commands/command_processor.hpp>
 #include <pulsar/application/playback/timeline_playback_coordinator.hpp>
 #include <pulsar/application/project/project_document.hpp>
 
+#include <chrono>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -23,8 +26,17 @@ struct TimelineClipView {
   bool selected{false};
 };
 
-class TimelineViewport {
-public:
+// Bounded observation of synchronize_document_state() for D3 evidence.
+// performed_count counts real synchronizations only; skipped_count counts
+// early-return no-ops. Durations cover the full performed body (snapshot +
+// generation update + read-model rebuild). Single-writer, no locks.
+struct EditorSyncDiagnostics {
+  std::uint64_t performed_count{0};
+  std::uint64_t skipped_count{0};
+  DurationSampleRing recent_durations;
+};
+
+class TimelineViewport {public:
   explicit TimelineViewport(domain::MediaTime duration) : duration_{duration} {}
   [[nodiscard]] std::optional<domain::MediaTime> time_at(double pixel, double width) const;
   [[nodiscard]] double pixel_at(domain::MediaTime time, double width) const;
@@ -68,6 +80,7 @@ public:
   [[nodiscard]] bool can_redo() const noexcept { return processor_.can_redo(); }
 
   void synchronize_document_state();
+  [[nodiscard]] EditorSyncDiagnostics synchronization_diagnostics() const;
   void rebuild_read_model();
   void select_clip(std::optional<domain::ClipId> clip);
   [[nodiscard]] std::optional<domain::MediaTime> time_at(double pixel, double width) const;
@@ -82,6 +95,9 @@ private:
   std::vector<TimelineClipView> views_;
   std::uint64_t read_model_generation_{0};
   std::optional<std::uint64_t> synchronized_document_generation_;
+  std::uint64_t sync_performed_count_{0};
+  std::uint64_t sync_skipped_count_{0};
+  DurationSampleRing sync_durations_;
 };
 
 } // namespace pulsar::desktop

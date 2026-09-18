@@ -1,6 +1,7 @@
 #pragma once
 
 #include "editor_session.hpp"
+#include "duration_sample_ring.hpp"
 #include "preview_image_provider.hpp"
 
 #include <pulsar/application/media/media_probe_result.hpp>
@@ -65,6 +66,10 @@ public:
   [[nodiscard]] bool busy() const { return busy_; }
   [[nodiscard]] bool previewLate() const { return preview_late_; }
   [[nodiscard]] QString debugMetrics() const { return debug_metrics_; }
+  // On-demand desktop performance snapshot for D3 evidence. Calculates
+  // percentiles from copied ring samples; call only for explicit reporting,
+  // never on a hot path. Not a Q_PROPERTY, emits no signals.
+  [[nodiscard]] QString performanceSnapshot() const;
   [[nodiscard]] QVariantList timelineClips() const { return timeline_clips_; }
   [[nodiscard]] QString timelineDurationText() const { return timeline_duration_text_; }
   [[nodiscard]] QVariantList timelineRulerTicks() const { return timeline_ruler_ticks_; }
@@ -101,7 +106,7 @@ private:
   struct VisualIdentity { std::uint64_t session_epoch; std::uint64_t document_generation; pulsar::domain::ClipId clip_id; pulsar::domain::MediaId media_id; std::uint64_t source_epoch; std::uint64_t ordinal; };
   void workerLoop();
   void postOpen(std::filesystem::path path, std::uint64_t generation);
-  [[nodiscard]] std::unique_ptr<pulsar::desktop::EditorSession> makeEditorSession() const;
+  [[nodiscard]] std::unique_ptr<pulsar::desktop::EditorSession> makeEditorSession();
   void enqueue(WorkerCommand command);
   void updateTick();
   void updatePositionProperties();
@@ -126,4 +131,10 @@ private:
   QString status_{"Vacío"}; QString technical_status_{"Preview CPU"}; QString media_name_; QString metadata_; QString error_message_; QString preview_source_; QString viewer_state_{"empty"}; QString position_text_{"00:00:00.000"}; QString duration_text_{"--:--:--.---"}; QString debug_metrics_; QVariantList timeline_clips_; QVariantList timeline_ruler_ticks_; QString timeline_duration_text_{"00:00:00.000"}; QString selected_clip_key_;
   double timeline_playhead_progress_{0.0}; double progress_{0.0}; bool has_media_{false}; bool playing_{false}; bool busy_{false}; bool preview_late_{false};
   std::optional<VisualIdentity> displayed_identity_; std::uint64_t preview_revision_{0}; std::uint64_t stale_visual_frames_{0}; std::uint64_t displayed_frames_{0}; std::uint64_t visual_misses_{0}; std::uint64_t seek_count_{0}; std::uint64_t read_count_{0}; std::chrono::nanoseconds last_conversion_time_{0};
+  // Bounded D3 diagnostics. Single-writer (GUI/control thread); no locks.
+  std::uint64_t worker_construction_count_{0};
+  std::uint64_t conversion_count_{0};
+  DurationSampleRing worker_ctor_durations_;
+  DurationSampleRing worker_descriptor_durations_;
+  DurationSampleRing conversion_durations_;
 };

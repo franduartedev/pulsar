@@ -1,6 +1,7 @@
 #include "editor_session.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <iomanip>
 #include <limits>
@@ -88,11 +89,23 @@ domain::MediaTime EditorSession::timeline_duration() const noexcept {
 void EditorSession::synchronize_document_state() {
   if (synchronized_document_generation_.has_value() &&
       synchronized_document_generation_.value() == document_.document_generation()) {
+    ++sync_skipped_count_;
     return;
   }
+  const auto start = std::chrono::steady_clock::now();
   coordinator_.set_snapshot(document_.snapshot());
   synchronized_document_generation_ = document_.document_generation();
   rebuild_read_model();
+  sync_durations_.push(std::chrono::steady_clock::now() - start);
+  ++sync_performed_count_;
+}
+
+EditorSyncDiagnostics EditorSession::synchronization_diagnostics() const {
+  EditorSyncDiagnostics diagnostics;
+  diagnostics.performed_count = sync_performed_count_;
+  diagnostics.skipped_count = sync_skipped_count_;
+  diagnostics.recent_durations = sync_durations_;
+  return diagnostics;
 }
 
 void EditorSession::rebuild_read_model() {

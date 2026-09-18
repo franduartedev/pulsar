@@ -1,10 +1,13 @@
+#include "duration_sample_ring.hpp"
 #include "editor_session.hpp"
 
 #include <pulsar/application/media/media_probe.hpp>
 #include <pulsar/application/playback/playback_worker.hpp>
 
 #include <cassert>
+#include <chrono>
 #include <cmath>
+#include <cstdint>
 #include <filesystem>
 #include <string>
 #include <limits>
@@ -247,9 +250,58 @@ void final_pointer_edit_regressions() {
 
 } // namespace
 
+void synchronization_diagnostics_semantics() {
+  Probe probe;
+  EditorSession session;
+  // The constructor performs the initial synchronization.
+  auto baseline = session.synchronization_diagnostics();
+  assert(baseline.performed_count == 1);
+  assert(baseline.skipped_count == 0);
+  assert(baseline.recent_durations.size() == 1);
+
+  // No document mutation: early-return path only.
+  session.synchronize_document_state();
+  const auto idle = session.synchronization_diagnostics();
+  assert(idle.performed_count == 1);
+  assert(idle.skipped_count == 1);
+  assert(idle.recent_durations.size() == 1);
+
+  // A real edit performs exactly one synchronization with one more sample.
+  (void)session.processor().import_asset("diag.mp4", probe);
+  session.synchronize_document_state();
+  const auto edited = session.synchronization_diagnostics();
+  assert(edited.performed_count == 2);
+  assert(edited.skipped_count == 1);
+  assert(edited.recent_durations.size() == 2);
+
+  // Settled again: skipped only.
+  session.synchronize_document_state();
+  const auto settled = session.synchronization_diagnostics();
+  assert(settled.performed_count == 2);
+  assert(settled.skipped_count == 2);
+  assert(settled.recent_durations.size() == 2);
+}
+
+void duration_ring_wraparound() {
+  DurationSampleRing ring;
+  assert(ring.size() == 0);
+  for (std::uint64_t i = 0; i < DurationSampleRing::capacity + 6; ++i) {
+    ring.push(std::chrono::nanoseconds{static_cast<long long>(i)});
+  }
+  assert(ring.size() == DurationSampleRing::capacity);
+  const auto snapshot = ring.snapshot();
+  assert(snapshot.size() == DurationSampleRing::capacity);
+  // Oldest-first: the first 6 samples fell off.
+  assert(snapshot.front() == std::chrono::nanoseconds{6});
+  assert(snapshot.back() ==
+         std::chrono::nanoseconds{static_cast<long long>(DurationSampleRing::capacity + 6 - 1)});
+}
+
 int main() {
   viewport_is_exactly_guarded();
   editing_actions_use_document_commands();
   session_read_model_and_selection();
   final_pointer_edit_regressions();
+  synchronization_diagnostics_semantics();
+  duration_ring_wraparound();
 }
