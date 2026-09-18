@@ -328,8 +328,49 @@ bool duplicate_timestamp_tests() {
   return is_temporal_error(late_duplicate.evaluate(playback(millis(1))));
 }
 
-bool decreasing_and_missing_tests() {
-  auto decreasing = scheduler_with_origin(seconds(0));
+bool same_physical_sample_is_idempotent_tests() {
+  auto scheduler = scheduler_with_origin(seconds(0));
+  scheduler.ingest(sample(10, seconds(0)));
+  if (!is_present(scheduler.evaluate(playback(seconds(0))), 10)) {
+    return false;
+  }
+  // Re-exposure of the same physical sample (same ordinal and timestamp)
+  // after presentation is a no-op, not a temporal error.
+  scheduler.ingest(sample(10, seconds(0)));
+  if (!is_present_or_hold(scheduler.evaluate(playback(seconds(0))), 10)) {
+    return false;
+  }
+  // The scheduler keeps working afterwards with coherent starvation semantics.
+  scheduler.ingest(sample(11, millis(40)));
+  if (!is_present(scheduler.evaluate(playback(millis(40))), 11)) {
+    return false;
+  }
+
+  // Same treatment for an already-buffered lookahead: re-ingesting it must
+  // not overflow lookahead capacity.
+  auto buffered = scheduler_with_origin(seconds(0));
+  buffered.ingest(sample(10, seconds(0)));
+  buffered.ingest(sample(11, millis(40)));
+  buffered.ingest(sample(11, millis(40)));
+  if (!is_present(buffered.evaluate(playback(seconds(0))), 10)) {
+    return false;
+  }
+  return true;
+}
+
+bool distinct_ordinal_same_timestamp_still_rejected_tests() {
+  auto scheduler = scheduler_with_origin(seconds(0));
+  scheduler.ingest(sample(10, seconds(0)));
+  if (!is_present(scheduler.evaluate(playback(seconds(0))), 10)) {
+    return false;
+  }
+  // Same timestamp but a DIFFERENT ordinal after presentation is still a
+  // genuine chronology violation, not idempotent re-exposure.
+  scheduler.ingest(sample(11, seconds(0)));
+  return is_temporal_error(scheduler.evaluate(playback(seconds(0))));
+}
+
+bool decreasing_and_missing_tests() {  auto decreasing = scheduler_with_origin(seconds(0));
   decreasing.ingest(sample(1, millis(40)));
   decreasing.ingest(sample(2, seconds(0)));
   if (!is_temporal_error(decreasing.evaluate(playback(millis(1))))) {
@@ -408,6 +449,12 @@ int main() {
   }
   if (!duplicate_timestamp_tests()) {
     return fail("duplicate timestamp tests");
+  }
+  if (!same_physical_sample_is_idempotent_tests()) {
+    return fail("same physical sample is idempotent tests");
+  }
+  if (!distinct_ordinal_same_timestamp_still_rejected_tests()) {
+    return fail("distinct ordinal same timestamp still rejected tests");
   }
   if (!decreasing_and_missing_tests()) {
     return fail("decreasing and missing tests");

@@ -32,7 +32,7 @@ int fail(std::string_view message) {
 }
 
 DecodedVisualVideoFrame frame(std::int64_t value) {
-  return DecodedVisualVideoFrame{0,
+  return DecodedVisualVideoFrame{7, 0,
                                  {1, 1, 1, 1, std::nullopt, std::nullopt, "", "", "", ""},
                                  MediaTime{value, Rational{1, 1}},
                                  {}};

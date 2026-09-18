@@ -3,6 +3,7 @@
 #include <pulsar/domain/time/media_time.hpp>
 #include <pulsar/domain/time/rational.hpp>
 
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <string>
@@ -48,6 +49,10 @@ private:
 };
 
 struct DecodedVisualVideoFrame {
+  // Stable identity of the physical decoded AVFrame for one
+  // FFmpegVideoDecodeSession lifetime. Re-exposing the same object (e.g. a
+  // retained pending lookahead) preserves it; it is unrelated to timestamps.
+  std::uint64_t physical_frame_id;
   int stream_index;
   FFmpegVideoImageDescriptor image;
   std::optional<domain::MediaTime> presentation_timestamp;

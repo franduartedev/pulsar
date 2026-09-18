@@ -11,6 +11,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <memory>
 #include <mutex>
@@ -95,7 +96,10 @@ private:
   FFmpegPlaybackWorkerStats stats_;
   // Guarded by mutex_; recorded alongside last_read_latency.
   detail::LatencySampleRing read_latencies_;
-  std::uint64_t next_ordinal_{1};
+  // Last physical frame id published to the visual mailbox, to avoid creating
+  // a second lease entry when the same pending frame is re-exposed. Worker
+  // (source-session) lifetime state; never reset on seek.
+  std::optional<std::uint64_t> last_published_physical_frame_id_;
   std::shared_ptr<FFmpegPlaybackVisualMailbox> visual_mailbox_;
   FFmpegPlaybackVisualMailbox::SourceEpoch source_epoch_{0};
   std::thread worker_;

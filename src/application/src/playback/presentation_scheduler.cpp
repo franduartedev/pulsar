@@ -166,6 +166,25 @@ void PresentationScheduler::accept_sample(VideoSample sample) {
     return;
   }
 
+  // Re-exposure of the same physical sample (e.g. a retained pending seek
+  // lookahead delivered again) is idempotent, never an error and never a
+  // replacement. Same timestamp with a DIFFERENT ordinal still falls through
+  // to the existing temporal validation below.
+  if (current_.has_value()) {
+    const auto current_start = sample_start(*current_);
+    if (current_start.has_value() && sample.ordinal == current_->ordinal &&
+        stream_equal(*incoming_start, *current_start)) {
+      return;
+    }
+  }
+  if (lookahead_.has_value()) {
+    const auto lookahead_start = sample_start(*lookahead_);
+    if (lookahead_start.has_value() && sample.ordinal == lookahead_->ordinal &&
+        stream_equal(*incoming_start, *lookahead_start)) {
+      return;
+    }
+  }
+
   if (lookahead_.has_value()) {
     set_temporal_error("presentation scheduler lookahead capacity exceeded");
     return;

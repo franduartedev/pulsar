@@ -692,6 +692,7 @@ private:
       }
 
       DecodedVisualVideoFrame visual_frame{
+          next_visual_frame_id_++,
           stream_index_,
           image_descriptor(*frame_),
           internal::convert_timestamp(frame_->best_effort_timestamp, stream_time_base_),
@@ -816,6 +817,10 @@ private:
   std::string codec_name_{"unknown"};
   std::optional<DecodedVideoFrameInfo> pending_decoded_frame_;
   std::optional<DecodedVisualVideoFrame> pending_visual_frame_;
+  // Monotonic physical visual-frame identity for this session lifetime.
+  // Assigned once per successful avcodec_receive_frame(); never reset by
+  // seeks, which flush codec state but do not restart the namespace.
+  std::uint64_t next_visual_frame_id_{1};
   State state_{State::Reading};
   bool has_pending_packet_{false};
   bool pending_send_was_blocked_{false};

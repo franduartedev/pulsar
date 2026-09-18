@@ -391,7 +391,7 @@ bool visual_mailbox_test() {
   using pulsar::media::ffmpeg::DecodedVisualVideoFrame;
   using pulsar::media::ffmpeg::FFmpegPlaybackVisualMailbox;
   auto frame = [](std::int64_t value) {
-    return DecodedVisualVideoFrame{0,
+    return DecodedVisualVideoFrame{7, 0,
                                    {1, 1, 1, 1, std::nullopt, std::nullopt, "", "", "", ""},
                                    pulsar::domain::MediaTime{value, pulsar::domain::Rational{1, 1}},
                                    {}};
@@ -620,6 +620,100 @@ bool visual_presentation_seek_test(const std::filesystem::path& root) {
   }
 
   return true;
+}
+
+bool visual_frame_identity_test(const std::filesystem::path& root) {
+  const auto fixture_path = root / "visual-frame-identity-h264.mkv";
+  write_non_zero_start_h264_fixture(fixture_path);
+  const auto fixture = inspect_non_zero_start_fixture(fixture_path);
+
+  const auto lower_timestamp = fixture.timestamps.at(37);
+  const auto upper_timestamp = fixture.timestamps.at(38);
+  const auto between_frames = one_stream_tick_after(lower_timestamp);
+
+  auto session = FFmpegVideoDecodeSession{fixture.path, 0};
+  const auto result = session.seek_to_presentation_timestamp_visual(between_frames);
+  if (!result.lookahead.has_value() || !result.lookahead->presentation_timestamp.has_value() ||
+      *result.lookahead->presentation_timestamp != upper_timestamp) {
+    return false;
+  }
+  const auto lookahead_id = result.lookahead->physical_frame_id;
+
+  // Re-exposing the retained pending frame keeps its identity and timestamp.
+  const auto pending = session.decode_next_visual();
+  if (!pending.has_value() || !pending->presentation_timestamp.has_value() ||
+      *pending->presentation_timestamp != upper_timestamp ||
+      pending->physical_frame_id != lookahead_id) {
+    return false;
+  }
+
+  // The next genuinely new physical decode gets a fresh monotonic identity.
+  const auto fresh = session.decode_next_visual();
+  if (!fresh.has_value() || fresh->physical_frame_id <= lookahead_id) {
+    return false;
+  }
+  const auto max_seen = fresh->physical_frame_id;
+
+  // A later seek in the same session continues the namespace; it never resets.
+  const auto later_target = one_stream_tick_after(fixture.timestamps.at(60));
+  const auto later = session.seek_to_presentation_timestamp_visual(later_target);
+  if (!later.frame.has_value()) {
+    return false;
+  }
+  auto following = session.decode_next_visual();
+  while (following.has_value() && following->physical_frame_id <= max_seen) {
+    // Retained pending re-exposure keeps old identity; skip through it.
+    following = session.decode_next_visual();
+    if (!following.has_value()) {
+      break;
+    }
+  }
+  if (!following.has_value() || following->physical_frame_id <= max_seen) {
+    return false;
+  }
+  return true;
+}
+
+bool worker_physical_identity_test(const std::filesystem::path& root) {
+  const auto fixture_path = root / "worker-physical-identity-h264.mkv";
+  write_non_zero_start_h264_fixture(fixture_path);
+  const auto fixture = inspect_non_zero_start_fixture(fixture_path);
+  const auto lower_timestamp = fixture.timestamps.at(37);
+  const auto upper_timestamp = fixture.timestamps.at(38);
+  const auto between_frames = one_stream_tick_after(lower_timestamp);
+
+  auto mailbox = std::make_shared<pulsar::media::ffmpeg::FFmpegPlaybackVisualMailbox>(8);
+  auto worker = FFmpegPlaybackWorker{fixture.path, 0, FFmpegPlaybackWorker::Limits{8}, mailbox};
+  const auto epoch = worker.source_epoch();
+  worker.request_seek_for_presentation(41, StreamTimestamp{between_frames});
+  const auto seek = wait_for_worker_event<pulsar::application::PlaybackWorkerSeekComplete>(worker);
+  if (!seek.has_value() || seek->generation != 41) {
+    return false;
+  }
+  const auto* hit = std::get_if<pulsar::application::VideoSeekHit>(&seek->outcome);
+  if (hit == nullptr || !hit->lookahead.has_value() ||
+      !hit->lookahead->presentation_timestamp.has_value() ||
+      hit->lookahead->presentation_timestamp->value() != upper_timestamp) {
+    return false;
+  }
+  const auto lookahead_ordinal = hit->lookahead->ordinal;
+  if (mailbox->stats().published != 2) {
+    return false;
+  }
+  // Drain the lookahead lease first: the repeated exposure must still not
+  // create a second mailbox entry for the same physical frame.
+  if (!mailbox->take(epoch, lookahead_ordinal).has_value()) {
+    return false;
+  }
+  worker.request_read(42);
+  const auto sample = wait_for_worker_event<pulsar::application::PlaybackWorkerSample>(worker);
+  if (!sample.has_value() || sample->generation != 42 ||
+      !sample->sample.presentation_timestamp.has_value() ||
+      sample->sample.presentation_timestamp->value() != upper_timestamp ||
+      sample->sample.ordinal != lookahead_ordinal) {
+    return false;
+  }
+  return mailbox->stats().published == 2;
 }
 
 bool audio_only_error_test(const std::filesystem::path& root) {
@@ -968,6 +1062,12 @@ int main() {
   }
   if (!visual_presentation_seek_test(root)) {
     return fail("visual presentation seek test");
+  }
+  if (!visual_frame_identity_test(root)) {
+    return fail("visual frame identity test");
+  }
+  if (!worker_physical_identity_test(root)) {
+    return fail("worker physical identity test");
   }
   if (!audio_only_error_test(root)) {
     return fail("audio-only error test");

@@ -256,12 +256,13 @@ void FFmpegPlaybackWorker::enqueue_event(application::PlaybackWorkerEvent event)
 }
 
 application::VideoSample FFmpegPlaybackWorker::to_sample(const DecodedVisualVideoFrame& frame) {
-  const auto ordinal = next_ordinal_++;
-  if (visual_mailbox_) {
-    visual_mailbox_->publish(source_epoch_, ordinal, frame);
+  if (visual_mailbox_ && (!last_published_physical_frame_id_.has_value() ||
+                           *last_published_physical_frame_id_ != frame.physical_frame_id)) {
+    visual_mailbox_->publish(source_epoch_, frame.physical_frame_id, frame);
+    last_published_physical_frame_id_ = frame.physical_frame_id;
   }
   return application::VideoSample{
-      ordinal,
+      frame.physical_frame_id,
       frame.presentation_timestamp.has_value()
           ? std::optional<application::StreamTimestamp>{
                 application::StreamTimestamp{*frame.presentation_timestamp}}
