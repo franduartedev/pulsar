@@ -303,6 +303,49 @@ void repository_atomic_save_and_missing_media_refresh() {
 
 } // namespace
 
+void repository_normalizes_codec_failures() {
+  const auto root = std::filesystem::temp_directory_path() /
+                    ("pulsar-project-codec-failures-" + std::to_string(
+                        std::chrono::steady_clock::now().time_since_epoch().count()));
+  std::filesystem::create_directories(root);
+  pulsar::project_file::FileProjectRepository repository;
+
+  // Malformed bytes through the real repository surface as repository errors.
+  const auto malformed = root / "malformed.pulsar";
+  { std::ofstream output{malformed}; output << "PULSAR_PROJECT 2\n"; }
+  bool load_rejected = false;
+  try {
+    (void)repository.load(malformed);
+  } catch (const application::ProjectRepositoryError& error) {
+    load_rejected = true;
+    assert(std::string{error.what()}.find("cannot decode project file") != std::string::npos);
+  }
+  assert(load_rejected);
+
+  // An unencodable snapshot fails before touching an existing destination.
+  auto oversized = make_document().snapshot();
+  oversized.assets.front() = application::MediaAsset{
+      oversized.assets.front().id(), std::string(65 * 1024, 'x'),
+      oversized.assets.front().video_stream_index(), oversized.assets.front().playable_duration(),
+      oversized.assets.front().metadata()};
+  const auto destination = root / "existing.pulsar";
+  const std::string sentinel{"sentinel-bytes"};
+  { std::ofstream output{destination, std::ios::binary}; output << sentinel; }
+  bool save_rejected = false;
+  try {
+    (void)repository.save(destination, oversized);
+  } catch (const application::ProjectRepositoryError& error) {
+    save_rejected = true;
+    assert(std::string{error.what()}.find("cannot encode project") != std::string::npos);
+  }
+  assert(save_rejected);
+  {
+    std::ifstream input{destination, std::ios::binary};
+    const std::string installed{std::istreambuf_iterator<char>{input}, {}};
+    assert(installed == sentinel);
+  }
+}
+
 int main() {
   codec_roundtrip_and_canonical_output();
   golden_fixture_decodes();
@@ -311,4 +354,5 @@ int main() {
   edited_state_and_saved_snapshot_regressions();
   allocator_high_water_and_restore_validation();
   repository_atomic_save_and_missing_media_refresh();
+  repository_normalizes_codec_failures();
 }

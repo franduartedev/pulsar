@@ -80,7 +80,13 @@ void refresh_availability(application::ProjectRestoreState& state,
 application::ProjectSaveResult FileProjectRepository::save(
     const std::filesystem::path& destination,
     const application::ProjectSnapshot& snapshot) const {
-  const std::string bytes = application::ProjectCodec::encode(snapshot);
+  std::string bytes;
+  try {
+    bytes = application::ProjectCodec::encode(snapshot);
+  } catch (const application::ProjectCodecError& error) {
+    throw application::ProjectRepositoryError{std::string{"cannot encode project: "} +
+                                              error.what()};
+  }
   if (!project_size_allowed(bytes.size())) {
     throw application::ProjectRepositoryError{"encoded project exceeds size limit"};
   }
@@ -147,9 +153,14 @@ application::ProjectSaveResult FileProjectRepository::save(
 
 application::ProjectRestoreState FileProjectRepository::load(
     const std::filesystem::path& source) const {
-  auto state = application::ProjectCodec::decode(read_all(source));
-  refresh_availability(state, source);
-  return state;
+  try {
+    auto state = application::ProjectCodec::decode(read_all(source));
+    refresh_availability(state, source);
+    return state;
+  } catch (const application::ProjectCodecError& error) {
+    throw application::ProjectRepositoryError{std::string{"cannot decode project file: "} +
+                                              error.what()};
+  }
 }
 
 } // namespace pulsar::project_file
