@@ -254,6 +254,9 @@ if(PULSAR_BUILD_QT_AUDIO)
   pulsar_apply_compiler_warnings(pulsar_qt_audio_output_tests)
 
   add_test(NAME pulsar.media.qt_audio_output COMMAND pulsar_qt_audio_output_tests)
+  # Threading regression insurance: a lifecycle deadlock must fail via
+  # timeout, never hang CI.
+  set_tests_properties(pulsar.media.qt_audio_output PROPERTIES TIMEOUT 300)
 endif()
 
 add_executable(pulsar_ffmpeg_audio_decode_session_tests

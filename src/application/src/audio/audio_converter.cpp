@@ -43,54 +43,6 @@ namespace {
   throw AudioConversionError{"unsupported audio channel mapping"};
 }
 
-[[nodiscard]] std::size_t resampled_frame_count(std::size_t source_frames, int source_rate,
-                                                int device_rate) {
-  const auto count = (static_cast<std::uint64_t>(source_frames) *
-                      static_cast<std::uint64_t>(device_rate)) /
-                     static_cast<std::uint64_t>(source_rate);
-  if (count == 0 || count > static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max())) {
-    throw AudioConversionError{"audio resampling produced an invalid frame count"};
-  }
-  return static_cast<std::size_t>(count);
-}
-
-[[nodiscard]] std::vector<float> resample_linear(const std::vector<float>& samples,
-                                                 std::size_t source_frames, int channels,
-                                                 int source_rate, int device_rate) {
-  if (source_rate == device_rate) {
-    return samples;
-  }
-  const std::size_t device_frames = resampled_frame_count(source_frames, source_rate, device_rate);
-  std::vector<float> resampled(device_frames * static_cast<std::size_t>(channels));
-  if (source_frames == 1) {
-    for (std::size_t frame = 0; frame < device_frames; ++frame) {
-      for (int channel = 0; channel < channels; ++channel) {
-        resampled[(frame * static_cast<std::size_t>(channels)) +
-                  static_cast<std::size_t>(channel)] = samples[static_cast<std::size_t>(channel)];
-      }
-    }
-    return resampled;
-  }
-  for (std::size_t frame = 0; frame < device_frames; ++frame) {
-    const double position =
-        (static_cast<double>(frame) * source_rate) / static_cast<double>(device_rate);
-    std::size_t base = static_cast<std::size_t>(position);
-    if (base + 1 >= source_frames) {
-      base = source_frames - 2;
-    }
-    const float fraction = static_cast<float>(position - static_cast<double>(base));
-    for (int channel = 0; channel < channels; ++channel) {
-      const float before = samples[(base * static_cast<std::size_t>(channels)) +
-                                   static_cast<std::size_t>(channel)];
-      const float after = samples[((base + 1) * static_cast<std::size_t>(channels)) +
-                                  static_cast<std::size_t>(channel)];
-      resampled[(frame * static_cast<std::size_t>(channels)) +
-                static_cast<std::size_t>(channel)] = before + fraction * (after - before);
-    }
-  }
-  return resampled;
-}
-
 void pack_float32(const std::vector<float>& samples, std::vector<std::uint8_t>& out) {
   const auto* bytes = reinterpret_cast<const std::uint8_t*>(samples.data());
   out.assign(bytes, bytes + samples.size() * sizeof(float));
@@ -127,43 +79,140 @@ void pack_uint8(const std::vector<float>& samples, std::vector<std::uint8_t>& ou
   }
 }
 
-} // namespace
-
-ConvertedAudioBlock convert_block_for_device(const AudioBlock& source,
-                                             const AudioDeviceFormat& device) {
-  if (source.sample_rate() <= 0 || device.sample_rate <= 0) {
-    throw AudioConversionError{"audio conversion requires positive sample rates"};
-  }
-  if (source.channel_count() <= 0 || device.channel_count <= 0) {
-    throw AudioConversionError{"audio conversion requires positive channel counts"};
-  }
-  if (!channels_supported(source.channel_count(), device.channel_count)) {
-    throw AudioConversionError{"unsupported audio channel mapping"};
-  }
-
-  std::vector<float> mapped =
-      map_channels(source.samples(), source.frame_count(), source.channel_count(),
-                   device.channel_count);
-  std::vector<float> timed =
-      resample_linear(mapped, source.frame_count(), device.channel_count,
-                      source.sample_rate(), device.sample_rate);
-  const std::size_t device_frames = timed.size() / static_cast<std::size_t>(device.channel_count);
-
-  ConvertedAudioBlock converted;
-  converted.format = device;
-  converted.frame_count = device_frames;
-  switch (device.sample_format) {
+void pack_samples(const std::vector<float>& samples, AudioSampleFormat format,
+                  std::vector<std::uint8_t>& out) {
+  switch (format) {
   case AudioSampleFormat::Float32:
-    pack_float32(timed, converted.frames);
+    pack_float32(samples, out);
     break;
   case AudioSampleFormat::Int16:
-    pack_int16(timed, converted.frames);
+    pack_int16(samples, out);
     break;
   case AudioSampleFormat::UInt8:
-    pack_uint8(timed, converted.frames);
+    pack_uint8(samples, out);
     break;
   }
+}
+
+} // namespace
+
+StreamingAudioConverter::StreamingAudioConverter(int source_rate, int source_channels,
+                                                 AudioDeviceFormat device)
+    : source_rate_{source_rate}, source_channels_{source_channels}, device_{device} {
+  if (source_rate_ <= 0 || device_.sample_rate <= 0) {
+    throw AudioConversionError{"audio conversion requires positive sample rates"};
+  }
+  if (source_channels_ <= 0 || device_.channel_count <= 0) {
+    throw AudioConversionError{"audio conversion requires positive channel counts"};
+  }
+  if (!channels_supported(source_channels_, device_.channel_count)) {
+    throw AudioConversionError{"unsupported audio channel mapping"};
+  }
+}
+
+ConvertedAudioBlock StreamingAudioConverter::convert(const AudioBlock& block) {
+  if (block.sample_rate() != source_rate_ || block.channel_count() != source_channels_) {
+    throw AudioConversionError{"audio block does not match converter source format"};
+  }
+  const std::size_t channels = static_cast<std::size_t>(device_.channel_count);
+  const std::size_t source_frames = block.frame_count();
+  const std::int64_t block_start = absolute_frames_;
+  if (!reservoir_.empty() &&
+      reservoir_base_ + static_cast<std::int64_t>(reservoir_.size() / channels) != block_start) {
+    throw AudioConversionError{"audio blocks are not contiguous"};
+  }
+  const std::vector<float> mapped =
+      map_channels(block.samples(), source_frames, source_channels_, device_.channel_count);
+  if (reservoir_.empty()) {
+    reservoir_base_ = block_start;
+  }
+  reservoir_.insert(reservoir_.end(), mapped.begin(), mapped.end());
+  absolute_frames_ += static_cast<std::int64_t>(source_frames);
+
+  // Streaming lattice in absolute source coordinates: identical grids for
+  // split and contiguous input. A point is emitted once its successor
+  // sample exists (interpolation history), so trailing points wait for the
+  // next block or the drain flush.
+  const double step = static_cast<double>(source_rate_) / device_.sample_rate;
+  const double block_end = static_cast<double>(block_start + static_cast<std::int64_t>(source_frames));
+  std::vector<float> resampled;
+  while (next_position_ < block_end - 1.0) {
+    const std::int64_t base = static_cast<std::int64_t>(std::floor(next_position_));
+    const float fraction =
+        static_cast<float>(next_position_ - static_cast<double>(base));
+    const std::size_t base_offset =
+        static_cast<std::size_t>(base - reservoir_base_) * channels;
+    for (std::size_t channel = 0; channel < channels; ++channel) {
+      resampled.push_back(reservoir_[base_offset + channel] * (1.0F - fraction) +
+                          reservoir_[base_offset + channels + channel] * fraction);
+    }
+    next_position_ += step;
+  }
+  // Keep only samples a future point may still reference.
+  const std::int64_t keep_from = static_cast<std::int64_t>(std::floor(next_position_)) - 1;
+  if (keep_from > reservoir_base_) {
+    const std::size_t drop =
+        static_cast<std::size_t>(keep_from - reservoir_base_) * channels;
+    if (drop >= reservoir_.size()) {
+      reservoir_.clear();
+    } else {
+      reservoir_.erase(reservoir_.begin(), reservoir_.begin() + static_cast<std::ptrdiff_t>(drop));
+    }
+    reservoir_base_ = keep_from;
+  }
+
+  ConvertedAudioBlock converted;
+  converted.format = device_;
+  converted.frame_count = resampled.size() / channels;
+  pack_samples(resampled, device_.sample_format, converted.frames);
   return converted;
+}
+
+ConvertedAudioBlock StreamingAudioConverter::flush_tail() const {
+  ConvertedAudioBlock tail;
+  tail.format = device_;
+  if (reservoir_.empty()) {
+    return tail;
+  }
+  const std::size_t channels = static_cast<std::size_t>(device_.channel_count);
+  const double step = static_cast<double>(source_rate_) / device_.sample_rate;
+  const double stream_end = static_cast<double>(absolute_frames_);
+  std::vector<float> resampled;
+  double position = next_position_;
+  const std::size_t reservoir_frames = reservoir_.size() / channels;
+  while (position < stream_end) {
+    std::int64_t base = static_cast<std::int64_t>(std::floor(position));
+    const float fraction = static_cast<float>(position - static_cast<double>(base));
+    std::size_t base_index = base - reservoir_base_ >= 0
+                                 ? static_cast<std::size_t>(base - reservoir_base_)
+                                 : 0;
+    std::size_t after_index = base_index + 1;
+    if (after_index >= reservoir_frames) {
+      after_index = reservoir_frames - 1;
+    }
+    if (base_index >= reservoir_frames) {
+      break;
+    }
+    for (std::size_t channel = 0; channel < channels; ++channel) {
+      resampled.push_back(reservoir_[base_index * channels + channel] * (1.0F - fraction) +
+                          reservoir_[after_index * channels + channel] * fraction);
+    }
+    position += step;
+  }
+  tail.frame_count = resampled.size() / channels;
+  pack_samples(resampled, device_.sample_format, tail.frames);
+  return tail;
+}
+
+void StreamingAudioConverter::reset() noexcept {
+  next_position_ = 0.0;
+  reservoir_.clear();
+  reservoir_base_ = 0;
+  absolute_frames_ = 0;
+}
+
+bool StreamingAudioConverter::can_convert(int source_channels) const noexcept {
+  return channels_supported(source_channels, device_.channel_count);
 }
 
 } // namespace pulsar::application

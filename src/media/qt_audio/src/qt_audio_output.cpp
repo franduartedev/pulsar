@@ -191,6 +191,7 @@ public:
     const auto outcome = on_owner(
         [&]() -> bool {
           teardown_device();
+          baseline_processed_ = 0;
           const auto device = select_device();
           if (device.isNull()) {
             set_error("no audio output device");
@@ -213,6 +214,7 @@ public:
     on_owner_void([this] {
       pump_.stop();
       teardown_device();
+      baseline_processed_ = 0;
       clear_error();
     });
   }
@@ -224,6 +226,9 @@ public:
             set_error("audio output is not configured");
             return false;
           }
+          // A sink (re)start opens a new processed-progress epoch:
+          // processedUSecs() restarts near zero, so the previous baseline
+          // must not leak forward or fresh audio looks already processed.
           io_ = sink_->start();
           if (io_ == nullptr) {
             set_error("audio device refused to start: " + sink_error_text(sink_->error()));
@@ -255,7 +260,9 @@ public:
       }
       // Verified against the real backend: reset() halts to Stopped and
       // zeroes counters, so the stream is re-acquired to keep playing.
+      // The re-acquired stream is a new processed-progress epoch.
       sink_->reset();
+      baseline_processed_ = 0;
       io_ = sink_->start();
       if (io_ == nullptr) {
         set_error("audio device refused to restart after flush: " +
@@ -323,14 +330,25 @@ public:
     return outcome.value_or(baseline_processed_);
   }
 
+  // Backend exhaustion authority for drain completion: the sink holds no
+  // unplayed audio once it returns to Idle after submissions. Never the
+  // microsecond counter alone.
+  bool is_playback_exhausted() override {
+    const auto outcome = on_owner(
+        [&]() -> bool {
+          return sink_ == nullptr || sink_->state() == QAudio::IdleState;
+        },
+        "exhaustion query");
+    return outcome.value_or(true);
+  }
+
   std::optional<std::string> backend_error() override {
     std::lock_guard lock{mutex_};
     if (latched_error_.has_value()) {
       return latched_error_;
     }
     if (QThread::currentThread() == owner_) {
-      poll_sink_error();
-      return latched_error_;
+      poll_sink_error_locked();
     }
     return latched_error_;
   }
@@ -363,13 +381,17 @@ private:
     latched_error_.reset();
   }
 
-  void poll_sink_error() {
-    if (sink_ != nullptr && sink_->error() != QAudio::NoError) {
-      std::lock_guard lock{mutex_};
-      if (!latched_error_.has_value()) {
-        latched_error_ = "audio device failure: " + sink_error_text(sink_->error());
-      }
+  // Assumes mutex_ is already held by the caller.
+  void poll_sink_error_locked() {
+    if (sink_ != nullptr && sink_->error() != QAudio::NoError && !latched_error_.has_value()) {
+      latched_error_ = "audio device failure: " + sink_error_text(sink_->error());
     }
+  }
+
+  // Acquires mutex_ exactly once; never call while holding it.
+  void poll_sink_error() {
+    std::lock_guard lock{mutex_};
+    poll_sink_error_locked();
   }
 
   void teardown_device() {

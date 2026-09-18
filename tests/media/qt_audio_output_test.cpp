@@ -10,12 +10,14 @@
 #include <QElapsedTimer>
 #include <QMediaDevices>
 
+#include <atomic>
 #include <cassert>
 #include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <string>
 #include <thread>
 #include <vector>
 
@@ -103,10 +105,78 @@ void drain_lifecycle_with_worker_producer() {
         static_cast<std::uint64_t>(device.sample_rate)) /
        static_cast<std::uint64_t>(kRate));
   assert(metrics.device_frames_submitted == expected_device_frames);
-  assert(metrics.device_frames_processed == expected_device_frames);
+  // Backend progress never exceeds submissions; exact equality is backend
+  // rounding luck, not a contract (completion uses exhaustion, not equality).
+  assert(metrics.device_frames_processed <= expected_device_frames);
   assert(metrics.buffered_device_frames == 0);
   assert(metrics.underrun_count == 0);
   output.close();
+  assert(output.state() == AudioOutputState::Closed);
+}
+
+// B3: flush opens a new processed epoch. After a long first run, post-flush
+// progress must restart near zero, never inherit the old baseline.
+void flush_resets_processed_epoch() {
+  QtAudioOutput output{QtAudioOutput::Options{{192000}, {}}};
+  assert(output.open({44100, 1}));
+  assert(output.enqueue(sine_block(44100, 1, 88200, 440.0)) == AudioEnqueueResult::Accepted);
+  assert(output.start());
+  assert(poll_until([&] { return output.metrics().device_frames_processed > 44000; }, 15000));
+  assert(output.flush());
+  assert(output.metrics().device_frames_processed == 0);
+  assert(output.metrics().device_frames_submitted == 0);
+  assert(output.enqueue(sine_block(44100, 1, 44100, 440.0)) == AudioEnqueueResult::Accepted);
+  assert(poll_until([&] { return output.metrics().device_frames_submitted > 0; }, 10000));
+  // A stale baseline would report the full new submission instantly; fresh
+  // audio cannot have played 0.5 s within microseconds of submission.
+  assert(output.metrics().device_frames_processed < 22050);
+  assert(poll_until([&] { return output.metrics().device_frames_processed > 0; }, 10000));
+  assert(output.request_drain());
+  assert(poll_until([&] { return output.state() == AudioOutputState::Completed; }, 20000));
+  output.close();
+}
+
+// B5/B6-Qt: full lifecycle driven from a foreign thread while the owner
+// pump is active. Any engine-lock/blocking-marshal cycle deadlocks here;
+// the watchdog bounds the test instead of hanging CI.
+void foreign_thread_lifecycle_no_deadlock() {
+  QtAudioOutput output{QtAudioOutput::Options{{65536}, {}}};
+  std::atomic<bool> worker_done{false};
+  std::string worker_error;
+  std::thread worker([&] {
+    if (!output.open({44100, 1})) {
+      worker_error = "open";
+      return;
+    }
+    if (output.enqueue(sine_block(44100, 1, 4410, 440.0)) != AudioEnqueueResult::Accepted) {
+      worker_error = "enqueue";
+      return;
+    }
+    if (!output.start()) {
+      worker_error = "start";
+      return;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    if (!output.stop()) {
+      worker_error = "stop";
+      return;
+    }
+    if (!output.flush()) {
+      worker_error = "flush";
+      return;
+    }
+    output.close();
+    worker_done = true;
+  });
+  const bool finished =
+      poll_until([&] { return worker_done.load(); }, 15000);
+  if (finished) {
+    worker.join();
+  } else {
+    worker.detach();
+  }
+  assert(finished);
+  assert(worker_error.empty());
   assert(output.state() == AudioOutputState::Closed);
 }
 
@@ -170,4 +240,6 @@ int main(int argc, char** argv) {
   start_empty_stop_flush_reopen();
   starvation_surfaces_underrun();
   multichannel_policy_without_guessing();
+  flush_resets_processed_epoch();
+  foreign_thread_lifecycle_no_deadlock();
 }

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <pulsar/application/audio/audio_converter.hpp>
 #include <pulsar/application/audio/audio_output.hpp>
 
 #include <cstddef>
@@ -38,6 +39,10 @@ public:
   virtual std::size_t write_frames(const void* frames, std::size_t frame_count) = 0;
   // Backend-processed device frames. Implementations clamp monotonically.
   [[nodiscard]] virtual std::uint64_t processed_frames() = 0;
+  // True when the backend holds no unplayed audio (all submitted data was
+  // consumed and played out). PULSAR-native observation; the engine never
+  // sees device-specific states.
+  [[nodiscard]] virtual bool is_playback_exhausted() = 0;
   // Latched backend failure, if any.
   [[nodiscard]] virtual std::optional<std::string> backend_error() = 0;
 };
@@ -66,8 +71,10 @@ public:
   bool flush() override;
 
   // Owner-thread pump step: moves queued device frames to the backend,
-  // updates metrics, detects underrun vs drain completion. Safe to call
-  // from tests without any device thread.
+  // updates metrics, detects underrun vs drain completion. Must be called
+  // on the device owner thread (or with a backend that never blocks):
+  // the engine never holds its mutex across backend calls, but backend
+  // implementations may assume owner-thread affinity.
   bool transfer_to_backend();
 
   [[nodiscard]] AudioOutputState state() const override;
@@ -82,18 +89,28 @@ private:
   [[nodiscard]] std::size_t frame_size_bytes() const noexcept;
   [[nodiscard]] std::size_t buffered_frames() const noexcept;
 
+  // Locking rule: the engine mutex is never held across backend calls
+  // (they may block or marshal to another thread). Lifecycle operations
+  // use two phases (validate under lock, backend unlocked, commit under
+  // lock) serialized by transition_ plus an epoch token: transfer_to_backend
+  // skips ticks during transitions and drops commit accounting when the
+  // epoch moved (a racing pump tick may still submit already-popped frames,
+  // bounded by one writable quantum; single-threaded behavior is exact).
   AudioDeviceBackend& backend_;
   AudioEngineLimits limits_;
   mutable std::mutex mutex_;
   AudioOutputState state_{AudioOutputState::Closed};
   AudioSourceFormat source_format_{0, 0};
   std::optional<AudioDeviceFormat> device_format_;
+  std::optional<StreamingAudioConverter> converter_;
   std::optional<AudioOutputError> latched_error_;
   std::vector<std::uint8_t> queue_;
   std::size_t queue_head_{0};
   AudioOutputMetrics metrics_;
   bool drain_requested_{false};
   bool in_underrun_{false};
+  bool transition_{false};
+  std::uint64_t epoch_{0};
 };
 
 } // namespace pulsar::application
