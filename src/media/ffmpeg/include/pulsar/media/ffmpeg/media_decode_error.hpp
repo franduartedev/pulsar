@@ -8,6 +8,7 @@ namespace pulsar::media::ffmpeg {
 enum class MediaDecodeErrorCode {
   InvalidStreamIndex,
   SelectedStreamIsNotVideo,
+  SelectedStreamIsNotAudio,
   DecoderUnavailable,
   DecoderInitializationFailed,
   DemuxReadFailed,

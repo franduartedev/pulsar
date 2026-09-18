@@ -8,9 +8,11 @@ pkg_check_modules(
     libavcodec
     libavutil
     libswscale
+    libswresample
 )
 
 add_library(pulsar_media_ffmpeg
+  src/ffmpeg_audio_decode_session.cpp
   src/ffmpeg_video_decode_session.cpp
   src/ffmpeg_media_probe.cpp
   src/ffmpeg_playback_worker.cpp

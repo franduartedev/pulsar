@@ -1,6 +1,7 @@
 add_library(pulsar_application
   src/bootstrap.cpp
   src/commands/command_processor.cpp
+  src/media/audio_block.cpp
   src/media/media_probe_error.cpp
   src/project/media_asset.cpp
   src/project/project_document.cpp
