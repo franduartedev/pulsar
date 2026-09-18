@@ -97,6 +97,7 @@ public:
   Q_INVOKABLE void deleteSelectedClip();
   Q_INVOKABLE void undoEdit();
   Q_INVOKABLE void redoEdit();
+  Q_INVOKABLE void saveProject(const QString& path);
 signals:
   void statusChanged(); void technicalStatusChanged(); void mediaChanged(); void errorChanged();
   void previewChanged(); void positionChanged(); void playbackChanged(); void busyChanged();

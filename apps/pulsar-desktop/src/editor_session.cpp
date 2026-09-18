@@ -108,6 +108,15 @@ EditorSyncDiagnostics EditorSession::synchronization_diagnostics() const {
   return diagnostics;
 }
 
+application::ProjectSaveResult EditorSession::save_project(
+    const std::filesystem::path& destination,
+    const application::ProjectRepository& repository) {
+  const application::ProjectSnapshot snapshot = document_.snapshot();
+  const application::ProjectSaveResult result = repository.save(destination, snapshot);
+  document_.mark_history_state_saved(snapshot.history_state_id);
+  return result;
+}
+
 void EditorSession::rebuild_read_model() {
   views_.clear();
   const auto& timeline = document_.timeline();

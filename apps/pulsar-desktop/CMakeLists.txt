@@ -64,6 +64,7 @@ target_link_libraries(pulsar_desktop
     pulsar::media_ffmpeg
     pulsar::application
     pulsar::domain
+    pulsar::project_file
 )
 
 pulsar_apply_project_options(pulsar_desktop)

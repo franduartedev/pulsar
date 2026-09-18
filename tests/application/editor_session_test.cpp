@@ -9,6 +9,8 @@
 #include <cmath>
 #include <cstdint>
 #include <filesystem>
+#include <functional>
+#include <optional>
 #include <string>
 #include <limits>
 
@@ -282,6 +284,116 @@ void synchronization_diagnostics_semantics() {
   assert(settled.recent_durations.size() == 2);
 }
 
+class FakeProjectRepository final : public application::ProjectRepository {
+ public:
+  [[nodiscard]] application::ProjectSaveResult save(
+      const std::filesystem::path& destination,
+      const application::ProjectSnapshot& snapshot) const override {
+    last_destination = destination;
+    last_snapshot = snapshot;
+    if (on_save) {
+      on_save();
+    }
+    if (throw_on_save) {
+      throw application::ProjectRepositoryError{"fake save failure"};
+    }
+    return result_to_return;
+  }
+
+  [[nodiscard]] application::ProjectRestoreState load(
+      const std::filesystem::path&) const override {
+    throw application::ProjectRepositoryError{"fake load unsupported"};
+  }
+
+  mutable std::optional<std::filesystem::path> last_destination;
+  mutable std::optional<application::ProjectSnapshot> last_snapshot;
+  application::ProjectSaveResult result_to_return{application::ProjectSaveStatus::Durable};
+  bool throw_on_save{false};
+  std::function<void()> on_save;
+};
+
+void save_project_marks_captured_history_state() {
+  Probe probe;
+  EditorSession session;
+  (void)session.processor().import_asset("save.mp4", probe);
+  assert(session.document().is_dirty());
+  const auto current = session.document().history_state_id();
+  const auto generation = session.document().document_generation();
+  const bool had_undo = session.can_undo();
+  const bool had_redo = session.can_redo();
+
+  FakeProjectRepository repository;
+  const auto result = session.save_project("project.pulsar", repository);
+  assert(result.status == application::ProjectSaveStatus::Durable);
+  assert(repository.last_destination == std::filesystem::path{"project.pulsar"});
+  assert(repository.last_snapshot.has_value());
+  assert(repository.last_snapshot->history_state_id == current);
+  assert(session.document().saved_history_state_id() == current);
+  assert(!session.document().is_dirty());
+  assert(session.document().document_generation() == generation);
+  assert(session.can_undo() == had_undo);
+  assert(session.can_redo() == had_redo);
+}
+
+void save_project_uncertain_durability_still_commits() {
+  Probe probe;
+  EditorSession session;
+  (void)session.processor().import_asset("uncertain.mp4", probe);
+  const auto current = session.document().history_state_id();
+
+  FakeProjectRepository repository;
+  repository.result_to_return = application::ProjectSaveResult{
+      application::ProjectSaveStatus::CommittedDurabilityUncertain};
+  const auto result = session.save_project("project.pulsar", repository);
+  assert(result.status == application::ProjectSaveStatus::CommittedDurabilityUncertain);
+  assert(session.document().saved_history_state_id() == current);
+  assert(!session.document().is_dirty());
+}
+
+void save_project_failure_marks_nothing_saved() {
+  Probe probe;
+  EditorSession session;
+  (void)session.processor().import_asset("failing.mp4", probe);
+  const auto current = session.document().history_state_id();
+  const auto saved_before = session.document().saved_history_state_id();
+  const auto generation = session.document().document_generation();
+
+  FakeProjectRepository repository;
+  repository.throw_on_save = true;
+  bool failed = false;
+  try {
+    (void)session.save_project("project.pulsar", repository);
+  } catch (const application::ProjectRepositoryError&) {
+    failed = true;
+  }
+  assert(failed);
+  assert(session.document().saved_history_state_id() == saved_before);
+  assert(session.document().history_state_id() == current);
+  assert(session.document().is_dirty());
+  assert(session.document().document_generation() == generation);
+}
+
+void save_project_marks_captured_snapshot_not_current_state() {
+  Probe probe;
+  EditorSession session;
+  (void)session.processor().import_asset("reentrant.mp4", probe);
+  const auto state_a = session.document().history_state_id();
+
+  FakeProjectRepository repository;
+  repository.on_save = [&session, &probe, state_a] {
+    assert(session.document().history_state_id() == state_a);
+    (void)session.processor().import_asset("second.mp4", probe);
+    assert(session.document().history_state_id() != state_a);
+  };
+  const auto result = session.save_project("project.pulsar", repository);
+  assert(result.status == application::ProjectSaveStatus::Durable);
+  assert(repository.last_snapshot.has_value());
+  assert(repository.last_snapshot->history_state_id == state_a);
+  assert(session.document().history_state_id() != state_a);
+  assert(session.document().saved_history_state_id() == state_a);
+  assert(session.document().is_dirty());
+}
+
 void duration_ring_wraparound() {
   DurationSampleRing ring;
   assert(ring.size() == 0);
@@ -304,4 +416,8 @@ int main() {
   final_pointer_edit_regressions();
   synchronization_diagnostics_semantics();
   duration_ring_wraparound();
+  save_project_marks_captured_history_state();
+  save_project_uncertain_durability_still_commits();
+  save_project_failure_marks_nothing_saved();
+  save_project_marks_captured_snapshot_not_current_state();
 }

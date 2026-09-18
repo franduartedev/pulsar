@@ -3,6 +3,7 @@
 #include <pulsar/media/ffmpeg/ffmpeg_media_probe.hpp>
 #include <pulsar/media/ffmpeg/ffmpeg_playback_worker.hpp>
 #include <pulsar/media/ffmpeg/ffmpeg_preview_converter.hpp>
+#include <pulsar/project_file/file_project_repository.hpp>
 
 #include <QMetaObject>
 #include <QStringList>
@@ -160,6 +161,24 @@ void DesktopController::splitSelectedClip(){if(!active_session_)return;try{(void
 void DesktopController::deleteSelectedClip(){if(!active_session_)return;try{active_session_->delete_selected();clearError();clearProgram("loading");publishTimeline();}catch(...){} }
 void DesktopController::undoEdit(){if(active_session_&&active_session_->undo()){clearProgram("loading");publishTimeline();}}
 void DesktopController::redoEdit(){if(active_session_&&active_session_->redo()){clearProgram("loading");publishTimeline();}}
+void DesktopController::saveProject(const QString& path) {
+  const QString trimmed = path.trimmed();
+  if (trimmed.isEmpty() || !active_session_) {
+    return;
+  }
+  try {
+    const auto result = active_session_->save_project(std::filesystem::path{trimmed.toStdString()},
+                                                      pulsar::project_file::FileProjectRepository{});
+    if (result.status == pulsar::application::ProjectSaveStatus::Durable) {
+      setStatus(QStringLiteral("Proyecto guardado"));
+    } else {
+      setStatus(QStringLiteral("Proyecto guardado (durabilidad no confirmada)"));
+    }
+    clearError();
+  } catch (const pulsar::application::ProjectRepositoryError& error) {
+    setError(QString::fromUtf8(error.what()));
+  }
+}
 
 std::unique_ptr<pulsar::desktop::EditorSession> DesktopController::makeEditorSession() {
   auto mailbox = visual_mailbox_;

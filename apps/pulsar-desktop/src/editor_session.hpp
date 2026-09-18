@@ -5,9 +5,11 @@
 #include <pulsar/application/commands/command_processor.hpp>
 #include <pulsar/application/playback/timeline_playback_coordinator.hpp>
 #include <pulsar/application/project/project_document.hpp>
+#include <pulsar/application/project/project_repository.hpp>
 
 #include <chrono>
 #include <cstdint>
+#include <filesystem>
 #include <memory>
 #include <optional>
 #include <string>
@@ -81,6 +83,12 @@ public:
 
   void synchronize_document_state();
   [[nodiscard]] EditorSyncDiagnostics synchronization_diagnostics() const;
+  // Persists exactly the snapshot captured here; marks that captured history
+  // state saved only after the repository reports success. Depends only on
+  // the application repository port, never on a concrete adapter.
+  [[nodiscard]] application::ProjectSaveResult save_project(
+      const std::filesystem::path& destination,
+      const application::ProjectRepository& repository);
   void rebuild_read_model();
   void select_clip(std::optional<domain::ClipId> clip);
   [[nodiscard]] std::optional<domain::MediaTime> time_at(double pixel, double width) const;
