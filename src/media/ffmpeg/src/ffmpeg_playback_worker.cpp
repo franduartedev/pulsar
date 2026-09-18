@@ -218,6 +218,7 @@ void FFmpegPlaybackWorker::run() {
               std::lock_guard lock{mutex_};
               stats_.last_read_latency = std::chrono::steady_clock::now() - read_start;
               read_latencies_.push(stats_.last_read_latency);
+              ++stats_.read_completion_count;
             }
             enqueue_event(application::PlaybackWorkerSample{read->generation, to_sample(*frame)});
           } else {
@@ -225,11 +226,16 @@ void FFmpegPlaybackWorker::run() {
               std::lock_guard lock{mutex_};
               stats_.last_read_latency = std::chrono::steady_clock::now() - read_start;
               read_latencies_.push(stats_.last_read_latency);
+              ++stats_.read_completion_count;
             }
             enqueue_event(application::PlaybackWorkerEndOfStream{
                 read->generation, application::VideoSourceEndOfStream{std::nullopt, false}});
           }
         } catch (const std::exception& error) {
+          {
+            std::lock_guard lock{mutex_};
+            ++stats_.read_completion_count;
+          }
           enqueue_event(application::PlaybackWorkerError{read->generation, to_error(error)});
         }
       }

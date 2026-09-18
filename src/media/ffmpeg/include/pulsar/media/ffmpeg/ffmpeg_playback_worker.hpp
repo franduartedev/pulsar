@@ -22,6 +22,9 @@ namespace pulsar::media::ffmpeg {
 struct FFmpegPlaybackWorkerStats {
   std::size_t read_request_count{0};
   std::size_t seek_request_count{0};
+  // Diagnostic only: read operations that reached an outcome (sample, end of
+  // stream, or request-scoped error). Guarded by the existing worker mutex.
+  std::uint64_t read_completion_count{0};
   std::size_t events_dropped_due_to_capacity{0};
   std::size_t event_queue_high_water_mark{0};
   std::size_t samples_dropped_due_to_capacity{0};

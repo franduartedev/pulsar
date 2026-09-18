@@ -5,11 +5,16 @@
 #include <pulsar/media/ffmpeg/decoded_visual_video_frame.hpp>
 #include <pulsar/media/ffmpeg/detail/latency_sample_ring.hpp>
 #include <pulsar/media/ffmpeg/ffmpeg_playback_visual_mailbox.hpp>
+#include <pulsar/media/ffmpeg/ffmpeg_playback_worker.hpp>
 
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
+#include <cstdlib>
+#include <filesystem>
 #include <iostream>
+#include <memory>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -132,6 +137,32 @@ bool latency_ring_tests() {
   return true;
 }
 
+std::string shell_quote(const std::filesystem::path& path) {
+  return "'" + path.string() + "'";
+}
+
+bool worker_completion_counter_plumbing_tests() {
+  // A freshly constructed real worker reports zeroed completion plumbing.
+  // (Completion increments themselves are observed in engine-lab runs.)
+  const auto root = std::filesystem::temp_directory_path() / "pulsar-playback-diagnostics-tests";
+  std::filesystem::create_directories(root);
+  const auto media = root / "tiny.mp4";
+  const std::string command =
+      std::string(PULSAR_TEST_FFMPEG_CLI) +
+      " -y -hide_banner -loglevel error -f lavfi -i testsrc=duration=2:size=64x64:rate=10"
+      " -pix_fmt yuv420p -c:v mpeg4 " +
+      shell_quote(media);
+  if (std::system(command.c_str()) != 0) {
+    return false;
+  }
+  auto mailbox = std::make_shared<pulsar::media::ffmpeg::FFmpegPlaybackVisualMailbox>(8);
+  pulsar::media::ffmpeg::FFmpegPlaybackWorker worker(
+      media, 0, pulsar::media::ffmpeg::FFmpegPlaybackWorker::Limits{}, mailbox);
+  const auto stats = worker.stats();
+  return stats.read_completion_count == 0 && stats.read_request_count == 0 &&
+         stats.seek_request_count == 0 && stats.read_latency_count == 0;
+}
+
 }  // namespace
 
 int main() {
@@ -140,6 +171,9 @@ int main() {
   }
   if (!latency_ring_tests()) {
     return fail("latency ring tests");
+  }
+  if (!worker_completion_counter_plumbing_tests()) {
+    return fail("worker completion counter plumbing tests");
   }
   return 0;
 }

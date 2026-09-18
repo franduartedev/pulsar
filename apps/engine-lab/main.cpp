@@ -23,6 +23,7 @@
 
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <iomanip>
 #include <iostream>
@@ -31,6 +32,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <variant>
 #include <vector>
 
 namespace {
@@ -386,6 +388,67 @@ void bounded_yield(int iteration) {
   }
 }
 
+// Simulates the desktop visual consumer: each new presentation ordinal is
+// taken at most once from the epoch-gated mailbox. Missing entries are
+// counted, never hidden. Harness-side only.
+class VisualConsumer {
+ public:
+  void consider(pulsar::media::ffmpeg::FFmpegPlaybackVisualMailbox& mailbox,
+                pulsar::media::ffmpeg::FFmpegPlaybackVisualMailbox::SourceEpoch epoch,
+                std::uint64_t ordinal) {
+    if (last_ordinal_.has_value() && *last_ordinal_ == ordinal) {
+      return;
+    }
+    last_ordinal_ = ordinal;
+    if (!mailbox.take(epoch, ordinal).has_value()) {
+      ++misses_;
+    }
+  }
+
+  void consider_decision(
+      pulsar::media::ffmpeg::FFmpegPlaybackVisualMailbox& mailbox,
+      pulsar::media::ffmpeg::FFmpegPlaybackVisualMailbox::SourceEpoch epoch,
+      const pulsar::application::PresentationDecision& decision) {
+    if (const auto* present = std::get_if<pulsar::application::PresentSample>(&decision)) {
+      consider(mailbox, epoch, present->sample.ordinal);
+    } else if (const auto* hold = std::get_if<pulsar::application::HoldPresentation>(&decision)) {
+      consider(mailbox, epoch, hold->sample.ordinal);
+    }
+  }
+
+  [[nodiscard]] std::uint64_t misses() const noexcept { return misses_; }
+
+ private:
+  std::optional<std::uint64_t> last_ordinal_;
+  std::uint64_t misses_{0};
+};
+
+// Bounded wait for worker read completions without evaluating the scheduler
+// again and without advancing fake time. Returns true on observed progress.
+bool await_read_completion(const pulsar::media::ffmpeg::FFmpegPlaybackWorker& worker,
+                           std::uint64_t baseline_completions) {
+  for (int i = 0; i < 20000; ++i) {
+    if (worker.stats().read_completion_count > baseline_completions) {
+      return true;
+    }
+    bounded_yield(i);
+  }
+  return worker.stats().read_completion_count > baseline_completions;
+}
+
+// Bounded wait until the session leaves a transitional availability.
+void await_settled(pulsar::application::PlaybackSession& session) {
+  for (int i = 0; i < 20000; ++i) {
+    (void)session.update();
+    const auto availability = session.availability();
+    if (availability == pulsar::application::PlaybackAvailability::Ready ||
+        availability == pulsar::application::PlaybackAvailability::Error) {
+      return;
+    }
+    bounded_yield(i);
+  }
+}
+
 int run_playback_metrics(const std::filesystem::path& path, int ticks) {
   if (ticks <= 0) {
     std::cerr << "Playback metrics failed: tick count must be positive\n";
@@ -411,94 +474,141 @@ int run_playback_metrics(const std::filesystem::path& path, int ticks) {
 
   const auto wall_start = std::chrono::steady_clock::now();
   session.open();
-  // Bounded cooperative wait for the async open/seek; deterministic tick
-  // advancement below stays separate from worker waiting.
-  for (int i = 0; i < 20000; ++i) {
-    (void)session.update();
-    const auto availability = session.availability();
-    if (availability == pulsar::application::PlaybackAvailability::Ready ||
-        availability == pulsar::application::PlaybackAvailability::Error) {
-      break;
-    }
-    bounded_yield(i);
-  }
+  await_settled(session);
 
+  // Phase A: main playback. Exactly one scheduler evaluation per fake tick;
+  // newly issued reads settle cooperatively without advancing fake time.
+  VisualConsumer consumer;
   session.play();
   const pulsar::domain::MediaTime tick_step{1, pulsar::domain::Rational{1, 60}};
   for (int i = 0; i < ticks; ++i) {
+    const auto reads_before = observed->stats().read_request_count;
+    const auto completions_before = observed->stats().read_completion_count;
     clock.advance(tick_step);
-    (void)session.update();
-  }
-
-  // Seek-epoch observation for X1: baselines, one known seek, settle, deltas.
-  // Scheduler counters reset on seek by design, so post-seek values below
-  // already describe exactly this seek epoch.
-  const auto epoch_reads_before = observed->stats().read_request_count;
-  const auto epoch_mail_before = mailbox->stats();
-  session.seek(pulsar::application::PlaybackPosition{pulsar::domain::MediaTime{2, pulsar::domain::Rational{1, 1}}});
-  for (int i = 0; i < 20000; ++i) {
-    (void)session.update();
-    const auto availability = session.availability();
-    if (availability == pulsar::application::PlaybackAvailability::Ready ||
-        availability == pulsar::application::PlaybackAvailability::Error) {
-      break;
+    consumer.consider_decision(*mailbox, observed->source_epoch(), session.update());
+    if (observed->stats().read_request_count > reads_before) {
+      (void)await_read_completion(*observed, completions_before);
     }
-    bounded_yield(i);
   }
-  for (int i = 0; i < 240; ++i) {
-    (void)session.update();
-    bounded_yield(i);
-  }
-  const auto epoch_sched_after = session.scheduler_stats();
-  const auto epoch_reads_after = observed->stats().read_request_count;
-  const auto epoch_mail_after = mailbox->stats();
-  const auto wall_end = std::chrono::steady_clock::now();
 
-  const auto session_stats = session.stats();
-  const auto worker_stats = observed->stats();
-  const auto mail_stats = mailbox->stats();
+  // Main snapshot is captured BEFORE the seek experiment below, so top-level
+  // fields describe main playback only.
+  const auto main_session = session.stats();
+  const auto main_scheduler = session.scheduler_stats();
+  const auto main_worker = observed->stats();
+  const auto main_mailbox = mailbox->stats();
+  const auto main_misses = consumer.misses();
+  const auto main_wall_ms =
+      std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() -
+                                                            wall_start)
+          .count();
+
+  // Phase B: seek epoch. Interior target only; otherwise report unavailable
+  // instead of fabricating X1 numbers.
+  bool seek_available = false;
+  pulsar::domain::MediaTime seek_target = pulsar::domain::MediaTime::zero();
+  if (probe_result.duration.has_value()) {
+    const auto duration = *probe_result.duration;
+    const pulsar::domain::MediaTime minimum{4, pulsar::domain::Rational{1, 1}};
+    if (duration > minimum) {
+      const auto half = pulsar::domain::MediaTime{duration.value() / 2, duration.time_base()};
+      const pulsar::domain::MediaTime two{2, pulsar::domain::Rational{1, 1}};
+      seek_target = (two < half) ? two : half;
+      seek_available = seek_target > pulsar::domain::MediaTime::zero();
+    }
+  }
+
+  bool seek_completed = false;
+  pulsar::application::PresentationSchedulerStats epoch_sched{};
+  std::uint64_t epoch_read_delta = 0;
+  std::uint64_t epoch_completion_delta = 0;
+  pulsar::media::ffmpeg::FFmpegPlaybackVisualMailbox::Stats epoch_mail_before{};
+  pulsar::media::ffmpeg::FFmpegPlaybackVisualMailbox::Stats epoch_mail_after{};
+  std::uint64_t epoch_misses = 0;
+  pulsar::domain::Rational target_seconds{0, 1};
+  if (seek_available) {
+    target_seconds = seek_target.seconds();
+    const auto reads_before = observed->stats().read_request_count;
+    const auto completions_before = observed->stats().read_completion_count;
+    epoch_mail_before = mailbox->stats();
+    const auto misses_before = consumer.misses();
+    session.seek(pulsar::application::PlaybackPosition{seek_target});
+    await_settled(session);
+    consumer.consider_decision(*mailbox, observed->source_epoch(), session.update());
+    // Advance fake time tick by tick until one normal post-seek read has been
+    // both issued and completed (seek hit/lookahead settling included).
+    for (int i = 0; i < 3000; ++i) {
+      const auto tick_reads = observed->stats().read_request_count;
+      const auto tick_completions = observed->stats().read_completion_count;
+      clock.advance(tick_step);
+      consumer.consider_decision(*mailbox, observed->source_epoch(), session.update());
+      if (observed->stats().read_request_count > tick_reads) {
+        (void)await_read_completion(*observed, tick_completions);
+      }
+      if (observed->stats().read_request_count > reads_before &&
+          observed->stats().read_completion_count > completions_before) {
+        seek_completed = true;
+        break;
+      }
+    }
+    epoch_sched = session.scheduler_stats();
+    epoch_read_delta = observed->stats().read_request_count - reads_before;
+    epoch_completion_delta = observed->stats().read_completion_count - completions_before;
+    epoch_mail_after = mailbox->stats();
+    epoch_misses = consumer.misses() - misses_before;
+  }
   std::vector<std::chrono::nanoseconds> latencies(
-      worker_stats.read_latency_ring.begin(),
-      worker_stats.read_latency_ring.begin() +
-          static_cast<std::ptrdiff_t>(worker_stats.read_latency_count));
+      main_worker.read_latency_ring.begin(),
+      main_worker.read_latency_ring.begin() +
+          static_cast<std::ptrdiff_t>(main_worker.read_latency_count));
   std::sort(latencies.begin(), latencies.end());
   const auto to_us = [](std::chrono::nanoseconds value) {
     return std::chrono::duration_cast<std::chrono::microseconds>(value).count();
   };
 
-  const auto wall_ms =
-      std::chrono::duration_cast<std::chrono::milliseconds>(wall_end - wall_start).count();
   std::cout << "media=" << path.filename().string() << '\n';
   std::cout << "ticks=" << ticks << '\n';
-  std::cout << "wall_ms=" << wall_ms << '\n';
-  std::cout << "session.stale_event_count=" << session_stats.stale_event_count << '\n';
-  std::cout << "session.control_accept_count=" << session_stats.control_accept_count << '\n';
-  std::cout << "scheduler.starvation_count=" << epoch_sched_after.starvation_count << '\n';
+  std::cout << "wall_ms=" << main_wall_ms << '\n';
+  std::cout << "session.stale_event_count=" << main_session.stale_event_count << '\n';
+  std::cout << "session.control_accept_count=" << main_session.control_accept_count << '\n';
+  std::cout << "scheduler.starvation_count=" << main_scheduler.starvation_count << '\n';
   std::cout << "scheduler.skipped_presentation_count="
-            << epoch_sched_after.skipped_presentation_count << '\n';
-  std::cout << "worker.read_request_count=" << worker_stats.read_request_count << '\n';
-  std::cout << "worker.seek_request_count=" << worker_stats.seek_request_count << '\n';
+            << main_scheduler.skipped_presentation_count << '\n';
+  std::cout << "worker.read_request_count=" << main_worker.read_request_count << '\n';
+  std::cout << "worker.seek_request_count=" << main_worker.seek_request_count << '\n';
+  std::cout << "worker.read_completion_count=" << main_worker.read_completion_count << '\n';
   std::cout << "worker.read_latency_p50_us=" << to_us(percentile_sorted(latencies, 0.50)) << '\n';
   std::cout << "worker.read_latency_p95_us=" << to_us(percentile_sorted(latencies, 0.95)) << '\n';
   std::cout << "worker.read_latency_max_us="
             << to_us(latencies.empty() ? std::chrono::nanoseconds{0} : latencies.back()) << '\n';
-  std::cout << "worker.queue_high_water=" << worker_stats.event_queue_high_water_mark << '\n';
-  std::cout << "worker.events_dropped=" << worker_stats.events_dropped_due_to_capacity << '\n';
-  std::cout << "worker.samples_dropped=" << worker_stats.samples_dropped_due_to_capacity << '\n';
-  std::cout << "worker.control_wait_count=" << worker_stats.control_wait_count << '\n';
-  std::cout << "mailbox.published=" << mail_stats.published << '\n';
-  std::cout << "mailbox.evicted=" << mail_stats.evicted << '\n';
-  std::cout << "mailbox.high_water=" << mail_stats.high_water_mark << '\n';
-  std::cout << "mailbox.current_size=" << mail_stats.current_size << '\n';
-  std::cout << "seek_epoch.starvation_count=" << epoch_sched_after.starvation_count << '\n';
-  std::cout << "seek_epoch.skipped_presentation_count="
-            << epoch_sched_after.skipped_presentation_count << '\n';
-  std::cout << "seek_epoch.read_request_delta=" << (epoch_reads_after - epoch_reads_before) << '\n';
+  std::cout << "worker.queue_high_water=" << main_worker.event_queue_high_water_mark << '\n';
+  std::cout << "worker.events_dropped=" << main_worker.events_dropped_due_to_capacity << '\n';
+  std::cout << "worker.samples_dropped=" << main_worker.samples_dropped_due_to_capacity << '\n';
+  std::cout << "worker.control_wait_count=" << main_worker.control_wait_count << '\n';
+  std::cout << "mailbox.published=" << main_mailbox.published << '\n';
+  std::cout << "mailbox.evicted=" << main_mailbox.evicted << '\n';
+  std::cout << "mailbox.high_water=" << main_mailbox.high_water_mark << '\n';
+  std::cout << "mailbox.current_size=" << main_mailbox.current_size << '\n';
+  std::cout << "harness.visual_misses=" << main_misses << '\n';
+  std::cout << "seek_epoch.available=" << (seek_available ? 1 : 0) << '\n';
+  std::cout << "seek_epoch.completed=" << (seek_completed ? 1 : 0) << '\n';
+  std::cout << "seek_epoch.target_num=" << target_seconds.numerator() << '\n';
+  std::cout << "seek_epoch.target_den=" << target_seconds.denominator() << '\n';
+  std::cout << "seek_epoch.starvation_count=" << epoch_sched.starvation_count << '\n';
+  std::cout << "seek_epoch.skipped_presentation_count=" << epoch_sched.skipped_presentation_count
+            << '\n';
+  std::cout << "seek_epoch.read_request_delta=" << epoch_read_delta << '\n';
+  std::cout << "seek_epoch.read_completion_delta=" << epoch_completion_delta << '\n';
   std::cout << "seek_epoch.mailbox_published_delta="
             << (epoch_mail_after.published - epoch_mail_before.published) << '\n';
   std::cout << "seek_epoch.mailbox_evicted_delta="
             << (epoch_mail_after.evicted - epoch_mail_before.evicted) << '\n';
   std::cout << "seek_epoch.mailbox_current_size=" << epoch_mail_after.current_size << '\n';
+  std::cout << "seek_epoch.visual_misses=" << epoch_misses << '\n';
+  if (seek_available && !seek_completed) {
+    std::cerr << "Playback metrics failed: seek epoch did not settle\n";
+    return 2;
+  }
   return 0;
 }
 

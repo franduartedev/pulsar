@@ -224,6 +224,11 @@ add_executable(pulsar_playback_diagnostics_tests
   media/playback_diagnostics_test.cpp
 )
 
+target_compile_definitions(pulsar_playback_diagnostics_tests
+  PRIVATE
+    PULSAR_TEST_FFMPEG_CLI="${PULSAR_TEST_FFMPEG_CLI}"
+)
+
 target_link_libraries(pulsar_playback_diagnostics_tests
   PRIVATE
     pulsar::media_ffmpeg
