@@ -3,6 +3,7 @@
 #include <pulsar/application/audio/audio_converter.hpp>
 #include <pulsar/application/audio/audio_output.hpp>
 
+#include <condition_variable>
 #include <cstddef>
 #include <cstdint>
 #include <mutex>
@@ -99,6 +100,11 @@ private:
   AudioDeviceBackend& backend_;
   AudioEngineLimits limits_;
   mutable std::mutex mutex_;
+  // Lifecycle serialization: at most one lifecycle backend phase runs at
+  // a time. bool ops fail fast while claimed; close() waits (releasing
+  // the engine mutex) since it must leave the session Closed. The cv is
+  // only ever waited on / notified without holding other locks.
+  std::condition_variable transition_cv_;
   AudioOutputState state_{AudioOutputState::Closed};
   AudioSourceFormat source_format_{0, 0};
   std::optional<AudioDeviceFormat> device_format_;

@@ -52,32 +52,59 @@ public:
   std::uint64_t pending{0};
   std::vector<std::uint8_t> captured;
   bool auto_process{true};
-  // When set, the marked backend calls block until release_gate().
-  // Proves the engine never holds its mutex across backend calls (B6).
-  bool block_writes{false};
-  bool block_stops{false};
+  // Gateable lifecycle backend calls (race/overlap regressions). A gated
+  // call signals entered_<op>, then blocks until release_gate().
+  bool gate_query{false};
+  bool gate_open{false};
+  bool gate_start{false};
+  bool gate_stop{false};
+  bool gate_reset{false};
+  bool gate_close{false};
+  bool gate_write{false};
+  bool entered_query{false};
+  bool entered_open{false};
+  bool entered_start{false};
+  bool entered_stop{false};
+  bool entered_reset{false};
+  bool entered_close{false};
   std::optional<std::string> injected_error;
   std::size_t frame_bytes_{4};
+  int query_count{0};
   int open_count{0};
   int close_count{0};
   int start_count{0};
   int stop_count{0};
   int reset_count{0};
+  int lifecycle_active{0};
+  int lifecycle_max_concurrent{0};
   AudioDeviceFormat opened_format{0, 0, AudioSampleFormat::Float32};
 
   void release_gate() {
     {
       std::lock_guard lock{gate_mutex_};
-      block_writes = false;
-      block_stops = false;
+      gate_query = gate_open = gate_start = gate_stop = gate_reset = gate_close = gate_write =
+          false;
     }
     gate_cv_.notify_all();
   }
 
+  bool wait_entered(bool FakeBackend::*flag, int timeout_seconds = 5) {
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(timeout_seconds);
+    std::unique_lock lock{gate_mutex_};
+    return gate_cv_.wait_until(lock, deadline,
+                               [this, flag] { return this->*flag; });
+  }
+
   std::optional<AudioDeviceFormat> query_device_format(const AudioSourceFormat&) override {
+    LifecycleScope scope{*this};
+    gate_point(gate_query, entered_query);
+    ++query_count;
     return offered;
   }
   bool open_device(const AudioDeviceFormat& format) override {
+    LifecycleScope scope{*this};
+    gate_point(gate_open, entered_open);
     if (!open_ok) {
       return false;
     }
@@ -87,8 +114,14 @@ public:
     ++open_count;
     return true;
   }
-  void close_device() override { ++close_count; }
+  void close_device() override {
+    LifecycleScope scope{*this};
+    gate_point(gate_close, entered_close);
+    ++close_count;
+  }
   bool start_device() override {
+    LifecycleScope scope{*this};
+    gate_point(gate_start, entered_start);
     if (!start_ok) {
       return false;
     }
@@ -96,24 +129,27 @@ public:
     return true;
   }
   void stop_device() override {
-    if (block_stops) {
-      std::unique_lock lock{gate_mutex_};
-      gate_cv_.wait(lock, [this] { return !block_stops; });
-    }
+    LifecycleScope scope{*this};
+    gate_point(gate_stop, entered_stop);
     ++stop_count;
   }
   void reset_device() override {
+    LifecycleScope scope{*this};
+    gate_point(gate_reset, entered_reset);
     ++reset_count;
     pending = 0;
     processed = written;
   }
   std::size_t writable_frames() override { return writable_cap; }
   std::size_t write_frames(const void* frames, std::size_t frame_count) override {
-    if (block_writes) {
-      std::unique_lock lock{gate_mutex_};
-      gate_cv_.wait(lock, [this] { return !block_writes; });
+    gate_point(gate_write, entered_write);
+    // Optional per-call script: each entry caps frames taken that call.
+    std::size_t allowed = frame_count;
+    if (!write_plan.empty()) {
+      allowed = write_plan.front() > frame_count ? frame_count : write_plan.front();
+      write_plan.erase(write_plan.begin());
     }
-    const std::size_t taken = frame_count > writable_cap ? writable_cap : frame_count;
+    const std::size_t taken = allowed > writable_cap ? writable_cap : allowed;
     const auto* bytes = static_cast<const std::uint8_t*>(frames);
     captured.insert(captured.end(), bytes, bytes + taken * frame_bytes_);
     written += taken;
@@ -133,9 +169,37 @@ public:
     processed += take;
   }
 
+  std::vector<std::size_t> write_plan;
+  bool entered_write{false};
+
 private:
+  struct LifecycleScope {
+    explicit LifecycleScope(FakeBackend& owner) : owner_{owner} {
+      std::lock_guard lock{owner_.track_mutex_};
+      ++owner_.lifecycle_active;
+      if (owner_.lifecycle_active > owner_.lifecycle_max_concurrent) {
+        owner_.lifecycle_max_concurrent = owner_.lifecycle_active;
+      }
+    }
+    ~LifecycleScope() {
+      std::lock_guard lock{owner_.track_mutex_};
+      --owner_.lifecycle_active;
+    }
+    FakeBackend& owner_;
+  };
+
+  void gate_point(bool& gate_flag, bool& entered_flag) {
+    std::unique_lock lock{gate_mutex_};
+    if (gate_flag) {
+      entered_flag = true;
+      gate_cv_.notify_all();
+      gate_cv_.wait(lock, [&] { return !gate_flag; });
+    }
+  }
+
   std::mutex gate_mutex_;
   std::condition_variable gate_cv_;
+  std::mutex track_mutex_;
 };
 
 void converter_passthrough_and_quantization() {
@@ -653,8 +717,8 @@ void incremental_consumption_after_atomic_accept() {
 // bound every wait so a locking regression fails instead of hanging CI.
 void foreign_lifecycle_during_blocked_transfer() {
   FakeBackend backend;
-  backend.block_writes = true;
-  backend.block_stops = true;
+  backend.gate_write = true;
+  backend.gate_stop = true;
   backend.offered = AudioDeviceFormat{44100, 2, AudioSampleFormat::Float32};
   AudioOutputEngine engine{backend, AudioEngineLimits{4096}};
   assert(engine.open({44100, 2}));
@@ -676,6 +740,252 @@ void foreign_lifecycle_during_blocked_transfer() {
   assert(stop_result);
   assert(engine.state() == AudioOutputState::Opened);
   engine.close();
+}
+
+// W1: a zero backend write changes nothing; later acceptance byte-matches.
+void zero_write_preserves_queue() {
+  FakeBackend backend;
+  backend.offered = AudioDeviceFormat{44100, 1, AudioSampleFormat::Float32};
+  AudioOutputEngine engine{backend, AudioEngineLimits{4096}};
+  assert(engine.open({44100, 1}));
+  const AudioBlock block = make_block(44100, 1, 64, 0.5F);
+  assert(engine.enqueue(block) == AudioEnqueueResult::Accepted);
+  assert(engine.start());
+  backend.write_plan = {0};
+  assert(engine.transfer_to_backend());
+  assert(engine.metrics().buffered_device_frames == 63);
+  assert(engine.metrics().device_frames_submitted == 0);
+  assert(backend.captured.empty());
+  assert(engine.transfer_to_backend());
+  assert(engine.metrics().device_frames_submitted == 63);
+  assert(engine.metrics().buffered_device_frames == 0);
+
+  StreamingAudioConverter reference{44100, 1, AudioDeviceFormat{44100, 1,
+                                                                AudioSampleFormat::Float32}};
+  const auto expected = reference.convert(block);
+  assert(backend.captured.size() == expected.frames.size());
+  assert(backend.captured == expected.frames);
+  engine.close();
+}
+
+// W2: scripted short writes (3/0/7/1/rest) emit the exact byte stream.
+void short_writes_preserve_exact_bytes() {
+  FakeBackend backend;
+  backend.offered = AudioDeviceFormat{44100, 1, AudioSampleFormat::Float32};
+  AudioOutputEngine engine{backend, AudioEngineLimits{4096}};
+  assert(engine.open({44100, 1}));
+  const AudioBlock block = make_block(44100, 1, 64, 0.25F);
+  assert(engine.enqueue(block) == AudioEnqueueResult::Accepted);
+  assert(engine.start());
+  backend.write_plan = {3, 0, 7, 1};
+  for (int i = 0; i < 5; ++i) {
+    assert(engine.transfer_to_backend());
+  }
+  assert(engine.metrics().device_frames_submitted == 63);
+  assert(engine.metrics().buffered_device_frames == 0);
+
+  StreamingAudioConverter reference{44100, 1, AudioDeviceFormat{44100, 1,
+                                                                AudioSampleFormat::Float32}};
+  const auto expected = reference.convert(block);
+  assert(backend.captured == expected.frames);
+  engine.close();
+}
+
+// W3: partial consumption across head/reset cycles preserves exact data.
+void partial_writes_across_reset_boundary() {
+  FakeBackend backend;
+  backend.offered = AudioDeviceFormat{44100, 1, AudioSampleFormat::Float32};
+  AudioOutputEngine engine{backend, AudioEngineLimits{4096}};
+  assert(engine.open({44100, 1}));
+  const AudioBlock first = make_block(44100, 1, 100, 0.1F);
+  const AudioBlock second = make_block(44100, 1, 100, 0.2F);
+  assert(engine.enqueue(first) == AudioEnqueueResult::Accepted);
+  assert(engine.start());
+  backend.writable_cap = 30;
+  assert(engine.transfer_to_backend());
+  assert(engine.metrics().buffered_device_frames == 69);
+  // Head sits mid-vector; new data appends behind it.
+  assert(engine.enqueue(second) == AudioEnqueueResult::Accepted);
+  backend.writable_cap = 100000;
+  assert(engine.transfer_to_backend());
+  assert(engine.transfer_to_backend());
+  assert(engine.metrics().buffered_device_frames == 0);
+  assert(engine.request_drain());
+  assert(engine.transfer_to_backend());
+  assert(engine.state() == AudioOutputState::Completed);
+  assert(backend.written == 200);
+
+  StreamingAudioConverter reference{44100, 1, AudioDeviceFormat{44100, 1,
+                                                                AudioSampleFormat::Float32}};
+  std::vector<std::uint8_t> expected;
+  for (const AudioBlock* part : {&first, &second}) {
+    const auto out = reference.convert(*part);
+    expected.insert(expected.end(), out.frames.begin(), out.frames.end());
+  }
+  const auto tail = reference.flush_tail();
+  expected.insert(expected.end(), tail.frames.begin(), tail.frames.end());
+  assert(backend.captured == expected);
+  engine.close();
+}
+
+// B2: a short valid stream completes with processed == 0 once the backend
+// is exhausted. Metrics never gate completion.
+void short_stream_completes_with_zero_processed() {
+  FakeBackend backend;
+  backend.auto_process = false;
+  backend.offered = AudioDeviceFormat{8000, 1, AudioSampleFormat::Float32};
+  AudioOutputEngine engine{backend, AudioEngineLimits{4096}};
+  assert(engine.open({8000, 1}));
+  assert(engine.enqueue(make_block(8000, 1, 5)) == AudioEnqueueResult::Accepted);
+  assert(engine.start());
+  assert(engine.request_drain());
+  assert(engine.transfer_to_backend());
+  assert(engine.metrics().device_frames_submitted == 5);
+  // Backend consumed everything but its progress counter rounds to zero.
+  backend.pending = 0;
+  backend.processed = 0;
+  assert(engine.transfer_to_backend());
+  assert(engine.state() == AudioOutputState::Completed);
+  assert(engine.metrics().underrun_count == 0);
+  engine.close();
+}
+
+// B3: enqueue during a destructive transition is rejected, never accepted
+// into a session being destroyed. Gated per op: flush, stop, close.
+void enqueue_rejected_during_flush_transition() {
+  FakeBackend backend;
+  backend.offered = AudioDeviceFormat{44100, 1, AudioSampleFormat::Float32};
+  AudioOutputEngine engine{backend, AudioEngineLimits{4096}};
+  assert(engine.open({44100, 1}));
+  assert(engine.enqueue(make_block(44100, 1, 32)) == AudioEnqueueResult::Accepted);
+  assert(engine.start());
+  backend.gate_reset = true;
+  bool flush_result = false;
+  std::thread worker([&] { flush_result = engine.flush(); });
+  assert(backend.wait_entered(&FakeBackend::entered_reset));
+  assert(engine.enqueue(make_block(44100, 1, 8)) != AudioEnqueueResult::Accepted);
+  assert(engine.metrics().source_frames_accepted == 32);
+  backend.release_gate();
+  worker.join();
+  assert(flush_result);
+  assert(engine.state() == AudioOutputState::Running);
+  assert(engine.enqueue(make_block(44100, 1, 8)) == AudioEnqueueResult::Accepted);
+  engine.close();
+}
+
+void enqueue_rejected_during_stop_transition() {
+  FakeBackend backend;
+  backend.offered = AudioDeviceFormat{44100, 1, AudioSampleFormat::Float32};
+  AudioOutputEngine engine{backend, AudioEngineLimits{4096}};
+  assert(engine.open({44100, 1}));
+  assert(engine.enqueue(make_block(44100, 1, 32)) == AudioEnqueueResult::Accepted);
+  assert(engine.start());
+  backend.gate_stop = true;
+  bool stop_result = false;
+  std::thread worker([&] { stop_result = engine.stop(); });
+  assert(backend.wait_entered(&FakeBackend::entered_stop));
+  assert(engine.enqueue(make_block(44100, 1, 8)) != AudioEnqueueResult::Accepted);
+  backend.release_gate();
+  worker.join();
+  assert(stop_result);
+  assert(engine.state() == AudioOutputState::Opened);
+  assert(engine.enqueue(make_block(44100, 1, 8)) == AudioEnqueueResult::Accepted);
+  engine.close();
+}
+
+void enqueue_rejected_during_close_transition() {
+  FakeBackend backend;
+  backend.offered = AudioDeviceFormat{44100, 1, AudioSampleFormat::Float32};
+  AudioOutputEngine engine{backend, AudioEngineLimits{4096}};
+  assert(engine.open({44100, 1}));
+  assert(engine.enqueue(make_block(44100, 1, 32)) == AudioEnqueueResult::Accepted);
+  assert(engine.start());
+  backend.gate_close = true;
+  std::thread worker([&] { engine.close(); });
+  assert(backend.wait_entered(&FakeBackend::entered_close));
+  assert(engine.enqueue(make_block(44100, 1, 8)) != AudioEnqueueResult::Accepted);
+  backend.release_gate();
+  worker.join();
+  assert(engine.state() == AudioOutputState::Closed);
+  assert(engine.enqueue(make_block(44100, 1, 8)) == AudioEnqueueResult::InvalidState);
+}
+
+// B4: overlapping lifecycle calls never enter the backend concurrently.
+// L1: second open fails fast while the first is inside the backend.
+void overlapping_open_rejected() {
+  FakeBackend backend;
+  backend.offered = AudioDeviceFormat{44100, 1, AudioSampleFormat::Float32};
+  AudioOutputEngine engine{backend, AudioEngineLimits{4096}};
+  backend.gate_query = true;
+  bool first_result = false;
+  std::thread first([&] { first_result = engine.open({44100, 1}); });
+  assert(backend.wait_entered(&FakeBackend::entered_query));
+  auto second =
+      std::async(std::launch::async, [&] { return engine.open({44100, 1}); });
+  assert(second.wait_for(std::chrono::seconds(5)) == std::future_status::ready);
+  assert(!second.get());
+  backend.release_gate();
+  first.join();
+  assert(first_result);
+  assert(backend.query_count == 1);
+  assert(engine.state() == AudioOutputState::Opened);
+  assert(backend.lifecycle_max_concurrent == 1);
+  engine.close();
+}
+
+// L2: stop during a gated flush fails fast without touching the backend.
+void overlapping_flush_stop_rejected() {
+  FakeBackend backend;
+  backend.offered = AudioDeviceFormat{44100, 1, AudioSampleFormat::Float32};
+  AudioOutputEngine engine{backend, AudioEngineLimits{4096}};
+  assert(engine.open({44100, 1}));
+  assert(engine.enqueue(make_block(44100, 1, 32)) == AudioEnqueueResult::Accepted);
+  assert(engine.start());
+  backend.gate_reset = true;
+  bool flush_result = false;
+  std::thread flushing([&] { flush_result = engine.flush(); });
+  assert(backend.wait_entered(&FakeBackend::entered_reset));
+  auto stopping = std::async(std::launch::async, [&] { return engine.stop(); });
+  assert(stopping.wait_for(std::chrono::seconds(5)) == std::future_status::ready);
+  assert(!stopping.get());
+  assert(backend.stop_count == 0);
+  backend.release_gate();
+  flushing.join();
+  assert(flush_result);
+  assert(engine.state() == AudioOutputState::Running);
+  assert(backend.lifecycle_max_concurrent == 1);
+  engine.close();
+}
+
+// L3: close waits (void API must leave the session Closed) while a gated
+// start is in flight; backend calls never overlap; final state coherent.
+void overlapping_start_close_serialized() {
+  FakeBackend backend;
+  backend.offered = AudioDeviceFormat{44100, 1, AudioSampleFormat::Float32};
+  AudioOutputEngine engine{backend, AudioEngineLimits{4096}};
+  assert(engine.open({44100, 1}));
+  assert(engine.enqueue(make_block(44100, 1, 32)) == AudioEnqueueResult::Accepted);
+  backend.gate_start = true;
+  bool start_result = false;
+  std::thread starting([&] { start_result = engine.start(); });
+  assert(backend.wait_entered(&FakeBackend::entered_start));
+  bool close_done = false;
+  std::thread closing([&] {
+    engine.close();
+    close_done = true;
+  });
+  // close() must not finish (nor enter the backend) before the gate opens.
+  std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  assert(!close_done);
+  assert(backend.close_count == 0);
+  backend.release_gate();
+  starting.join();
+  closing.join();
+  assert(start_result);
+  assert(close_done);
+  assert(engine.state() == AudioOutputState::Closed);
+  assert(backend.close_count == 1);
+  assert(backend.lifecycle_max_concurrent == 1);
 }
 
 }  // namespace
@@ -701,4 +1011,14 @@ int main() {
   processed_progress_is_monotonic_and_bounded();
   incremental_consumption_after_atomic_accept();
   foreign_lifecycle_during_blocked_transfer();
+  zero_write_preserves_queue();
+  short_writes_preserve_exact_bytes();
+  partial_writes_across_reset_boundary();
+  short_stream_completes_with_zero_processed();
+  enqueue_rejected_during_flush_transition();
+  enqueue_rejected_during_stop_transition();
+  enqueue_rejected_during_close_transition();
+  overlapping_open_rejected();
+  overlapping_flush_stop_rejected();
+  overlapping_start_close_serialized();
 }
