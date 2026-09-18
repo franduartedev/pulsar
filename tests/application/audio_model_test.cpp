@@ -1,0 +1,351 @@
+#include <pulsar/application/commands/command_processor.hpp>
+#include <pulsar/application/media/media_probe.hpp>
+#include <pulsar/application/playback/timeline_playback_coordinator.hpp>
+#include <pulsar/application/project/project_codec.hpp>
+#include <pulsar/application/project/project_document.hpp>
+#include <pulsar/application/timeline/timeline_clip_resolver.hpp>
+
+#include <cassert>
+#include <deque>
+#include <filesystem>
+#include <fstream>
+#include <iterator>
+#include <memory>
+#include <optional>
+#include <string>
+#include <utility>
+#include <vector>
+
+namespace {
+using namespace pulsar;
+using application::AudioAssetMetadata;
+using application::CommandProcessor;
+using application::MediaProbeResult;
+using application::ProjectCodec;
+using application::ProjectCodecError;
+using application::ProjectDocument;
+using application::ResolvedClip;
+using domain::MediaTime;
+using domain::Rational;
+using domain::TimeRange;
+
+MediaTime time(std::int64_t value, Rational base = Rational{1, 1}) {
+  return MediaTime{value, base};
+}
+
+class FakeProbe final : public application::MediaProbe {
+public:
+  FakeProbe(std::vector<application::AudioStreamInfo> audio_streams, int video_stream = 2)
+      : audio_streams_{std::move(audio_streams)}, video_stream_{video_stream} {}
+
+  [[nodiscard]] MediaProbeResult probe(const std::filesystem::path& path) const override {
+    MediaProbeResult result;
+    result.path = path;
+    result.container_name = "test";
+    result.video_streams.push_back(application::VideoStreamInfo{
+        video_stream_, "h264", 1920, 1080, Rational{1, 90000},
+        time(100000, Rational{1, 1000}), std::nullopt});
+    result.audio_streams = audio_streams_;
+    return result;
+  }
+
+private:
+  std::vector<application::AudioStreamInfo> audio_streams_;
+  int video_stream_;
+};
+
+application::AudioStreamInfo audio_stream(int index, int sample_rate = 48000,
+                                          int channels = 2) {
+  return application::AudioStreamInfo{index, "aac", sample_rate, channels, Rational{1, 48000},
+                                      time(96000, Rational{1, 48000})};
+}
+
+// T1: first audio stream wins deterministically, by real FFmpeg stream index.
+void audio_selected_first_stream_deterministically() {
+  ProjectDocument document;
+  CommandProcessor processor{document};
+  FakeProbe probe{{audio_stream(5), audio_stream(7, 44100, 1)}};
+  const auto media = processor.import_asset("media/av.mp4", probe);
+  const auto asset = document.find_asset(media);
+  assert(asset.has_value());
+  assert(asset->audio().has_value());
+  assert(asset->audio()->stream_index == 5);
+  assert(asset->audio()->sample_rate == 48000);
+  assert(asset->audio()->channel_count == 2);
+  assert((asset->audio()->time_base == Rational{1, 48000}));
+  assert(asset->audio()->duration.has_value());
+  assert(*asset->audio()->duration == time(96000, Rational{1, 48000}));
+  // M9 duration semantics frozen: playable duration still comes from video.
+  assert(asset->playable_duration() == time(100000, Rational{1, 1000}));
+  assert(asset->video_stream_index() == 2);
+}
+
+// T2: video-only media imports normally with no audio binding.
+void video_only_has_no_audio() {
+  ProjectDocument document;
+  CommandProcessor processor{document};
+  FakeProbe probe{{}};
+  const auto media = processor.import_asset("media/silent.mp4", probe);
+  const auto asset = document.find_asset(media);
+  assert(asset.has_value());
+  assert(!asset->audio().has_value());
+  const auto clip =
+      processor.add_clip(media, TimeRange{time(0), time(10)}, time(0));
+  assert(document.timeline().find_clip(clip) != nullptr);
+}
+
+// T3: audio metadata survives encode/decode/restore exactly; absence stays absent.
+void audio_survives_codec_round_trip() {
+  ProjectDocument document;
+  CommandProcessor processor{document};
+  FakeProbe with_audio{{audio_stream(4, 44100, 6)}};
+  FakeProbe silent{{}};
+  const auto av = processor.import_asset("media/av.mp4", with_audio);
+  const auto muted = processor.import_asset("media/muted.mp4", silent);
+  (void)processor.add_clip(av, TimeRange{time(0), time(10)}, time(0));
+  (void)processor.add_clip(muted, TimeRange{time(0), time(10)}, time(10));
+  const auto bytes = ProjectCodec::encode(document.snapshot());
+  assert(bytes.find("AUDIO") != std::string::npos);
+  auto restored = ProjectDocument::restore(ProjectCodec::decode(bytes));
+  assert(ProjectCodec::encode(restored.snapshot()) == bytes);
+  const auto restored_av = restored.find_asset(av);
+  assert(restored_av.has_value() && restored_av->audio().has_value());
+  assert(restored_av->audio()->stream_index == 4);
+  assert(restored_av->audio()->sample_rate == 44100);
+  assert(restored_av->audio()->channel_count == 6);
+  assert((restored_av->audio()->time_base == Rational{1, 48000}));
+  assert(restored_av->audio()->duration.has_value());
+  assert(*restored_av->audio()->duration == time(96000, Rational{1, 48000}));
+  const auto restored_muted = restored.find_asset(muted);
+  assert(restored_muted.has_value() && !restored_muted->audio().has_value());
+}
+
+// T3b: missing audio duration round-trips as missing.
+void audio_without_duration_round_trips() {
+  ProjectDocument document;
+  CommandProcessor processor{document};
+  application::AudioStreamInfo stream = audio_stream(3);
+  stream.duration.reset();
+  FakeProbe probe{{stream}};
+  const auto media = processor.import_asset("media/av.mp4", probe);
+  assert(document.find_asset(media)->audio()->duration == std::nullopt);
+  const auto bytes = ProjectCodec::encode(document.snapshot());
+  auto restored = ProjectDocument::restore(ProjectCodec::decode(bytes));
+  assert(ProjectCodec::encode(restored.snapshot()) == bytes);
+  const auto asset = restored.find_asset(media);
+  assert(asset.has_value() && asset->audio().has_value());
+  assert(asset->audio()->stream_index == 3);
+  assert(asset->audio()->duration == std::nullopt);
+}
+
+// T4: Outcome A proof — golden v1 decodes unchanged, absence means nullopt.
+void golden_and_absence_decode_as_no_audio() {
+  std::ifstream input{std::filesystem::path{PULSAR_SOURCE_DIR} / "tests" / "fixtures" /
+                      "project_v1_golden.pulsar"};
+  const std::string bytes{std::istreambuf_iterator<char>{input}, {}};
+  assert(!bytes.empty());
+  assert(bytes.find("AUDIO") == std::string::npos);
+  auto restored = ProjectDocument::restore(ProjectCodec::decode(bytes));
+  for (const auto& asset : restored.assets()) {
+    assert(!asset.audio().has_value());
+  }
+  // Byte-identical re-encode: old lines decode exactly as before.
+  assert(ProjectCodec::encode(restored.snapshot()) == bytes);
+}
+
+// Malformed audio suffixes are rejected; strictness for old shapes is kept.
+void malformed_audio_suffix_rejected() {
+  ProjectDocument document;
+  CommandProcessor processor{document};
+  FakeProbe probe{{audio_stream(1)}};
+  (void)processor.import_asset("media/av.mp4", probe);
+  const auto good = ProjectCodec::encode(document.snapshot());
+  const auto asset_line = good.find("ASSET ");
+  assert(asset_line != std::string::npos);
+  const auto asset_end = good.find('\n', asset_line);
+  assert(asset_end != std::string::npos);
+  const std::string prefix = good.substr(0, asset_end);
+  const std::string suffix = good.substr(asset_end);
+  auto expect_reject = [](const std::string& text) {
+    bool rejected = false;
+    try {
+      (void)ProjectCodec::decode(text);
+    } catch (const ProjectCodecError&) {
+      rejected = true;
+    }
+    assert(rejected);
+  };
+  expect_reject(prefix + " JUNK" + suffix);
+  expect_reject(prefix + " AUDIO" + suffix);
+  expect_reject(prefix + " AUDIO 1 48000" + suffix);
+  expect_reject(prefix + " AUDIO x 48000 2 1 48000 96000 1 48000" + suffix);
+  expect_reject(prefix + " AUDIO -1 48000 2 1 48000 96000 1 48000" + suffix);
+  expect_reject(prefix + " AUDIO 1 0 2 1 48000 96000 1 48000" + suffix);
+  expect_reject(prefix + " AUDIO 1 48000 0 1 48000 96000 1 48000" + suffix);
+  expect_reject(prefix + " AUDIO 1 48000 2 1 0 96000 1 48000" + suffix);
+  // Trailing garbage after a valid binding is still rejected.
+  const auto audio_at = good.find(" AUDIO ");
+  assert(audio_at != std::string::npos);
+  expect_reject(good.substr(0, asset_end) + " EXTRA" + suffix);
+  (void)audio_at;
+}
+
+// T5: resolver exposes audio identity (locator + metadata), no timestamp mapping.
+void resolver_exposes_audio_identity() {
+  ProjectDocument document;
+  CommandProcessor processor{document};
+  FakeProbe with_audio{{audio_stream(6)}};
+  FakeProbe silent{{}};
+  const auto av = processor.import_asset("media/av.mp4", with_audio);
+  const auto muted = processor.import_asset("media/muted.mp4", silent);
+  const auto av_clip = processor.add_clip(av, TimeRange{time(0), time(10)}, time(0));
+  (void)processor.add_clip(muted, TimeRange{time(0), time(10)}, time(10));
+  const auto snapshot = document.snapshot();
+  const auto av_outcome =
+      application::resolve_clip_at(snapshot, snapshot.video_track_id, time(2));
+  assert(std::holds_alternative<ResolvedClip>(av_outcome));
+  const auto resolved = std::get<ResolvedClip>(av_outcome);
+  assert(resolved.clip_id == av_clip);
+  assert(resolved.audio.has_value());
+  assert(resolved.audio->source_locator == std::filesystem::path{"media/av.mp4"});
+  assert(resolved.audio->metadata.stream_index == 6);
+  assert(resolved.audio->metadata.sample_rate == 48000);
+  assert(resolved.audio->metadata.channel_count == 2);
+  assert((resolved.audio->metadata.time_base == Rational{1, 48000}));
+  const auto muted_outcome =
+      application::resolve_clip_at(snapshot, snapshot.video_track_id, time(12));
+  assert(std::holds_alternative<ResolvedClip>(muted_outcome));
+  assert(!std::get<ResolvedClip>(muted_outcome).audio.has_value());
+}
+
+class FakeClock final : public application::MonotonicClock {
+public:
+  application::MonotonicInstant now() const override {
+    return application::MonotonicInstant{value};
+  }
+  void advance(MediaTime amount) { value = value + amount; }
+  MediaTime value{MediaTime::zero()};
+};
+
+class FakeWorker final : public application::PlaybackMediaWorker {
+public:
+  explicit FakeWorker(int* seek_stream_index) : seek_stream_index_{seek_stream_index} {}
+
+  application::VideoSourceDescriptor describe() const override {
+    return application::VideoSourceDescriptor{
+        application::StreamTimestamp{time(0)}, Rational{1, 90000},
+        time(100, Rational{1, 1}), true};
+  }
+
+  void request_read(application::PlaybackGeneration generation) override {
+    using namespace pulsar::application;
+    events_.push_back(PlaybackWorkerSample{
+        generation,
+        VideoSample{next_ordinal_++, StreamTimestamp{last_target_ + time(1)}, time(10)}});
+  }
+
+  void request_seek_for_presentation(application::PlaybackGeneration generation,
+                                     application::StreamTimestamp target) override {
+    last_target_ = target.value();
+    events_.push_back(application::PlaybackWorkerSeekComplete{
+        generation, application::VideoSeekHit{
+                        application::VideoSample{next_ordinal_++, target, time(10)},
+                        std::nullopt}});
+  }
+
+  void cancel_pending() override {}
+
+  std::optional<application::PlaybackWorkerEvent> poll_event() override {
+    if (events_.empty()) {
+      return std::nullopt;
+    }
+    auto event = std::move(events_.front());
+    events_.pop_front();
+    return event;
+  }
+
+  int* seek_stream_index() const noexcept { return seek_stream_index_; }
+
+private:
+  int* seek_stream_index_;
+  std::deque<application::PlaybackWorkerEvent> events_;
+  MediaTime last_target_{MediaTime::zero()};
+  std::uint64_t next_ordinal_{1};
+};
+
+// T6: identical M9 presentation/clock behavior with and without audio metadata.
+void audio_metadata_does_not_change_playback() {
+  using application::TimelinePlaybackCoordinator;
+  auto run_script = [](const application::ProjectSnapshot& snapshot,
+                       std::vector<std::size_t>& kinds, std::vector<MediaTime>& positions,
+                       std::vector<int>& streams) {
+    FakeClock clock;
+    int streams_seen = 0;
+    application::PlaybackWorkerFactory factory =
+        [&streams, &streams_seen](const std::filesystem::path&, int stream_index) {
+          streams.push_back(stream_index);
+          ++streams_seen;
+          return std::make_unique<FakeWorker>(&streams_seen);
+        };
+    TimelinePlaybackCoordinator coordinator{clock, std::move(factory)};
+    coordinator.set_snapshot(snapshot);
+    kinds.push_back(coordinator.update().index());
+    positions.push_back(coordinator.timeline_position());
+    coordinator.play();
+    clock.advance(time(3));
+    kinds.push_back(coordinator.update().index());
+    positions.push_back(coordinator.timeline_position());
+    coordinator.seek(time(6));
+    kinds.push_back(coordinator.update().index());
+    positions.push_back(coordinator.timeline_position());
+    coordinator.pause();
+    clock.advance(time(5));
+    kinds.push_back(coordinator.update().index());
+    positions.push_back(coordinator.timeline_position());
+    assert(coordinator.intent() == application::PlaybackIntent::Paused);
+  };
+
+  ProjectDocument silent_document;
+  CommandProcessor silent_processor{silent_document};
+  FakeProbe silent_probe{{}};
+  const auto silent_media = silent_processor.import_asset("media/clip.mp4", silent_probe);
+  (void)silent_processor.add_clip(silent_media, TimeRange{time(0), time(10)}, time(0));
+
+  ProjectDocument av_document;
+  CommandProcessor av_processor{av_document};
+  FakeProbe av_probe{{audio_stream(9)}};
+  const auto av_media = av_processor.import_asset("media/clip.mp4", av_probe);
+  (void)av_processor.add_clip(av_media, TimeRange{time(0), time(10)}, time(0));
+
+  std::vector<std::size_t> silent_kinds;
+  std::vector<MediaTime> silent_positions;
+  std::vector<int> silent_streams;
+  run_script(silent_document.snapshot(), silent_kinds, silent_positions, silent_streams);
+
+  std::vector<std::size_t> av_kinds;
+  std::vector<MediaTime> av_positions;
+  std::vector<int> av_streams;
+  run_script(av_document.snapshot(), av_kinds, av_positions, av_streams);
+
+  assert(silent_kinds == av_kinds);
+  assert(silent_positions.size() == av_positions.size());
+  for (std::size_t i = 0; i < silent_positions.size(); ++i) {
+    assert(silent_positions[i] == av_positions[i]);
+  }
+  assert(silent_streams == av_streams);
+  assert(!silent_streams.empty());
+  assert(silent_streams.front() == 2);
+}
+
+}  // namespace
+
+int main() {
+  audio_selected_first_stream_deterministically();
+  video_only_has_no_audio();
+  audio_survives_codec_round_trip();
+  audio_without_duration_round_trips();
+  golden_and_absence_decode_as_no_audio();
+  malformed_audio_suffix_rejected();
+  resolver_exposes_audio_identity();
+  audio_metadata_does_not_change_playback();
+}

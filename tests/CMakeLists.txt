@@ -165,6 +165,22 @@ target_compile_definitions(pulsar_project_persistence_tests PRIVATE PULSAR_SOURC
 
 add_test(NAME pulsar.application.project_persistence COMMAND pulsar_project_persistence_tests)
 
+add_executable(pulsar_audio_model_tests
+  application/audio_model_test.cpp
+)
+
+target_link_libraries(pulsar_audio_model_tests
+  PRIVATE
+    pulsar::application
+    pulsar::domain
+)
+
+pulsar_apply_project_options(pulsar_audio_model_tests)
+pulsar_apply_compiler_warnings(pulsar_audio_model_tests)
+target_compile_definitions(pulsar_audio_model_tests PRIVATE PULSAR_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+
+add_test(NAME pulsar.application.audio_model COMMAND pulsar_audio_model_tests)
+
 add_executable(pulsar_editor_session_tests
   application/editor_session_test.cpp
   ${CMAKE_SOURCE_DIR}/apps/pulsar-desktop/src/editor_session.cpp

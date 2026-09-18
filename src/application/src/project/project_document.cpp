@@ -177,8 +177,18 @@ MediaAsset ProjectDocument::build_asset(const std::filesystem::path& source_loca
 
   VideoAssetMetadata metadata{stream.codec_name, stream.width, stream.height, stream.time_base,
                               stream.nominal_frame_rate, result.container_name};
+  // A0 selection rule: first probed audio stream wins, by its real FFmpeg
+  // stream index. No language/default-track heuristics.
+  std::optional<AudioAssetMetadata> audio;
+  if (!result.audio_streams.empty()) {
+    const AudioStreamInfo& audio_stream = result.audio_streams.front();
+    audio = AudioAssetMetadata{audio_stream.stream_index, audio_stream.sample_rate,
+                               audio_stream.channel_count, audio_stream.time_base,
+                               audio_stream.duration};
+  }
   return MediaAsset{id, source_locator, stream.stream_index, *stream.duration,
-                    std::move(metadata)};
+                    std::move(metadata), MediaAvailability::Available, std::nullopt,
+                    std::move(audio)};
 }
 
 void ProjectDocument::add_asset_value(const MediaAsset& asset) {

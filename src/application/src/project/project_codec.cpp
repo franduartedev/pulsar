@@ -217,6 +217,19 @@ std::string ProjectCodec::encode(const ProjectSnapshot& snapshot) {
     } else {
       output << '-';
     }
+    // A0 extension (Outcome A): trailing optional audio binding. Absence
+    // means no audio; old v1 lines without the suffix decode unchanged.
+    if (asset->audio().has_value()) {
+      const auto& audio = *asset->audio();
+      output << " AUDIO " << audio.stream_index << ' ' << audio.sample_rate << ' '
+             << audio.channel_count << ' ' << audio.time_base.numerator() << ' '
+             << audio.time_base.denominator() << ' ';
+      if (audio.duration.has_value()) {
+        append_time(output, *audio.duration);
+      } else {
+        output << '-';
+      }
+    }
     output << "\n";
   }
 
@@ -313,7 +326,7 @@ ProjectRestoreState ProjectCodec::decode(std::string_view bytes) {
         video_track = true;
         section = Section::Assets;
       } else if (tokens[0].text == "ASSET") {
-        if (!video_track || (section != Section::Assets) || (tokens.size() != 14 && tokens.size() != 15)) parse_fail(line_number, "invalid ASSET");
+        if (!video_track || (section != Section::Assets) || tokens.size() < 14) parse_fail(line_number, "invalid ASSET");
         std::size_t i = 1;
         const auto id = domain::MediaId{unsigned_number(tokens[i++], line_number, "media id")};
         const int stream = int_number(tokens[i++], line_number, "stream index");
@@ -339,9 +352,39 @@ ProjectRestoreState ProjectCodec::decode(std::string_view bytes) {
         if (i >= tokens.size() || (tokens[i].text != "-" && !tokens[i].quoted)) parse_fail(line_number, "invalid container");
         if (tokens[i].quoted || tokens[i].text != "-") container = tokens[i].text;
         ++i;
-        if (i != tokens.size()) parse_fail(line_number, "extra ASSET fields");
+        // A0 audio suffix: AUDIO <stream> <sample_rate> <channels> <tb_num>
+        // <tb_den> (<dur_val> <dur_num> <dur_den> | -). Absent suffix means
+        // no audio binding; old v1 lines end exactly here.
+        std::optional<AudioAssetMetadata> audio;
+        if (i != tokens.size()) {
+          if (i + 6 >= tokens.size() || tokens[i].quoted || tokens[i].text != "AUDIO") {
+            parse_fail(line_number, "invalid ASSET audio binding");
+          }
+          ++i;
+          const int audio_stream = int_number(tokens[i++], line_number, "audio stream index");
+          const int sample_rate = int_number(tokens[i++], line_number, "audio sample rate");
+          const int channel_count = int_number(tokens[i++], line_number, "audio channel count");
+          const auto audio_tb_num =
+              signed_number(tokens[i++], line_number, "audio time base numerator");
+          const auto audio_tb_den =
+              signed_number(tokens[i++], line_number, "audio time base denominator");
+          if (audio_stream < 0 || sample_rate <= 0 || channel_count <= 0) {
+            parse_fail(line_number, "invalid ASSET audio binding");
+          }
+          domain::Rational audio_time_base{audio_tb_num, audio_tb_den};
+          std::optional<domain::MediaTime> audio_duration;
+          if (i < tokens.size() && !tokens[i].quoted && tokens[i].text == "-") {
+            ++i;
+          } else {
+            audio_duration = media_time(tokens, i, line_number, "audio duration");
+          }
+          if (i != tokens.size()) parse_fail(line_number, "extra ASSET fields");
+          audio = AudioAssetMetadata{audio_stream, sample_rate, channel_count, audio_time_base,
+                                     audio_duration};
+        }
         state.assets.emplace_back(id, locator, stream, duration,
-                                  VideoAssetMetadata{codec, width, height, time_base, fps, container});
+                                  VideoAssetMetadata{codec, width, height, time_base, fps, container},
+                                  MediaAvailability::Available, std::nullopt, std::move(audio));
         section = Section::Assets;
       } else if (tokens[0].text == "CLIP") {
         if (!video_track || (section != Section::Assets && section != Section::Clips) || tokens.size() != 13) parse_fail(line_number, "invalid CLIP");

@@ -25,13 +25,25 @@ struct VideoAssetMetadata {
   std::optional<std::string> container_name;
 };
 
+// A0 identity-only audio description: which audio stream of the container was
+// selected at import plus the clock metadata the probe already reports. No
+// sample format, no PCM/output policy, no timeline timestamp mapping.
+struct AudioAssetMetadata {
+  int stream_index;
+  int sample_rate;
+  int channel_count;
+  domain::Rational time_base;
+  std::optional<domain::MediaTime> duration;
+};
+
 class MediaAsset {
 public:
   MediaAsset(domain::MediaId id, std::filesystem::path source_locator,
              int video_stream_index, domain::MediaTime playable_duration,
              VideoAssetMetadata metadata,
              MediaAvailability availability = MediaAvailability::Available,
-             std::optional<std::string> availability_reason = std::nullopt);
+             std::optional<std::string> availability_reason = std::nullopt,
+             std::optional<AudioAssetMetadata> audio = std::nullopt);
 
   [[nodiscard]] domain::MediaId id() const noexcept { return id_; }
   [[nodiscard]] const std::filesystem::path& source_locator() const noexcept {
@@ -46,6 +58,7 @@ public:
   [[nodiscard]] const std::optional<std::string>& availability_reason() const noexcept {
     return availability_reason_;
   }
+  [[nodiscard]] const std::optional<AudioAssetMetadata>& audio() const noexcept { return audio_; }
 
 private:
   domain::MediaId id_;
@@ -55,6 +68,7 @@ private:
   VideoAssetMetadata metadata_;
   MediaAvailability availability_;
   std::optional<std::string> availability_reason_;
+  std::optional<AudioAssetMetadata> audio_;
 };
 
 } // namespace pulsar::application

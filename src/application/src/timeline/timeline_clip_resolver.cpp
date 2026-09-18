@@ -50,9 +50,15 @@ TimelineResolveOutcome resolve_clip_at(const ProjectSnapshot& snapshot,
                             asset->availability_reason()};
   }
 
+  // A0: expose the asset's audio identity (if any) for later M10 consumers.
+  // The resolver algorithm is unchanged; no timestamp mapping is computed.
+  std::optional<AudioSourceBinding> audio;
+  if (asset->audio().has_value()) {
+    audio = AudioSourceBinding{asset->source_locator(), *asset->audio()};
+  }
   return ResolvedClip{clip->id(), clip->media_id(), timeline_position, timeline_range, clip_offset,
                       source_range, source_time, asset->video_stream_index(),
-                      asset->source_locator()};
+                      asset->source_locator(), std::move(audio)};
 }
 
 } // namespace pulsar::application
