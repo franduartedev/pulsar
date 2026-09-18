@@ -98,6 +98,7 @@ public:
   Q_INVOKABLE void undoEdit();
   Q_INVOKABLE void redoEdit();
   Q_INVOKABLE void saveProject(const QString& path);
+  Q_INVOKABLE void openProject(const QString& path);
 signals:
   void statusChanged(); void technicalStatusChanged(); void mediaChanged(); void errorChanged();
   void previewChanged(); void positionChanged(); void playbackChanged(); void busyChanged();
@@ -108,6 +109,13 @@ private:
   void workerLoop();
   void postOpen(std::filesystem::path path, std::uint64_t generation);
   [[nodiscard]] std::unique_ptr<pulsar::desktop::EditorSession> makeEditorSession();
+  // Worker factory bound to one mailbox, measuring construction for D3
+  // evidence. An empty project_file leaves authored locators unchanged;
+  // otherwise relative locators resolve against the project directory for
+  // FFmpeg only (the document keeps the authored value).
+  [[nodiscard]] pulsar::application::PlaybackWorkerFactory makeWorkerFactory(
+      std::shared_ptr<pulsar::media::ffmpeg::FFmpegPlaybackVisualMailbox> mailbox,
+      std::filesystem::path project_file);
   void enqueue(WorkerCommand command);
   void updateTick();
   void updatePositionProperties();

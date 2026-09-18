@@ -1,5 +1,7 @@
 #include "desktop_controller.hpp"
 
+#include "project_path_resolution.hpp"
+
 #include <pulsar/media/ffmpeg/ffmpeg_media_probe.hpp>
 #include <pulsar/media/ffmpeg/ffmpeg_playback_worker.hpp>
 #include <pulsar/media/ffmpeg/ffmpeg_preview_converter.hpp>
@@ -179,19 +181,74 @@ void DesktopController::saveProject(const QString& path) {
     setError(QString::fromUtf8(error.what()));
   }
 }
+void DesktopController::openProject(const QString& path) {
+  const QString trimmed = path.trimmed();
+  if (trimmed.isEmpty()) {
+    return;
+  }
+  const std::filesystem::path project_path{trimmed.toStdString()};
+  setBusy(true);
+  setStatus(QStringLiteral("Abriendo proyecto…"));
+  clearError();
+  try {
+    auto restore_state = pulsar::project_file::FileProjectRepository{}.load(project_path);
+    // Candidate-first: the old session, mailbox, epochs and generations stay
+    // untouched until the new session is fully constructed. In particular the
+    // candidate gets its own visual mailbox, because activating a worker on
+    // the shared mailbox would disturb the old session before commit.
+    auto candidate_mailbox =
+        std::make_shared<pulsar::media::ffmpeg::FFmpegPlaybackVisualMailbox>(8);
+    auto candidate = std::make_unique<pulsar::desktop::EditorSession>(
+        std::move(restore_state), makeWorkerFactory(candidate_mailbox, project_path));
+    ++import_request_generation_;
+    active_session_ = std::move(candidate);
+    visual_mailbox_ = std::move(candidate_mailbox);
+    ++editor_session_epoch_;
+  } catch (const std::exception& error) {
+    setBusy(false);
+    setError(QString::fromUtf8(error.what()));
+    setStatus(QStringLiteral("Error"));
+    return;
+  }
+  pause();
+  has_media_ = false;
+  media_name_.clear();
+  metadata_.clear();
+  duration_text_ = "--:--:--.---";
+  progress_ = 0.0;
+  position_text_ = "00:00:00.000";
+  publishTimeline();
+  clearProgram(active_session_->timeline_duration() > MediaTime::zero() ? "loading" : "empty");
+  setBusy(false);
+  clearError();
+  setStatus(QStringLiteral("Proyecto abierto"));
+  emit mediaChanged();
+  emit playbackChanged();
+  emit positionChanged();
+}
 
 std::unique_ptr<pulsar::desktop::EditorSession> DesktopController::makeEditorSession() {
-  auto mailbox = visual_mailbox_;
   return std::make_unique<pulsar::desktop::EditorSession>(
-      [this, mailbox](const std::filesystem::path& path, int stream) {
-        const auto start = std::chrono::steady_clock::now();
-        auto worker = std::make_unique<FFmpegPlaybackWorker>(path, stream, FFmpegPlaybackWorker::Limits{8}, mailbox);
-        worker_ctor_durations_.push(std::chrono::steady_clock::now() - start);
-        worker_descriptor_durations_.push(worker->stats().descriptor_latency);
-        ++worker_construction_count_;
-        return worker;
-      });
+      makeWorkerFactory(visual_mailbox_, std::filesystem::path{}));
 }
+
+pulsar::application::PlaybackWorkerFactory DesktopController::makeWorkerFactory(
+    std::shared_ptr<pulsar::media::ffmpeg::FFmpegPlaybackVisualMailbox> mailbox,
+    std::filesystem::path project_file) {
+  return [this, mailbox, project_file = std::move(project_file)](
+             const std::filesystem::path& path, int stream) {
+    const auto runtime_path =
+        pulsar::desktop::resolve_runtime_media_path(project_file, path);
+    const auto start = std::chrono::steady_clock::now();
+    auto worker = std::make_unique<FFmpegPlaybackWorker>(runtime_path, stream,
+                                                         FFmpegPlaybackWorker::Limits{8}, mailbox);
+    worker_ctor_durations_.push(std::chrono::steady_clock::now() - start);
+    worker_descriptor_durations_.push(worker->stats().descriptor_latency);
+    ++worker_construction_count_;
+    return worker;
+  };
+}
+
 void DesktopController::postOpen(std::filesystem::path path, std::uint64_t generation) { setBusy(true); setStatus("Preparando…"); setTechnicalStatus("Probing"); clearError(); enqueue(WorkerCommand{std::move(path),generation}); }
 void DesktopController::enqueue(WorkerCommand command){{std::lock_guard lock{mutex_};pending_command_=std::move(command);}wake_.notify_one();}
 void DesktopController::workerLoop(){while(true){WorkerCommand command;{std::unique_lock lock{mutex_};wake_.wait(lock,[this]{return stop_worker_||pending_command_.has_value();});if(stop_worker_)return;command=std::move(*pending_command_);pending_command_.reset();}try{FFmpegMediaProbe probe;auto result=probe.probe(command.path);if(result.video_streams.empty())throw std::runtime_error{"media has no video stream"};QMetaObject::invokeMethod(this,[this,generation=command.generation,result=std::move(result)]()mutable{if(generation!=import_request_generation_){++stale_visual_frames_;return;}installTimelineAsset(result);},Qt::QueuedConnection);}catch(const std::exception& error){QMetaObject::invokeMethod(this,[this,generation=command.generation,message=QString::fromUtf8(error.what())]{if(generation!=import_request_generation_)return;setBusy(false);setError(message);setStatus("Error");},Qt::QueuedConnection);}}}

@@ -51,6 +51,11 @@ class EditorSession final {
 public:
   EditorSession();
   explicit EditorSession(application::PlaybackWorkerFactory worker_factory);
+  // Builds a completely fresh session from loaded restore state: new document,
+  // new processor/history, new coordinator, no selection. Throws without
+  // mutating any existing session; callers replace atomically on success.
+  explicit EditorSession(application::ProjectRestoreState restore_state,
+                         application::PlaybackWorkerFactory worker_factory);
   ~EditorSession() = default;
   EditorSession(const EditorSession&) = delete;
   EditorSession& operator=(const EditorSession&) = delete;

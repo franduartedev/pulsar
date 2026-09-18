@@ -7,6 +7,7 @@
 #include <limits>
 #include <sstream>
 #include <stdexcept>
+#include <utility>
 
 namespace pulsar::desktop {
 namespace {
@@ -79,6 +80,14 @@ EditorSession::EditorSession()
 
 EditorSession::EditorSession(application::PlaybackWorkerFactory worker_factory)
     : processor_{document_}, coordinator_{clock_, std::move(worker_factory)} {
+  synchronize_document_state();
+}
+
+EditorSession::EditorSession(application::ProjectRestoreState restore_state,
+                             application::PlaybackWorkerFactory worker_factory)
+    : document_{application::ProjectDocument::restore(std::move(restore_state))},
+      processor_{document_},
+      coordinator_{clock_, std::move(worker_factory)} {
   synchronize_document_state();
 }
 

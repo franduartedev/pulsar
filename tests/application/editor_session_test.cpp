@@ -1,8 +1,13 @@
 #include "duration_sample_ring.hpp"
 #include "editor_session.hpp"
+#include "project_path_resolution.hpp"
 
 #include <pulsar/application/media/media_probe.hpp>
 #include <pulsar/application/playback/playback_worker.hpp>
+#include <pulsar/application/project/project_codec.hpp>
+#include <pulsar/domain/timeline/clip.hpp>
+#include <pulsar/domain/timeline/track.hpp>
+#include <pulsar/domain/timeline/track_kind.hpp>
 
 #include <cassert>
 #include <chrono>
@@ -13,6 +18,7 @@
 #include <optional>
 #include <string>
 #include <limits>
+#include <variant>
 
 namespace {
 using namespace pulsar;
@@ -413,6 +419,169 @@ void duration_ring_wraparound() {
          std::chrono::nanoseconds{static_cast<long long>(DurationSampleRing::capacity + 6 - 1)});
 }
 
+application::ProjectRestoreState make_restore_state(
+    domain::TimelineId timeline_id, domain::TrackId video_track,
+    std::vector<application::MediaAsset> assets, domain::Track track,
+    application::ProjectAllocatorState allocator) {
+  application::ProjectRestoreTrack restore_track{track.id(), domain::TrackKind::Video, {}};
+  for (const auto& clip : track.clips()) {
+    restore_track.clips.push_back(clip);
+  }
+  application::ProjectRestoreState state{timeline_id, {restore_track}, video_track,
+                                         std::move(assets), allocator};
+  return state;
+}
+
+application::VideoAssetMetadata test_metadata() {
+  return application::VideoAssetMetadata{"h264", 1920, 1080, Rational{1, 90000}, std::nullopt,
+                                         std::nullopt};
+}
+
+void restored_session_matches_persisted_editorial_state() {
+  Probe probe;
+  EditorSession original;
+  const auto media_a = original.processor().import_asset("a.mp4", probe);
+  const auto media_b = original.processor().import_asset("b.mp4", probe);
+  const auto clip_a = original.processor().add_clip(
+      media_a, TimeRange{MediaTime::zero(), MediaTime{4, Rational{1, 1}}}, MediaTime::zero());
+  const auto clip_b = original.processor().add_clip(
+      media_b, TimeRange{MediaTime::zero(), MediaTime{4, Rational{1, 1}}}, MediaTime{4, Rational{1, 1}});
+  original.processor().move_clip(clip_b, original.document().video_track_id(),
+                                 MediaTime{6, Rational{1, 1}});
+  original.processor().trim_clip_start(clip_a, MediaTime{1, Rational{1, 1}});
+  const auto right = original.processor().split_clip(clip_a, MediaTime{2, Rational{1, 1}});
+  assert(right != clip_a);
+  original.synchronize_document_state();
+
+  const auto bytes = application::ProjectCodec::encode(original.document().snapshot());
+  auto state = application::ProjectCodec::decode(bytes);
+  int worker_calls = 0;
+  EditorSession loaded(std::move(state), [&worker_calls](const std::filesystem::path&, int) {
+    ++worker_calls;
+    return std::unique_ptr<application::PlaybackMediaWorker>{};
+  });
+
+  assert(application::ProjectCodec::encode(loaded.document().snapshot()) == bytes);
+  assert(loaded.document().assets().size() == 2);
+  assert(loaded.document().find_asset(media_a)->source_locator() == std::filesystem::path{"a.mp4"});
+  assert(loaded.document().find_asset(media_b)->source_locator() == std::filesystem::path{"b.mp4"});
+  const auto* loaded_a = loaded.document().timeline().find_clip(clip_a);
+  const auto* loaded_right = loaded.document().timeline().find_clip(right);
+  const auto* loaded_b = loaded.document().timeline().find_clip(clip_b);
+  assert(loaded_a != nullptr && loaded_right != nullptr && loaded_b != nullptr);
+  assert((loaded_a->timeline_start() == MediaTime{1, Rational{1, 1}}));
+  assert((loaded_a->source_range().start() == MediaTime{1, Rational{1, 1}}));
+  assert((loaded_b->timeline_start() == MediaTime{6, Rational{1, 1}}));
+  assert(loaded.document().next_clip_id() == original.document().next_clip_id());
+  assert(loaded.document().history_state_id() == 1);
+  assert(loaded.document().saved_history_state_id() == 1);
+  assert(loaded.document().document_generation() == 0);
+  assert(!loaded.document().is_dirty());
+  assert(!loaded.can_undo());
+  assert(!loaded.can_redo());
+  assert(!loaded.selected_clip().has_value());
+  assert(worker_calls == 0);
+
+  // Fresh history root: one new edit is undoable without touching the baseline.
+  loaded.processor().move_clip(clip_b, loaded.document().video_track_id(),
+                               MediaTime{7, Rational{1, 1}});
+  assert(loaded.can_undo());
+  assert(loaded.undo());
+  assert((loaded.document().timeline().find_clip(clip_b)->timeline_start() ==
+         MediaTime{6, Rational{1, 1}}));
+  assert(!loaded.can_undo());
+}
+
+void missing_media_survives_restore_without_workers() {
+  application::VideoAssetMetadata metadata{"h264", 1920, 1080, Rational{1, 90000}, std::nullopt,
+                                           std::nullopt};
+  application::MediaAsset asset{domain::MediaId{7}, "media/offline.mp4", 0,
+                               MediaTime{10, Rational{1, 1}}, metadata,
+                               application::MediaAvailability::Unavailable, std::string{"gone"}};
+  domain::Track track{domain::TrackId{3}, domain::TrackKind::Video};
+  track.insert_clip(domain::Clip{domain::ClipId{9}, domain::MediaId{7},
+                                 TimeRange{MediaTime::zero(), MediaTime{4, Rational{1, 1}}},
+                                 MediaTime::zero()});
+  application::ProjectAllocatorState allocator;
+  allocator.next_media_id = 8;
+  allocator.next_clip_id = 10;
+  allocator.next_timeline_id = 6;
+  allocator.next_track_id = 4;
+  auto state = make_restore_state(domain::TimelineId{5}, domain::TrackId{3}, {asset}, track, allocator);
+
+  int worker_calls = 0;
+  EditorSession loaded(std::move(state), [&worker_calls](const std::filesystem::path&, int) {
+    ++worker_calls;
+    return std::unique_ptr<application::PlaybackMediaWorker>{};
+  });
+  assert(loaded.document().find_asset(domain::MediaId{7}).has_value());
+  assert(loaded.document().find_asset(domain::MediaId{7})->source_locator() ==
+         std::filesystem::path{"media/offline.mp4"});
+  const auto* clip = loaded.document().timeline().find_clip(domain::ClipId{9});
+  assert(clip != nullptr);
+  assert((clip->timeline_range().start() == MediaTime::zero()));
+  assert((loaded.document().timeline().duration() == MediaTime{4, Rational{1, 1}}));
+  assert(loaded.timeline_views().size() == 1);
+  assert(loaded.timeline_views().front().missing);
+  assert(worker_calls == 0);
+  const auto presentation = loaded.update_playback();
+  assert(std::holds_alternative<application::TimelineMissingMediaPresentation>(presentation));
+  assert(worker_calls == 0);
+  assert(!loaded.document().is_dirty());
+  assert(!loaded.can_undo());
+  assert(!loaded.can_redo());
+}
+
+void failed_candidate_preserves_active_session() {
+  Probe probe;
+  auto active = std::make_unique<EditorSession>();
+  const auto media = active->processor().import_asset("keep.mp4", probe);
+  const auto clip = active->processor().add_clip(
+      media, TimeRange{MediaTime::zero(), MediaTime{4, Rational{1, 1}}}, MediaTime::zero());
+  active->synchronize_document_state();
+  active->select_clip(clip);
+  const auto history_before = active->document().history_state_id();
+  assert(active->document().is_dirty());
+  assert(active->selected_clip() == clip);
+  assert(active->can_undo());
+
+  application::VideoAssetMetadata metadata{"h264", 1920, 1080, Rational{1, 90000}, std::nullopt,
+                                           std::nullopt};
+  application::MediaAsset first{domain::MediaId{7}, "a.mp4", 0, MediaTime{10, Rational{1, 1}},
+                               metadata};
+  application::MediaAsset second{domain::MediaId{7}, "b.mp4", 0, MediaTime{10, Rational{1, 1}},
+                                metadata};
+  auto bad = make_restore_state(domain::TimelineId{5}, domain::TrackId{3}, {first, second},
+                                domain::Track{domain::TrackId{3}, domain::TrackKind::Video},
+                                application::ProjectAllocatorState{});
+  bool rejected = false;
+  try {
+    auto candidate = std::make_unique<EditorSession>(
+        std::move(bad), [](const std::filesystem::path&, int) {
+          return std::unique_ptr<application::PlaybackMediaWorker>{};
+        });
+    active = std::move(candidate);
+  } catch (const std::exception&) {
+    rejected = true;
+  }
+  assert(rejected);
+  assert(active->document().timeline().find_clip(clip) != nullptr);
+  assert(active->document().history_state_id() == history_before);
+  assert(active->document().is_dirty());
+  assert(active->selected_clip() == clip);
+  assert(active->can_undo());
+}
+
+void runtime_media_path_resolution() {
+  using pulsar::desktop::resolve_runtime_media_path;
+  assert(resolve_runtime_media_path("/tmp/project/session.pulsar", "media/clip.mp4") ==
+         std::filesystem::path{"/tmp/project/media/clip.mp4"});
+  assert(resolve_runtime_media_path("/tmp/project/session.pulsar", "/abs/clip.mp4") ==
+         std::filesystem::path{"/abs/clip.mp4"});
+  assert(resolve_runtime_media_path("session.pulsar", "media/clip.mp4") ==
+         std::filesystem::path{"media/clip.mp4"});
+}
+
 int main() {
   viewport_is_exactly_guarded();
   editing_actions_use_document_commands();
@@ -424,4 +593,9 @@ int main() {
   save_project_uncertain_durability_still_commits();
   save_project_failure_marks_nothing_saved();
   save_project_marks_captured_snapshot_not_current_state();
+  restored_session_matches_persisted_editorial_state();
+  missing_media_survives_restore_without_workers();
+  failed_candidate_preserves_active_session();
+  runtime_media_path_resolution();
+  return 0;
 }
