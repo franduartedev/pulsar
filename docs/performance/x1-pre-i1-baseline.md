@@ -149,9 +149,10 @@ not a product verdict. Notable scale signal even pre-failure: descriptor
 Temporary harness `/dev/shm/pulsar-x1/edit_metrics_probe.cpp` (NOT committed):
 real `EditorSession` + real `FFmpegPlaybackWorker` factory + real probe on the
 1080p fixture. Deterministic exact edits, each followed by
-`synchronize_document_state()`: import, 2× add_clip, 3× move, 6× inward trim,
-1× split, 1× delete, 4× undo, 2× redo, plus 2 settled no-ops (20
-generation-changing ops).
+`synchronize_document_state()`: import, 2× add_clip, 3× move, 4× inward trim,
+1× split, 1× delete, 4× undo, 2× redo — 18 generation-changing ops. Counting
+the constructor's initial synchronization, the run performs 19 synchronizations
+plus 2 settled no-ops (which only increment skipped_count).
 
 Run 1:
 ```text
@@ -188,11 +189,14 @@ edit_sequence_wall_ms=256
 ```
 
 Classification: **POTENTIALLY HARMFUL (borderline)**. Synchronize p95
-(~22–25 ms) exceeds one 16 ms frame budget, and worker construction /
-descriptor latency (~7–10 ms, ~70% of the sync cost) is the dominant portion —
-i.e. synchronous `describe_source` on the GUI thread during edits. Stable
-across runs. Skipped-path stays cheap (guard works). Verdict is evidence for
-later optimization, not action now.
+(~22–25 ms) exceeds one 16 ms frame budget. Worker construction is a large
+synchronous component of synchronization, accounting for roughly 40–50% when
+comparing corresponding p50/p95 values (ctor p50 ~6.9 ms vs sync p50
+~14.8 ms; ctor p95 ~10.6 ms vs sync p95 ~22–25 ms). Most of the constructor
+cost is descriptor/open-source work (descriptor p50 ~6.8 ms vs ctor p50
+~6.9 ms, i.e. descriptor open dominates; descriptor and constructor must not
+be added as independent costs). Stable across runs. Skipped-path stays cheap
+(guard works). Verdict is evidence for later optimization, not action now.
 
 ## G. Desktop diagnostics smoke
 
