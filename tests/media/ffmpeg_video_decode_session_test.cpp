@@ -627,14 +627,43 @@ bool visual_frame_identity_test(const std::filesystem::path& root) {
   write_non_zero_start_h264_fixture(fixture_path);
   const auto fixture = inspect_non_zero_start_fixture(fixture_path);
 
-  const auto lower_timestamp = fixture.timestamps.at(37);
-  const auto upper_timestamp = fixture.timestamps.at(38);
-  const auto between_frames = one_stream_tick_after(lower_timestamp);
-
   auto session = FFmpegVideoDecodeSession{fixture.path, 0};
-  const auto result = session.seek_to_presentation_timestamp_visual(between_frames);
+
+  // Phase 1: decode many frames sequentially to establish a clearly high
+  // baseline identity, independent of any seek behavior.
+  std::uint64_t previous_id = 0;
+  std::uint64_t pre_seek_max_id = 0;
+  int sequential_count = 0;
+  for (int i = 0; i < 50; ++i) {
+    const auto frame = session.decode_next_visual();
+    if (!frame.has_value()) {
+      break;
+    }
+    if (frame->physical_frame_id <= previous_id) {
+      return false;
+    }
+    previous_id = frame->physical_frame_id;
+    ++sequential_count;
+  }
+  pre_seek_max_id = previous_id;
+  if (sequential_count < 50 || pre_seek_max_id < 50) {
+    return false;
+  }
+
+  // Phase 2: seek back near the beginning, where the seek itself can only
+  // perform a handful of physical decodes. Every identity the seek returns
+  // must therefore exceed the pre-seek baseline; a counter reset to 1 could
+  // never catch up and would fail here deterministically.
+  const auto early_lower = fixture.timestamps.at(2);
+  const auto early_upper = fixture.timestamps.at(3);
+  const auto early_target = one_stream_tick_after(early_lower);
+  const auto result = session.seek_to_presentation_timestamp_visual(early_target);
+  if (!result.frame.has_value() || result.frame->physical_frame_id <= pre_seek_max_id) {
+    return false;
+  }
   if (!result.lookahead.has_value() || !result.lookahead->presentation_timestamp.has_value() ||
-      *result.lookahead->presentation_timestamp != upper_timestamp) {
+      *result.lookahead->presentation_timestamp != early_upper ||
+      result.lookahead->physical_frame_id <= pre_seek_max_id) {
     return false;
   }
   const auto lookahead_id = result.lookahead->physical_frame_id;
@@ -642,33 +671,14 @@ bool visual_frame_identity_test(const std::filesystem::path& root) {
   // Re-exposing the retained pending frame keeps its identity and timestamp.
   const auto pending = session.decode_next_visual();
   if (!pending.has_value() || !pending->presentation_timestamp.has_value() ||
-      *pending->presentation_timestamp != upper_timestamp ||
+      *pending->presentation_timestamp != early_upper ||
       pending->physical_frame_id != lookahead_id) {
     return false;
   }
 
-  // The next genuinely new physical decode gets a fresh monotonic identity.
+  // The next genuinely new physical decode gets a newer identity.
   const auto fresh = session.decode_next_visual();
   if (!fresh.has_value() || fresh->physical_frame_id <= lookahead_id) {
-    return false;
-  }
-  const auto max_seen = fresh->physical_frame_id;
-
-  // A later seek in the same session continues the namespace; it never resets.
-  const auto later_target = one_stream_tick_after(fixture.timestamps.at(60));
-  const auto later = session.seek_to_presentation_timestamp_visual(later_target);
-  if (!later.frame.has_value()) {
-    return false;
-  }
-  auto following = session.decode_next_visual();
-  while (following.has_value() && following->physical_frame_id <= max_seen) {
-    // Retained pending re-exposure keeps old identity; skip through it.
-    following = session.decode_next_visual();
-    if (!following.has_value()) {
-      break;
-    }
-  }
-  if (!following.has_value() || following->physical_frame_id <= max_seen) {
     return false;
   }
   return true;
