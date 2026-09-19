@@ -1,5 +1,6 @@
 #pragma once
 
+#include <pulsar/application/playback/audio_playback_session.hpp>
 #include <pulsar/application/playback/playback_session.hpp>
 #include <pulsar/application/timeline/timeline_clip_resolver.hpp>
 
@@ -76,9 +77,17 @@ using TimelinePresentation = std::variant<
 using PlaybackWorkerFactory = std::function<std::unique_ptr<PlaybackMediaWorker>(
     const std::filesystem::path& source_locator, int video_stream_index)>;
 
+enum class PlaybackClockSource {
+  Software,
+  AudioDevice,
+  Paused,
+};
+
 class TimelinePlaybackCoordinator {
 public:
-  TimelinePlaybackCoordinator(const MonotonicClock& clock, PlaybackWorkerFactory worker_factory);
+  TimelinePlaybackCoordinator(const MonotonicClock& clock, PlaybackWorkerFactory worker_factory,
+                              AudioPlaybackSourceFactory audio_source_factory = {},
+                              AudioOutput* audio_output = nullptr);
   ~TimelinePlaybackCoordinator() = default;
 
   TimelinePlaybackCoordinator(const TimelinePlaybackCoordinator&) = delete;
@@ -92,6 +101,7 @@ public:
   [[nodiscard]] TimelinePresentation update();
   [[nodiscard]] domain::MediaTime timeline_position() const;
   [[nodiscard]] PlaybackIntent intent() const noexcept { return intent_; }
+  [[nodiscard]] PlaybackClockSource clock_source() const noexcept { return clock_source_; }
 
 private:
   enum class SegmentKind {
@@ -128,18 +138,21 @@ private:
   [[nodiscard]] TimelinePresentation make_ended(const TimelineEnded& ended) const;
   [[nodiscard]] domain::MediaTime next_gap_boundary(domain::MediaTime position) const;
   void reset_source();
+  void synchronize_audio_clock();
 
   const MonotonicClock& clock_;
   PlaybackWorkerFactory worker_factory_;
   PlaybackTransport transport_;
   std::optional<ProjectSnapshot> snapshot_;
   std::unique_ptr<PlaybackSession> source_session_;
+  std::unique_ptr<AudioPlaybackSession> audio_session_;
   std::optional<ResolvedClip> active_clip_;
   std::optional<MissingClipMedia> active_missing_;
   std::optional<domain::MediaTime> segment_end_;
   std::optional<TimelinePresentation> current_presentation_;
   std::optional<std::string> source_creation_error_;
   PlaybackIntent intent_{PlaybackIntent::Paused};
+  PlaybackClockSource clock_source_{PlaybackClockSource::Paused};
   SegmentKind segment_kind_{SegmentKind::None};
   TimelineAdvancePermission advance_permission_{TimelineAdvancePermission::Hold};
 };

@@ -1,4 +1,7 @@
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Qml Quick)
+if(PULSAR_BUILD_QT_AUDIO)
+  find_package(Qt6 REQUIRED COMPONENTS Multimedia)
+endif()
 
 qt_add_executable(pulsar_desktop
   src/main.cpp
@@ -66,6 +69,11 @@ target_link_libraries(pulsar_desktop
     pulsar::domain
     pulsar::project_file
 )
+
+if(PULSAR_BUILD_QT_AUDIO)
+  target_compile_definitions(pulsar_desktop PRIVATE PULSAR_HAS_QT_AUDIO=1)
+  target_link_libraries(pulsar_desktop PRIVATE Qt6::Multimedia pulsar::media_qt_audio)
+endif()
 
 pulsar_apply_project_options(pulsar_desktop)
 pulsar_apply_compiler_warnings(pulsar_desktop)

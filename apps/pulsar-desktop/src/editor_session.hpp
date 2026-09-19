@@ -3,6 +3,8 @@
 #include "duration_sample_ring.hpp"
 
 #include <pulsar/application/commands/command_processor.hpp>
+#include <pulsar/application/audio/audio_output.hpp>
+#include <pulsar/application/playback/audio_playback_session.hpp>
 #include <pulsar/application/playback/timeline_playback_coordinator.hpp>
 #include <pulsar/application/project/project_document.hpp>
 #include <pulsar/application/project/project_repository.hpp>
@@ -50,12 +52,16 @@ private:
 class EditorSession final {
 public:
   EditorSession();
-  explicit EditorSession(application::PlaybackWorkerFactory worker_factory);
+  explicit EditorSession(application::PlaybackWorkerFactory worker_factory,
+                         application::AudioPlaybackSourceFactory audio_source_factory = {},
+                         std::unique_ptr<application::AudioOutput> audio_output = {});
   // Builds a completely fresh session from loaded restore state: new document,
   // new processor/history, new coordinator, no selection. Throws without
   // mutating any existing session; callers replace atomically on success.
   explicit EditorSession(application::ProjectRestoreState restore_state,
-                         application::PlaybackWorkerFactory worker_factory);
+                         application::PlaybackWorkerFactory worker_factory,
+                         application::AudioPlaybackSourceFactory audio_source_factory = {},
+                         std::unique_ptr<application::AudioOutput> audio_output = {});
   ~EditorSession() = default;
   EditorSession(const EditorSession&) = delete;
   EditorSession& operator=(const EditorSession&) = delete;
@@ -104,6 +110,7 @@ private:
   application::ProjectDocument document_;
   application::CommandProcessor processor_;
   application::SteadyMonotonicClock clock_;
+  std::unique_ptr<application::AudioOutput> audio_output_;
   application::TimelinePlaybackCoordinator coordinator_;
   std::optional<domain::ClipId> selected_clip_;
   std::vector<TimelineClipView> views_;

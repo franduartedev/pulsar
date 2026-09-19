@@ -12,6 +12,7 @@ extern "C" {
 #include <libavutil/avutil.h>
 #include <libavutil/channel_layout.h>
 #include <libavutil/error.h>
+#include <libavutil/mathematics.h>
 #include <libavutil/samplefmt.h>
 #include <libswresample/swresample.h>
 }
@@ -227,7 +228,10 @@ public:
     }
 
     codec_name_ = internal::codec_name(*stream.codecpar);
+    stream_time_base_ffmpeg_ = stream.time_base;
     stream_time_base_ = internal::convert_required_time_base(stream.time_base);
+    stream_start_timestamp_ =
+        internal::convert_timestamp(stream.start_time, stream_time_base_);
     codec_context_ = allocate_decoder_context(*decoder, *stream.codecpar);
     sample_rate_ = codec_context_->sample_rate;
     channel_count_ = codec_context_->ch_layout.nb_channels;
@@ -270,12 +274,55 @@ public:
     }
   }
 
+  [[nodiscard]] bool seek_to(domain::MediaTime timestamp) {
+    const auto source_base = timestamp.time_base();
+    const auto in_range = [](std::int64_t value) {
+      return value >= std::numeric_limits<int>::min() &&
+             value <= std::numeric_limits<int>::max();
+    };
+    if (!in_range(source_base.numerator()) || !in_range(source_base.denominator()) ||
+        source_base.denominator() <= 0) {
+      throw MediaDecodeError{MediaDecodeErrorCode::DecodeFailed,
+                             "audio seek timestamp is outside FFmpeg range"};
+    }
+    const AVRational source_time_base{static_cast<int>(source_base.numerator()),
+                                      static_cast<int>(source_base.denominator())};
+    const auto target = av_rescale_q(timestamp.value(), source_time_base,
+                                     stream_time_base_ffmpeg_);
+    const int result = avformat_seek_file(context_.get(), stream_index_,
+                                           std::numeric_limits<std::int64_t>::min(), target,
+                                           std::numeric_limits<std::int64_t>::max(),
+                                           AVSEEK_FLAG_BACKWARD);
+    if (result < 0) {
+      throw MediaDecodeError{MediaDecodeErrorCode::DecodeFailed,
+                             "FFmpeg could not seek audio stream: " + ffmpeg_error_text(result)};
+    }
+    avcodec_flush_buffers(codec_context_.get());
+    av_packet_unref(packet_.get());
+    av_frame_unref(frame_.get());
+    swr_close(resampler_.get());
+    const int init_result = swr_init(resampler_.get());
+    if (init_result < 0) {
+      throw MediaDecodeError{MediaDecodeErrorCode::DecodeFailed,
+                             "libswresample could not reset after audio seek: " +
+                                 ffmpeg_error_text(init_result)};
+    }
+    pending_tail_.reset();
+    state_ = State::Reading;
+    has_pending_packet_ = false;
+    pending_send_was_blocked_ = false;
+    return true;
+  }
+
   [[nodiscard]] int stream_index() const noexcept { return stream_index_; }
   [[nodiscard]] int sample_rate() const noexcept { return sample_rate_; }
   [[nodiscard]] int channel_count() const noexcept { return channel_count_; }
   [[nodiscard]] const std::string& codec_name() const noexcept { return codec_name_; }
   [[nodiscard]] const domain::Rational& stream_time_base() const noexcept {
     return stream_time_base_;
+  }
+  [[nodiscard]] std::optional<domain::MediaTime> stream_start_timestamp() const {
+    return stream_start_timestamp_;
   }
 
 private:
@@ -448,9 +495,11 @@ private:
   int sample_rate_{0};
   int channel_count_{0};
   AVSampleFormat input_sample_format_{AV_SAMPLE_FMT_NONE};
+  AVRational stream_time_base_ffmpeg_{0, 1};
   domain::Rational stream_time_base_{1, 1};
   std::string codec_name_{"unknown"};
   std::optional<AudioBlock> pending_tail_;
+  std::optional<domain::MediaTime> stream_start_timestamp_;
   State state_{State::Reading};
   bool has_pending_packet_{false};
   bool pending_send_was_blocked_{false};
@@ -471,6 +520,10 @@ std::optional<application::AudioBlock> FFmpegAudioDecodeSession::decode_next() {
   return impl_->decode_next();
 }
 
+bool FFmpegAudioDecodeSession::seek_to(domain::MediaTime timestamp) {
+  return impl_->seek_to(timestamp);
+}
+
 int FFmpegAudioDecodeSession::stream_index() const noexcept {
   return impl_->stream_index();
 }
@@ -489,6 +542,10 @@ const std::string& FFmpegAudioDecodeSession::codec_name() const noexcept {
 
 const domain::Rational& FFmpegAudioDecodeSession::stream_time_base() const noexcept {
   return impl_->stream_time_base();
+}
+
+std::optional<domain::MediaTime> FFmpegAudioDecodeSession::stream_start_timestamp() const {
+  return impl_->stream_start_timestamp();
 }
 
 } // namespace pulsar::media::ffmpeg

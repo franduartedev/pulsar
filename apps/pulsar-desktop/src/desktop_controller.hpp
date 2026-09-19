@@ -121,6 +121,8 @@ private:
   [[nodiscard]] pulsar::application::PlaybackWorkerFactory makeWorkerFactory(
       std::shared_ptr<pulsar::media::ffmpeg::FFmpegPlaybackVisualMailbox> mailbox,
       std::filesystem::path project_file);
+  [[nodiscard]] pulsar::application::AudioPlaybackSourceFactory makeAudioSourceFactory(
+      std::filesystem::path project_file);
   void enqueue(WorkerCommand command);
   void updateTick();
   void updatePositionProperties();

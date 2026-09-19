@@ -364,6 +364,17 @@ void timestamp_contract() {
   assert(rejected);
 }
 
+void seek_resets_decoder_state() {
+  FFmpegAudioDecodeSession session{fixture_path(), 1};
+  assert(session.decode_next().has_value());
+  assert(session.seek_to(MediaTime{8820, Rational{1, 44100}}));
+  auto block = session.decode_next();
+  assert(block.has_value());
+  assert(block->frame_count() > 0);
+  assert(block->presentation_timestamp().has_value());
+  assert((*block->presentation_timestamp() < MediaTime{8820, Rational{1, 44100}}));
+}
+
 }  // namespace
 
 int main() {
@@ -376,4 +387,5 @@ int main() {
   a0_identity_integration();
   timestamp_contract();
   multichannel_planar_beyond_inline_planes();
+  seek_resets_decoder_state();
 }

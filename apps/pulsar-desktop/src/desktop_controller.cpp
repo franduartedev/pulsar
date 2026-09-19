@@ -3,8 +3,12 @@
 #include "project_path_resolution.hpp"
 
 #include <pulsar/media/ffmpeg/ffmpeg_media_probe.hpp>
+#include <pulsar/media/ffmpeg/ffmpeg_audio_playback_source.hpp>
 #include <pulsar/media/ffmpeg/ffmpeg_playback_worker.hpp>
 #include <pulsar/media/ffmpeg/ffmpeg_preview_converter.hpp>
+#if defined(PULSAR_HAS_QT_AUDIO)
+#include <pulsar/media/qt_audio/qt_audio_output.hpp>
+#endif
 #include <pulsar/project_file/file_project_repository.hpp>
 
 #include <QMetaObject>
@@ -200,8 +204,17 @@ void DesktopController::openProject(const QString& path) {
     // the shared mailbox would disturb the old session before commit.
     auto candidate_mailbox =
         std::make_shared<pulsar::media::ffmpeg::FFmpegPlaybackVisualMailbox>(8);
+#if defined(PULSAR_HAS_QT_AUDIO)
+    auto candidate_output = std::make_unique<pulsar::media::qt_audio::QtAudioOutput>(
+        pulsar::media::qt_audio::QtAudioOutput::Options{{48000 * 2}, {}});
     auto candidate = std::make_unique<pulsar::desktop::EditorSession>(
-        std::move(restore_state), makeWorkerFactory(candidate_mailbox, project_path));
+        std::move(restore_state), makeWorkerFactory(candidate_mailbox, project_path),
+        makeAudioSourceFactory(project_path), std::move(candidate_output));
+#else
+    auto candidate = std::make_unique<pulsar::desktop::EditorSession>(
+        std::move(restore_state), makeWorkerFactory(candidate_mailbox, project_path),
+        makeAudioSourceFactory(project_path));
+#endif
     ++import_request_generation_;
     active_session_ = std::move(candidate);
     visual_mailbox_ = std::move(candidate_mailbox);
@@ -230,8 +243,17 @@ void DesktopController::openProject(const QString& path) {
 }
 
 std::unique_ptr<pulsar::desktop::EditorSession> DesktopController::makeEditorSession() {
+#if defined(PULSAR_HAS_QT_AUDIO)
+  auto output = std::make_unique<pulsar::media::qt_audio::QtAudioOutput>(
+      pulsar::media::qt_audio::QtAudioOutput::Options{{48000 * 2}, {}});
   return std::make_unique<pulsar::desktop::EditorSession>(
-      makeWorkerFactory(visual_mailbox_, std::filesystem::path{}));
+      makeWorkerFactory(visual_mailbox_, std::filesystem::path{}),
+      makeAudioSourceFactory(std::filesystem::path{}), std::move(output));
+#else
+  return std::make_unique<pulsar::desktop::EditorSession>(
+      makeWorkerFactory(visual_mailbox_, std::filesystem::path{}),
+      makeAudioSourceFactory(std::filesystem::path{}));
+#endif
 }
 
 pulsar::application::PlaybackWorkerFactory DesktopController::makeWorkerFactory(
@@ -248,6 +270,17 @@ pulsar::application::PlaybackWorkerFactory DesktopController::makeWorkerFactory(
     worker_descriptor_durations_.push(worker->stats().descriptor_latency);
     ++worker_construction_count_;
     return worker;
+  };
+}
+
+pulsar::application::AudioPlaybackSourceFactory DesktopController::makeAudioSourceFactory(
+    std::filesystem::path project_file) {
+  return [this, project_file = std::move(project_file)](const std::filesystem::path& path,
+                                                        int stream) {
+    const auto runtime_path =
+        pulsar::desktop::resolve_runtime_media_path(project_file, path);
+    return std::make_unique<pulsar::media::ffmpeg::FFmpegAudioPlaybackSource>(runtime_path,
+                                                                                stream);
   };
 }
 

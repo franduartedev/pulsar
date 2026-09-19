@@ -7,8 +7,14 @@
 namespace pulsar::application {
 
 TimelinePlaybackCoordinator::TimelinePlaybackCoordinator(const MonotonicClock& clock,
-                                                         PlaybackWorkerFactory worker_factory)
-    : clock_{clock}, worker_factory_{std::move(worker_factory)}, transport_{clock} {}
+                                                         PlaybackWorkerFactory worker_factory,
+                                                         AudioPlaybackSourceFactory audio_source_factory,
+                                                         AudioOutput* audio_output)
+    : clock_{clock},
+      worker_factory_{std::move(worker_factory)},
+      transport_{clock},
+      audio_session_{std::make_unique<AudioPlaybackSession>(audio_output,
+                                                             std::move(audio_source_factory))} {}
 
 void TimelinePlaybackCoordinator::set_advance_permission(TimelineAdvancePermission permission) {
   advance_permission_ = permission;
@@ -33,6 +39,7 @@ void TimelinePlaybackCoordinator::set_snapshot(ProjectSnapshot snapshot) {
   set_advance_permission(TimelineAdvancePermission::Hold);
   reanchor_transport(position);
   reset_source();
+  audio_session_->reset();
   snapshot_ = std::move(snapshot);
   segment_kind_ = SegmentKind::None;
   current_presentation_.reset();
@@ -47,14 +54,26 @@ void TimelinePlaybackCoordinator::set_snapshot(ProjectSnapshot snapshot) {
 
 void TimelinePlaybackCoordinator::play() {
   intent_ = PlaybackIntent::Playing;
+  if (audio_session_ != nullptr) {
+    audio_session_->play();
+  }
   if (!snapshot_.has_value()) {
     return;
+  }
+  if (audio_session_ != nullptr && audio_session_->has_device_clock()) {
+    clock_source_ = PlaybackClockSource::AudioDevice;
+  } else {
+    clock_source_ = PlaybackClockSource::Software;
   }
   synchronize_transport();
 }
 
 void TimelinePlaybackCoordinator::pause() {
   intent_ = PlaybackIntent::Paused;
+  if (audio_session_ != nullptr) {
+    audio_session_->pause();
+  }
+  clock_source_ = PlaybackClockSource::Paused;
   synchronize_transport();
 }
 
@@ -66,6 +85,11 @@ void TimelinePlaybackCoordinator::seek(domain::MediaTime timeline_position_value
     throw std::invalid_argument{"cannot seek without a project snapshot"};
   }
   reanchor_transport(timeline_position_value);
+  if (audio_session_ != nullptr) {
+    audio_session_->seek(timeline_position_value);
+  }
+  clock_source_ = intent_ == PlaybackIntent::Playing ? PlaybackClockSource::Software
+                                                       : PlaybackClockSource::Paused;
   const auto outcome = resolve_clip_at(*snapshot_, snapshot_->video_track_id,
                                        timeline_position_value);
   reconcile(outcome, timeline_position_value, true);
@@ -77,6 +101,7 @@ TimelinePresentation TimelinePlaybackCoordinator::update() {
     return TimelineEndedPresentation{domain::MediaTime::zero(), domain::MediaTime::zero()};
   }
 
+  synchronize_audio_clock();
   const domain::MediaTime position = timeline_position();
   switch (segment_kind_) {
   case SegmentKind::Clip:
@@ -174,6 +199,12 @@ void TimelinePlaybackCoordinator::enter_clip(const ResolvedClip& clip, bool forc
   segment_end_ = clip.timeline_range.end();
   segment_kind_ = SegmentKind::Clip;
   current_presentation_ = TimelineStarvedPresentation{clip.clip_id, clip.media_id, clip.timeline_range.start()};
+  audio_session_->configure(clip, timeline_position());
+  if (audio_session_->state() == AudioPlaybackState::IntentionalSilence ||
+      audio_session_->state() == AudioPlaybackState::DeviceUnavailable ||
+      audio_session_->state() == AudioPlaybackState::Error) {
+    set_advance_permission(TimelineAdvancePermission::Advance);
+  }
 }
 
 void TimelinePlaybackCoordinator::enter_gap(const TimelineGap& gap, bool force_transition) {
@@ -181,6 +212,7 @@ void TimelinePlaybackCoordinator::enter_gap(const TimelineGap& gap, bool force_t
     return;
   }
   reset_source();
+  audio_session_->reset();
   active_clip_.reset();
   active_missing_.reset();
   source_creation_error_.reset();
@@ -198,6 +230,7 @@ void TimelinePlaybackCoordinator::enter_missing(const MissingClipMedia& missing,
     return;
   }
   reset_source();
+  audio_session_->reset();
   active_clip_.reset();
   active_missing_ = missing;
   source_creation_error_.reset();
@@ -213,6 +246,7 @@ void TimelinePlaybackCoordinator::enter_ended(const TimelineEnded& ended, bool f
     return;
   }
   reset_source();
+  audio_session_->reset();
   active_clip_.reset();
   active_missing_.reset();
   source_creation_error_.reset();
@@ -225,6 +259,21 @@ void TimelinePlaybackCoordinator::enter_ended(const TimelineEnded& ended, bool f
 
 TimelinePresentation TimelinePlaybackCoordinator::evaluate_clip(const ResolvedClip& clip,
                                                                 domain::MediaTime position) {
+  if (audio_session_->state() == AudioPlaybackState::Starved) {
+    set_advance_permission(TimelineAdvancePermission::Hold);
+    synchronize_transport();
+    current_presentation_ = TimelineStarvedPresentation{clip.clip_id, clip.media_id, position};
+    return *current_presentation_;
+  }
+  if (audio_session_->state() == AudioPlaybackState::Ready && intent_ == PlaybackIntent::Playing) {
+    audio_session_->play();
+  }
+  if (audio_session_->state() == AudioPlaybackState::Error ||
+      audio_session_->state() == AudioPlaybackState::DeviceUnavailable ||
+      audio_session_->state() == AudioPlaybackState::IntentionalSilence ||
+      audio_session_->state() == AudioPlaybackState::EndedEarly) {
+    set_advance_permission(TimelineAdvancePermission::Advance);
+  }
   if (source_creation_error_.has_value()) {
     set_advance_permission(TimelineAdvancePermission::Hold);
     synchronize_transport();
@@ -262,6 +311,7 @@ TimelinePresentation TimelinePlaybackCoordinator::evaluate_clip(const ResolvedCl
     synchronize_transport();
     current_presentation_ = TimelineSourceGapPresentation{clip.clip_id, clip.media_id, position};
   } else if (std::holds_alternative<PresentationStarved>(decision)) {
+    audio_session_->pause();
     set_advance_permission(TimelineAdvancePermission::Hold);
     synchronize_transport();
     current_presentation_ = TimelineStarvedPresentation{clip.clip_id, clip.media_id, position};
@@ -272,6 +322,7 @@ TimelinePresentation TimelinePlaybackCoordinator::evaluate_clip(const ResolvedCl
                                                                   position};
   } else {
     const auto& error = std::get<PresentationTemporalError>(decision);
+    audio_session_->pause();
     set_advance_permission(TimelineAdvancePermission::Hold);
     synchronize_transport();
     segment_kind_ = SegmentKind::SourceError;
@@ -310,6 +361,28 @@ domain::MediaTime TimelinePlaybackCoordinator::next_gap_boundary(
 
 void TimelinePlaybackCoordinator::reset_source() {
   source_session_.reset();
+}
+
+void TimelinePlaybackCoordinator::synchronize_audio_clock() {
+  if (audio_session_ == nullptr || intent_ != PlaybackIntent::Playing || !snapshot_.has_value()) {
+    return;
+  }
+  audio_session_->update(timeline_position());
+  if (audio_session_->state() == AudioPlaybackState::Ready) {
+    audio_session_->play();
+  }
+  if (audio_session_->state() == AudioPlaybackState::Running) {
+    clock_source_ = PlaybackClockSource::AudioDevice;
+    if (const auto position = audio_session_->clock_position(); position.has_value()) {
+      reanchor_transport(*position);
+    }
+  } else if (audio_session_->state() == AudioPlaybackState::Starved) {
+    clock_source_ = PlaybackClockSource::Paused;
+    set_advance_permission(TimelineAdvancePermission::Hold);
+    synchronize_transport();
+  } else if (intent_ == PlaybackIntent::Playing) {
+    clock_source_ = PlaybackClockSource::Software;
+  }
 }
 
 } // namespace pulsar::application

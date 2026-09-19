@@ -3,6 +3,7 @@
 #include <pulsar/application/media/media_probe.hpp>
 
 #include <cassert>
+#include <algorithm>
 #include <deque>
 #include <filesystem>
 #include <memory>
@@ -151,6 +152,84 @@ struct Fixture {
   }
 };
 
+class SyncOutput final : public application::AudioOutput {
+public:
+  bool open(const application::AudioSourceFormat& source) override {
+    format_ = application::AudioDeviceFormat{source.sample_rate, source.channel_count,
+                                              application::AudioSampleFormat::Float32};
+    metrics_ = {};
+    pending_ = 0;
+    state_ = application::AudioOutputState::Opened;
+    return true;
+  }
+  bool close() override {
+    pending_ = 0;
+    state_ = application::AudioOutputState::Closed;
+    return true;
+  }
+  application::AudioEnqueueResult enqueue(const application::AudioBlock& block) override {
+    if (state_ != application::AudioOutputState::Opened &&
+        state_ != application::AudioOutputState::Running) {
+      return application::AudioEnqueueResult::InvalidState;
+    }
+    pending_ += block.frame_count();
+    metrics_.device_frames_submitted += block.frame_count();
+    metrics_.buffered_device_frames = pending_;
+    return application::AudioEnqueueResult::Accepted;
+  }
+  bool start() override {
+    if (state_ != application::AudioOutputState::Opened || pending_ == 0) return false;
+    state_ = application::AudioOutputState::Running;
+    return true;
+  }
+  bool request_drain() override {
+    if (state_ != application::AudioOutputState::Running) return false;
+    state_ = application::AudioOutputState::Draining;
+    return true;
+  }
+  bool stop() override {
+    if (state_ == application::AudioOutputState::Closed) return false;
+    pending_ = 0;
+    metrics_.buffered_device_frames = 0;
+    state_ = application::AudioOutputState::Opened;
+    return true;
+  }
+  bool flush() override { return stop(); }
+  application::AudioOutputState state() const override { return state_; }
+  std::optional<application::AudioDeviceFormat> device_format() const override { return format_; }
+  application::AudioOutputMetrics metrics() const override { return metrics_; }
+  std::optional<application::AudioOutputError> error() const override { return std::nullopt; }
+  void advance(std::uint64_t frames) {
+    const auto consumed = std::min(frames, pending_);
+    pending_ -= consumed;
+    metrics_.device_frames_processed += consumed;
+    metrics_.buffered_device_frames = pending_;
+  }
+
+private:
+  application::AudioOutputState state_{application::AudioOutputState::Closed};
+  application::AudioDeviceFormat format_{0, 0, application::AudioSampleFormat::Float32};
+  application::AudioOutputMetrics metrics_{};
+  std::uint64_t pending_{0};
+};
+
+class SyncAudioSource final : public application::AudioPlaybackSource {
+public:
+  int sample_rate() const noexcept override { return 44100; }
+  int channel_count() const noexcept override { return 1; }
+  bool seek_to(domain::MediaTime) override { return true; }
+  std::optional<application::AudioBlock> decode_next() override {
+    if (sent_) return std::nullopt;
+    sent_ = true;
+    return application::AudioBlock{
+        44100, 1, 44100 * 10, std::vector<float>(44100 * 10, 0.25F),
+        Rational{1, 44100}, MediaTime{0, Rational{1, 44100}}};
+  }
+
+private:
+  bool sent_{false};
+};
+
 ProjectSnapshot snapshot_with_clip(Fixture& fixture, MediaId media, TimeRange source, MediaTime start) {
   (void)fixture.processor.add_clip(media, source, start);
   return fixture.document.snapshot();
@@ -165,6 +244,7 @@ void one_clock_play_pause_resume_and_origin_mapping() {
   auto presentation = coordinator.update();
   assert(std::holds_alternative<TimelinePresentSample>(presentation));
   coordinator.play();
+  assert(coordinator.clock_source() == application::PlaybackClockSource::Software);
   clock.advance(time(2));
   presentation = coordinator.update();
   assert(std::holds_alternative<TimelinePresentSample>(presentation) ||
@@ -568,6 +648,36 @@ void edit_shrinking_timeline_reanchors_stale_playhead() {
   assert(coordinator.intent() == application::PlaybackIntent::Playing);
 }
 
+void audio_device_is_the_single_running_clock() {
+  Fixture fixture;
+  auto snapshot = snapshot_with_clip(fixture, fixture.media_one, TimeRange{time(0), time(10)},
+                                     time(0));
+  auto& asset = snapshot.assets.front();
+  snapshot.assets.front() = application::MediaAsset{
+      asset.id(), asset.source_locator(), asset.video_stream_index(), asset.playable_duration(),
+      asset.metadata(), asset.availability(), asset.availability_reason(),
+      application::AudioAssetMetadata{7, 44100, 1, Rational{1, 44100}, time(10)}};
+
+  FakeClock clock;
+  SyncOutput output;
+  TimelinePlaybackCoordinator coordinator{
+      clock, fixture.factory(),
+      [](const std::filesystem::path&, int) { return std::make_unique<SyncAudioSource>(); },
+      &output};
+  coordinator.set_snapshot(snapshot);
+  (void)coordinator.update();
+  coordinator.play();
+  assert(coordinator.clock_source() == application::PlaybackClockSource::AudioDevice);
+
+  // Once audio is running, a software-clock advance must not become a second
+  // clock. The next device observation reanchors the centralized transport.
+  clock.advance(time(5));
+  output.advance(4410);
+  (void)coordinator.update();
+  assert(coordinator.clock_source() == application::PlaybackClockSource::AudioDevice);
+  assert(coordinator.timeline_position() == time(1, Rational{1, 10}));
+}
+
 } // namespace
 
 int main() {
@@ -586,4 +696,5 @@ int main() {
   pause_overrides_advance_tests();
   seek_preserves_intent_tests();
   edit_shrinking_timeline_reanchors_stale_playhead();
+  audio_device_is_the_single_running_clock();
 }
