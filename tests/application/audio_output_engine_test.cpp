@@ -1146,6 +1146,39 @@ void destructive_transition_during_blocked_write() {
   assert(engine.close());
 }
 
+// The transfer snapshot must retain the old device frame size while a close
+// and reopen replace the session during the backend write. The old completion
+// is stale and must not account against the reopened queue; the replacement
+// format must still transfer normally afterwards.
+void format_snapshot_survives_replacement_during_write() {
+  FakeBackend backend;
+  backend.gate_write = true;
+  backend.offered = AudioDeviceFormat{44100, 1, AudioSampleFormat::Float32};
+  AudioOutputEngine engine{backend, AudioEngineLimits{4096}};
+  assert(engine.open({44100, 1}));
+  assert(engine.enqueue(make_block(44100, 1, 64, 0.1F)) == AudioEnqueueResult::Accepted);
+  assert(engine.start());
+
+  std::thread transfer([&] { assert(engine.transfer_to_backend()); });
+  assert(backend.wait_entered(&FakeBackend::entered_write));
+
+  assert(engine.close());
+  backend.offered = AudioDeviceFormat{44100, 2, AudioSampleFormat::Int16};
+  assert(engine.open({44100, 1}));
+  assert(engine.metrics().device_frames_submitted == 0);
+
+  backend.release_gate();
+  transfer.join();
+  assert(engine.state() == AudioOutputState::Opened);
+  assert(engine.metrics().device_frames_submitted == 0);
+
+  assert(engine.enqueue(make_block(44100, 1, 32, 0.7F)) == AudioEnqueueResult::Accepted);
+  assert(engine.start());
+  assert(engine.transfer_to_backend());
+  assert(engine.metrics().device_frames_submitted == 31);
+  assert(engine.close());
+}
+
 }  // namespace
 
 int main() {
@@ -1185,4 +1218,5 @@ int main() {
   close_failure_never_pretends_closed();
   concurrent_enqueue_during_blocked_write();
   destructive_transition_during_blocked_write();
+  format_snapshot_survives_replacement_during_write();
 }

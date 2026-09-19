@@ -13,7 +13,6 @@
 #include <QThread>
 #include <QTimer>
 
-#include <atomic>
 #include <cstdint>
 #include <functional>
 #include <mutex>
@@ -108,22 +107,18 @@ public:
 
   ~Impl() override = default;
 
-  // Non-blocking destruction path: invalidate first so stray pump events
-  // and in-flight marshaled calls become safe no-ops, then release Qt
-  // resources without ever waiting on the owner thread.
+  [[nodiscard]] bool on_owner_thread() const noexcept {
+    return QThread::currentThread() == owner_;
+  }
+
+  // Called only from QtAudioOutput's owner-thread destructor. Since all
+  // callbacks use gate_ as their receiver, destroying gate_ immediately
+  // afterwards removes pending queued work; no callback can run concurrently
+  // with this method on the same Qt thread.
   void teardown_for_destruction() {
-    invalidated_.store(true);
-    if (QThread::currentThread() == owner_) {
-      pump_.stop();
-      teardown_device();
-      return;
-    }
-    QMetaObject::invokeMethod(gate_.get(), [this] { pump_.stop(); }, Qt::QueuedConnection);
-    if (sink_ != nullptr) {
-      sink_->deleteLater();
-      sink_ = nullptr;
-      io_ = nullptr;
-    }
+    Q_ASSERT(on_owner_thread());
+    pump_.stop();
+    teardown_device();
   }
 
   void bind_engine() {
@@ -151,7 +146,7 @@ public:
   }
 
   void pump_once() {
-    if (invalidated_.load() || engine_ == nullptr) {
+    if (engine_ == nullptr) {
       pump_.stop();
       return;
     }
@@ -170,13 +165,8 @@ public:
   }
 
   // AudioDeviceBackend: every method marshals to the owner thread.
-  // After invalidate() (destruction), all methods fail fast without
-  // touching Qt or waiting on any thread.
   std::optional<AudioDeviceFormat>
   query_device_format(const AudioSourceFormat& requested) override {
-    if (invalidated_.load()) {
-      return std::nullopt;
-    }
     const auto outcome = on_owner(
         [&]() -> std::optional<AudioDeviceFormat> {
           const auto device = select_device();
@@ -201,9 +191,6 @@ public:
   }
 
   bool open_device(const AudioDeviceFormat& format) override {
-    if (invalidated_.load()) {
-      return false;
-    }
     const auto outcome = on_owner(
         [&]() -> bool {
           teardown_device();
@@ -227,9 +214,6 @@ public:
   }
 
   bool close_device() override {
-    if (invalidated_.load()) {
-      return true;
-    }
     const auto outcome = on_owner(
         [&]() -> bool {
           pump_.stop();
@@ -243,9 +227,6 @@ public:
   }
 
   bool start_device() override {
-    if (invalidated_.load()) {
-      return false;
-    }
     const auto outcome = on_owner(
         [&]() -> bool {
           if (sink_ == nullptr) {
@@ -270,9 +251,6 @@ public:
   }
 
   bool stop_device() override {
-    if (invalidated_.load()) {
-      return true;
-    }
     const auto outcome = on_owner(
         [&]() -> bool {
           pump_.stop();
@@ -287,9 +265,6 @@ public:
   }
 
   bool reset_device() override {
-    if (invalidated_.load()) {
-      return true;
-    }
     const auto outcome = on_owner(
         [&]() -> bool {
           if (sink_ == nullptr) {
@@ -313,9 +288,6 @@ public:
   }
 
   std::size_t writable_frames() override {
-    if (invalidated_.load()) {
-      return 0;
-    }
     const auto outcome = on_owner(
         [&]() -> std::size_t {
           if (sink_ == nullptr || io_ == nullptr) {
@@ -332,9 +304,6 @@ public:
   }
 
   std::size_t write_frames(const void* frames, std::size_t frame_count) override {
-    if (invalidated_.load()) {
-      return 0;
-    }
     struct Written {
       std::size_t frames{0};
     };
@@ -357,9 +326,6 @@ public:
   }
 
   std::uint64_t processed_frames() override {
-    if (invalidated_.load()) {
-      return baseline_processed_;
-    }
     const auto outcome = on_owner(
         [&]() -> std::uint64_t {
           if (sink_ == nullptr) {
@@ -384,9 +350,6 @@ public:
   // unplayed audio once it returns to Idle after submissions. Never the
   // microsecond counter alone.
   bool is_playback_exhausted() override {
-    if (invalidated_.load()) {
-      return true;
-    }
     const auto outcome = on_owner(
         [&]() -> bool {
           return sink_ == nullptr || sink_->state() == QAudio::IdleState;
@@ -396,9 +359,6 @@ public:
   }
 
   std::optional<std::string> backend_error() override {
-    if (invalidated_.load()) {
-      return std::nullopt;
-    }
     std::lock_guard lock{mutex_};
     if (latched_error_.has_value()) {
       return latched_error_;
@@ -493,7 +453,6 @@ private:
   std::uint64_t baseline_processed_{0};
   mutable std::mutex mutex_;
   std::optional<std::string> latched_error_;
-  std::atomic<bool> invalidated_{false};
 };
 
 QtAudioOutput::QtAudioOutput(Options options)
@@ -501,13 +460,11 @@ QtAudioOutput::QtAudioOutput(Options options)
   impl_->bind_engine();
 }
 
-// Destruction contract: no in-flight lifecycle operation, and (like most
-// Qt-bound objects) prefer the owner thread. Never blocks: invalidates the
-// backend so stray pump events and marshaled calls become safe no-ops,
-// then releases Qt resources without waiting on any thread. Prefer an
-// explicit close() that returned true before destroying.
 QtAudioOutput::~QtAudioOutput() {
   if (impl_ != nullptr) {
+    if (!impl_->on_owner_thread()) {
+      qFatal("QtAudioOutput must be destroyed on its owner thread");
+    }
     impl_->teardown_for_destruction();
   }
 }

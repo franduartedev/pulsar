@@ -14,8 +14,13 @@ namespace pulsar::media::qt_audio {
 // Thread contract: construct on a Qt event-loop thread (the owner). All
 // QAudioSink/QIODevice operations run on the owner internally; AudioOutput
 // calls from any thread are safe (device calls marshal to the owner).
-// Destroy on the owner thread when possible. No timeline, clock, or sync
-// semantics: PCM is consumed sequentially only.
+// Destruction is owner-thread-only and is enforced: callers must first finish
+// lifecycle operations (normally close() == true), stop all producer threads,
+// and ensure no AudioOutput call is in flight or can begin; then destroy this
+// object on the thread that constructed it. This keeps queued callbacks and
+// all Qt objects within one serial event-loop lifetime. AudioOutput calls from
+// other threads remain safe while the object is alive. No timeline, clock, or
+// sync semantics: PCM is consumed sequentially only.
 class QtAudioOutput : public application::AudioOutput {
 public:
   struct Options {

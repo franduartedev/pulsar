@@ -330,6 +330,7 @@ bool AudioOutputEngine::flush() {
 bool AudioOutputEngine::transfer_to_backend() {
   AudioOutputState snapshot = AudioOutputState::Closed;
   std::size_t buffered = 0;
+  std::size_t frame_size = 0;
   std::uint64_t observed_epoch = 0;
   {
     std::lock_guard lock{mutex_};
@@ -345,6 +346,12 @@ bool AudioOutputEngine::transfer_to_backend() {
     }
     snapshot = state_;
     buffered = buffered_frames();
+    frame_size = frame_size_bytes();
+    if (frame_size == 0) {
+      enter_error(AudioOutputError::Code::BackendFailure,
+                  "audio output has no valid device frame size");
+      return false;
+    }
     observed_epoch = epoch_;
   }
 
@@ -374,10 +381,12 @@ bool AudioOutputEngine::transfer_to_backend() {
     const std::size_t confirmed = transfer > available ? available : transfer;
     attempt.assign(queue_.begin() + static_cast<std::ptrdiff_t>(queue_head_),
                    queue_.begin() + static_cast<std::ptrdiff_t>(queue_head_) +
-                       static_cast<std::ptrdiff_t>(confirmed * frame_size_bytes()));
+                       static_cast<std::ptrdiff_t>(confirmed * frame_size));
   }
-  const std::size_t attempted =
-      attempt.size() / (frame_size_bytes() == 0 ? 1 : frame_size_bytes());
+  // Everything needed after releasing the engine lock is local immutable
+  // state. In particular, device_format_ may be replaced by a concurrent
+  // close/open while the backend write is in flight.
+  const std::size_t attempted = attempt.size() / frame_size;
 
   std::size_t written = 0;
   if (attempted > 0) {
@@ -401,7 +410,7 @@ bool AudioOutputEngine::transfer_to_backend() {
       // by that lifecycle operation, as documented.
       return true;
     }
-    queue_head_ += written * frame_size_bytes();
+    queue_head_ += written * frame_size;
     if (queue_head_ == queue_.size()) {
       queue_.clear();
       queue_head_ = 0;
