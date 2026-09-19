@@ -3,7 +3,6 @@
 #include <pulsar/application/audio/audio_converter.hpp>
 #include <pulsar/application/audio/audio_output.hpp>
 
-#include <condition_variable>
 #include <cstddef>
 #include <cstdint>
 #include <mutex>
@@ -26,13 +25,18 @@ public:
   [[nodiscard]] virtual std::optional<AudioDeviceFormat>
   query_device_format(const AudioSourceFormat& requested) = 0;
   [[nodiscard]] virtual bool open_device(const AudioDeviceFormat& format) = 0;
-  virtual void close_device() = 0;
+  // Releases the backend session. Returns whether the backend reached the
+  // closed postcondition; the engine enters Error (not Closed) on failure.
+  [[nodiscard]] virtual bool close_device() = 0;
   // Acquires the device stream for consumption. Returns false on failure.
   [[nodiscard]] virtual bool start_device() = 0;
-  // Halts the device and discards backend-buffered audio.
-  virtual void stop_device() = 0;
-  // Drops backend-buffered audio while remaining started.
-  virtual void reset_device() = 0;
+  // Halts the device and discards backend-buffered audio. Returns whether
+  // the stopped postcondition was established.
+  [[nodiscard]] virtual bool stop_device() = 0;
+  // Drops backend-buffered audio while remaining started. Returns whether
+  // the backend is back in the required runnable state; the engine enters
+  // Error (never Running-with-failed-backend) on failure.
+  [[nodiscard]] virtual bool reset_device() = 0;
   // Complete device frames the backend can take right now (nonblocking).
   [[nodiscard]] virtual std::size_t writable_frames() = 0;
   // Writes up to frame_count complete frames; returns frames taken.
@@ -64,7 +68,7 @@ public:
   AudioOutputEngine& operator=(const AudioOutputEngine&) = delete;
 
   bool open(const AudioSourceFormat& source) override;
-  void close() override;
+  bool close() override;
   [[nodiscard]] AudioEnqueueResult enqueue(const AudioBlock& block) override;
   bool start() override;
   bool request_drain() override;
@@ -92,19 +96,16 @@ private:
 
   // Locking rule: the engine mutex is never held across backend calls
   // (they may block or marshal to another thread). Lifecycle operations
-  // use two phases (validate under lock, backend unlocked, commit under
-  // lock) serialized by transition_ plus an epoch token: transfer_to_backend
-  // skips ticks during transitions and drops commit accounting when the
-  // epoch moved (a racing pump tick may still submit already-popped frames,
-  // bounded by one writable quantum; single-threaded behavior is exact).
+  // claim exclusive transition ownership (fail-fast while claimed),
+  // validate under lock, run backend phases unlocked (rollback included),
+  // then commit under lock. transfer_to_backend skips ticks during
+  // transitions; its backend write uses a stable owned copy, and commit
+  // accounting is dropped when the epoch moved, so a racing pump tick can
+  // neither corrupt the replacement queue nor deadlock the owner thread.
+  // Single-threaded behavior is exact.
   AudioDeviceBackend& backend_;
   AudioEngineLimits limits_;
   mutable std::mutex mutex_;
-  // Lifecycle serialization: at most one lifecycle backend phase runs at
-  // a time. bool ops fail fast while claimed; close() waits (releasing
-  // the engine mutex) since it must leave the session Closed. The cv is
-  // only ever waited on / notified without holding other locks.
-  std::condition_variable transition_cv_;
   AudioOutputState state_{AudioOutputState::Closed};
   AudioSourceFormat source_format_{0, 0};
   std::optional<AudioDeviceFormat> device_format_;

@@ -13,6 +13,7 @@
 #include <QThread>
 #include <QTimer>
 
+#include <atomic>
 #include <cstdint>
 #include <functional>
 #include <mutex>
@@ -105,9 +106,24 @@ public:
     QObject::connect(&pump_, &QTimer::timeout, gate_.get(), [this] { pump_once(); });
   }
 
-  ~Impl() override {
-    // Best effort: engine.close() should have run already via QtAudioOutput.
-    teardown_device();
+  ~Impl() override = default;
+
+  // Non-blocking destruction path: invalidate first so stray pump events
+  // and in-flight marshaled calls become safe no-ops, then release Qt
+  // resources without ever waiting on the owner thread.
+  void teardown_for_destruction() {
+    invalidated_.store(true);
+    if (QThread::currentThread() == owner_) {
+      pump_.stop();
+      teardown_device();
+      return;
+    }
+    QMetaObject::invokeMethod(gate_.get(), [this] { pump_.stop(); }, Qt::QueuedConnection);
+    if (sink_ != nullptr) {
+      sink_->deleteLater();
+      sink_ = nullptr;
+      io_ = nullptr;
+    }
   }
 
   void bind_engine() {
@@ -134,16 +150,8 @@ public:
     return outcome;
   }
 
-  void on_owner_void(const std::function<void()>& action) {
-    if (QThread::currentThread() == owner_) {
-      action();
-      return;
-    }
-    QMetaObject::invokeMethod(gate_.get(), action, Qt::BlockingQueuedConnection);
-  }
-
   void pump_once() {
-    if (engine_ == nullptr) {
+    if (invalidated_.load() || engine_ == nullptr) {
       pump_.stop();
       return;
     }
@@ -162,8 +170,13 @@ public:
   }
 
   // AudioDeviceBackend: every method marshals to the owner thread.
+  // After invalidate() (destruction), all methods fail fast without
+  // touching Qt or waiting on any thread.
   std::optional<AudioDeviceFormat>
   query_device_format(const AudioSourceFormat& requested) override {
+    if (invalidated_.load()) {
+      return std::nullopt;
+    }
     const auto outcome = on_owner(
         [&]() -> std::optional<AudioDeviceFormat> {
           const auto device = select_device();
@@ -188,6 +201,9 @@ public:
   }
 
   bool open_device(const AudioDeviceFormat& format) override {
+    if (invalidated_.load()) {
+      return false;
+    }
     const auto outcome = on_owner(
         [&]() -> bool {
           teardown_device();
@@ -210,16 +226,26 @@ public:
     return outcome.value_or(false);
   }
 
-  void close_device() override {
-    on_owner_void([this] {
-      pump_.stop();
-      teardown_device();
-      baseline_processed_ = 0;
-      clear_error();
-    });
+  bool close_device() override {
+    if (invalidated_.load()) {
+      return true;
+    }
+    const auto outcome = on_owner(
+        [&]() -> bool {
+          pump_.stop();
+          teardown_device();
+          baseline_processed_ = 0;
+          clear_error();
+          return true;
+        },
+        "device close");
+    return outcome.value_or(false);
   }
 
   bool start_device() override {
+    if (invalidated_.load()) {
+      return false;
+    }
     const auto outcome = on_owner(
         [&]() -> bool {
           if (sink_ == nullptr) {
@@ -243,35 +269,53 @@ public:
     return outcome.value_or(false);
   }
 
-  void stop_device() override {
-    on_owner_void([this] {
-      pump_.stop();
-      if (sink_ != nullptr) {
-        sink_->stop();
-      }
-      io_ = nullptr;
-    });
+  bool stop_device() override {
+    if (invalidated_.load()) {
+      return true;
+    }
+    const auto outcome = on_owner(
+        [&]() -> bool {
+          pump_.stop();
+          if (sink_ != nullptr) {
+            sink_->stop();
+          }
+          io_ = nullptr;
+          return true;
+        },
+        "device stop");
+    return outcome.value_or(false);
   }
 
-  void reset_device() override {
-    on_owner_void([this] {
-      if (sink_ == nullptr) {
-        return;
-      }
-      // Verified against the real backend: reset() halts to Stopped and
-      // zeroes counters, so the stream is re-acquired to keep playing.
-      // The re-acquired stream is a new processed-progress epoch.
-      sink_->reset();
-      baseline_processed_ = 0;
-      io_ = sink_->start();
-      if (io_ == nullptr) {
-        set_error("audio device refused to restart after flush: " +
-                  sink_error_text(sink_->error()));
-      }
-    });
+  bool reset_device() override {
+    if (invalidated_.load()) {
+      return true;
+    }
+    const auto outcome = on_owner(
+        [&]() -> bool {
+          if (sink_ == nullptr) {
+            return true;
+          }
+          // Verified against the real backend: reset() halts to Stopped and
+          // zeroes counters, so the stream is re-acquired to keep playing.
+          // The re-acquired stream is a new processed-progress epoch.
+          sink_->reset();
+          baseline_processed_ = 0;
+          io_ = sink_->start();
+          if (io_ == nullptr) {
+            set_error("audio device refused to restart after flush: " +
+                      sink_error_text(sink_->error()));
+            return false;
+          }
+          return true;
+        },
+        "device reset");
+    return outcome.value_or(false);
   }
 
   std::size_t writable_frames() override {
+    if (invalidated_.load()) {
+      return 0;
+    }
     const auto outcome = on_owner(
         [&]() -> std::size_t {
           if (sink_ == nullptr || io_ == nullptr) {
@@ -288,6 +332,9 @@ public:
   }
 
   std::size_t write_frames(const void* frames, std::size_t frame_count) override {
+    if (invalidated_.load()) {
+      return 0;
+    }
     struct Written {
       std::size_t frames{0};
     };
@@ -310,6 +357,9 @@ public:
   }
 
   std::uint64_t processed_frames() override {
+    if (invalidated_.load()) {
+      return baseline_processed_;
+    }
     const auto outcome = on_owner(
         [&]() -> std::uint64_t {
           if (sink_ == nullptr) {
@@ -334,6 +384,9 @@ public:
   // unplayed audio once it returns to Idle after submissions. Never the
   // microsecond counter alone.
   bool is_playback_exhausted() override {
+    if (invalidated_.load()) {
+      return true;
+    }
     const auto outcome = on_owner(
         [&]() -> bool {
           return sink_ == nullptr || sink_->state() == QAudio::IdleState;
@@ -343,6 +396,9 @@ public:
   }
 
   std::optional<std::string> backend_error() override {
+    if (invalidated_.load()) {
+      return std::nullopt;
+    }
     std::lock_guard lock{mutex_};
     if (latched_error_.has_value()) {
       return latched_error_;
@@ -437,6 +493,7 @@ private:
   std::uint64_t baseline_processed_{0};
   mutable std::mutex mutex_;
   std::optional<std::string> latched_error_;
+  std::atomic<bool> invalidated_{false};
 };
 
 QtAudioOutput::QtAudioOutput(Options options)
@@ -444,9 +501,14 @@ QtAudioOutput::QtAudioOutput(Options options)
   impl_->bind_engine();
 }
 
+// Destruction contract: no in-flight lifecycle operation, and (like most
+// Qt-bound objects) prefer the owner thread. Never blocks: invalidates the
+// backend so stray pump events and marshaled calls become safe no-ops,
+// then releases Qt resources without waiting on any thread. Prefer an
+// explicit close() that returned true before destroying.
 QtAudioOutput::~QtAudioOutput() {
-  if (impl_ != nullptr && impl_->engine_ready()) {
-    impl_->engine().close();
+  if (impl_ != nullptr) {
+    impl_->teardown_for_destruction();
   }
 }
 
@@ -454,8 +516,8 @@ bool QtAudioOutput::open(const AudioSourceFormat& source) {
   return impl_->engine().open(source);
 }
 
-void QtAudioOutput::close() {
-  impl_->engine().close();
+bool QtAudioOutput::close() {
+  return impl_->engine().close();
 }
 
 AudioEnqueueResult QtAudioOutput::enqueue(const application::AudioBlock& block) {

@@ -105,6 +105,6 @@ int main(int argc, char** argv) {
                (unsigned long long)metrics.device_frames_processed,
                (unsigned long long)metrics.buffered_device_frames,
                (unsigned long long)metrics.underrun_count);
-  output.close();
+  (void)output.close();
   return 0;
 }

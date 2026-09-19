@@ -85,12 +85,24 @@ class AudioOutput {
 public:
   virtual ~AudioOutput() = default;
 
+  // Lifecycle operations are exclusive and fail-fast: if another
+  // lifecycle operation is already running its backend phase, the second
+  // call returns false immediately (Busy) instead of waiting or
+  // overlapping backend mutations. No lifecycle call ever waits for
+  // another lifecycle call, so owner-thread callers cannot deadlock.
+  //
   // Negotiates the device format for source and enters Opened. Valid only
   // from Closed. Returns false and latches error() on failure.
   virtual bool open(const AudioSourceFormat& source) = 0;
   // Stops/resets the device, discards buffers, clears the latched error,
-  // returns to Closed. Idempotent.
-  virtual void close() = 0;
+  // returns to Closed. Returns false (Busy) without changing state while
+  // another lifecycle operation is active; call again once it finishes.
+  // Idempotent once Closed (returns true).
+  //
+  // Destruction contract: destroy only with no in-flight lifecycle
+  // operation (prefer an explicit close() that returned true, or a never
+  // opened instance). Destructors never block waiting for transitions.
+  virtual bool close() = 0;
   // Copies the block into the device-format queue atomically: accepted
   // fully or rejected completely, never partial, never drops accepted
   // frames. Nonblocking; the caller retains its block.

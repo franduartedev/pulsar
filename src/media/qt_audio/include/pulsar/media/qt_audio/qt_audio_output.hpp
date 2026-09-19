@@ -31,7 +31,7 @@ public:
   QtAudioOutput& operator=(const QtAudioOutput&) = delete;
 
   bool open(const application::AudioSourceFormat& source) override;
-  void close() override;
+  bool close() override;
   [[nodiscard]] application::AudioEnqueueResult
   enqueue(const application::AudioBlock& block) override;
   bool start() override;

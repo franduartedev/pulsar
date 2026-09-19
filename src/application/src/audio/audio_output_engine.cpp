@@ -28,11 +28,6 @@ namespace {
 AudioOutputEngine::AudioOutputEngine(AudioDeviceBackend& backend, AudioEngineLimits limits)
     : backend_{backend}, limits_{limits} {}
 
-// Lifecycle operations claim exclusive transition ownership under the
-// engine lock, release it across the backend phase, and commit under it
-// again. A second lifecycle call fails fast while one is active; close()
-// (void, must leave the session Closed) waits lock-free for the active
-// transition instead. transfer_to_backend() skips ticks during transitions.
 bool AudioOutputEngine::open(const AudioSourceFormat& source) {
   {
     std::lock_guard lock{mutex_};
@@ -52,17 +47,22 @@ bool AudioOutputEngine::open(const AudioSourceFormat& source) {
   const bool backend_opened = offered.has_value() && valid_device(*offered) &&
                               backend_.open_device(*offered);
   const auto backend_message = backend_.backend_error();
-  bool backend_cleanup = false;
+  // Rollback stays inside transition ownership: the cleanup call below
+  // runs before the ownership release at the end, so no second lifecycle
+  // operation can enter the backend concurrently.
   bool opened = false;
   {
     std::lock_guard lock{mutex_};
-    transition_ = false;
     if (state_ != AudioOutputState::Closed) {
-      backend_cleanup = backend_opened;
+      // Lost the race (e.g. close ran concurrently): release the backend
+      // while still owning the transition.
+      if (backend_opened) {
+        // Defer: must run outside the engine lock; ownership still held.
+        opened = false;
+      }
     } else if (!offered.has_value() || !valid_device(*offered)) {
       enter_error(AudioOutputError::Code::NoDevice, "no usable audio output device");
     } else if (!channels_negotiable(source.channel_count, offered->channel_count)) {
-      backend_cleanup = true;
       enter_error(AudioOutputError::Code::UnsupportedConversion,
                   "audio channel mapping is outside A2 scope");
     } else if (!backend_opened) {
@@ -82,39 +82,53 @@ bool AudioOutputEngine::open(const AudioSourceFormat& source) {
       state_ = AudioOutputState::Opened;
       opened = true;
     }
+    // NOTE: transition_ stays claimed across the cleanup call below.
   }
-  transition_cv_.notify_all();
-  if (backend_cleanup) {
+  if (!opened && backend_opened) {
     backend_.close_device();
+  }
+  {
+    std::lock_guard lock{mutex_};
+    transition_ = false;
   }
   return opened;
 }
 
-void AudioOutputEngine::close() {
+bool AudioOutputEngine::close() {
   {
-    std::unique_lock lock{mutex_};
-    // close() must leave the session Closed with the backend released, so
-    // it waits (holding no lock while waiting) for any active transition
-    // instead of failing or splitting engine/backend state.
-    transition_cv_.wait(lock, [this] { return !transition_; });
+    std::lock_guard lock{mutex_};
+    if (transition_) {
+      return false;
+    }
     transition_ = true;
   }
-  backend_.close_device();
+  const bool backend_closed = backend_.close_device();
+  const auto backend_message = backend_.backend_error();
+  bool closed = false;
+  {
+    std::lock_guard lock{mutex_};
+    if (backend_closed) {
+      queue_.clear();
+      queue_head_ = 0;
+      device_format_.reset();
+      converter_.reset();
+      latched_error_.reset();
+      metrics_ = AudioOutputMetrics{};
+      drain_requested_ = false;
+      in_underrun_ = false;
+      ++epoch_;
+      state_ = AudioOutputState::Closed;
+      closed = true;
+    } else {
+      enter_error(AudioOutputError::Code::BackendFailure,
+                  backend_message.value_or("audio backend refused to close"));
+    }
+  }
   {
     std::lock_guard lock{mutex_};
     transition_ = false;
-    queue_.clear();
-    queue_head_ = 0;
-    device_format_.reset();
-    converter_.reset();
-    latched_error_.reset();
-    metrics_ = AudioOutputMetrics{};
-    drain_requested_ = false;
-    in_underrun_ = false;
-    ++epoch_;
-    state_ = AudioOutputState::Closed;
   }
-  transition_cv_.notify_all();
+  return closed;
 }
 
 AudioEnqueueResult AudioOutputEngine::enqueue(const AudioBlock& block) {
@@ -175,7 +189,6 @@ bool AudioOutputEngine::start() {
   bool started = false;
   {
     std::lock_guard lock{mutex_};
-    transition_ = false;
     if (state_ != AudioOutputState::Opened) {
       backend_cleanup = backend_started;
     } else if (!backend_started) {
@@ -188,10 +201,14 @@ bool AudioOutputEngine::start() {
       state_ = AudioOutputState::Running;
       started = true;
     }
+    // Ownership still held across the cleanup call below.
   }
-  transition_cv_.notify_all();
   if (backend_cleanup) {
     backend_.stop_device();
+  }
+  {
+    std::lock_guard lock{mutex_};
+    transition_ = false;
   }
   return started;
 }
@@ -227,12 +244,21 @@ bool AudioOutputEngine::stop() {
     }
     transition_ = true;
   }
-  backend_.stop_device();
+  const bool backend_stopped = backend_.stop_device();
+  const auto backend_message = backend_.backend_error();
   bool stopped = false;
   {
     std::lock_guard lock{mutex_};
-    transition_ = false;
-    if (state_ != AudioOutputState::Closed && state_ != AudioOutputState::Error) {
+    if (state_ == AudioOutputState::Closed || state_ == AudioOutputState::Error) {
+      // Ownership still held; nothing to commit into a dead session.
+    } else if (!backend_stopped) {
+      queue_.clear();
+      queue_head_ = 0;
+      reset_session_counters();
+      enter_error(AudioOutputError::Code::BackendFailure,
+                  backend_message.value_or("audio backend refused to stop"));
+      ++epoch_;
+    } else {
       queue_.clear();
       queue_head_ = 0;
       reset_session_counters();
@@ -245,8 +271,12 @@ bool AudioOutputEngine::stop() {
       state_ = AudioOutputState::Opened;
       stopped = true;
     }
+    // Ownership still held across nothing further; released below.
   }
-  transition_cv_.notify_all();
+  {
+    std::lock_guard lock{mutex_};
+    transition_ = false;
+  }
   return stopped;
 }
 
@@ -262,13 +292,22 @@ bool AudioOutputEngine::flush() {
     }
     transition_ = true;
   }
-  backend_.reset_device();
+  const bool backend_reset = backend_.reset_device();
+  const auto backend_message = backend_.backend_error();
   bool flushed = false;
   {
     std::lock_guard lock{mutex_};
-    transition_ = false;
-    if (state_ == AudioOutputState::Opened || state_ == AudioOutputState::Running ||
-        state_ == AudioOutputState::Draining) {
+    if (state_ != AudioOutputState::Opened && state_ != AudioOutputState::Running &&
+        state_ != AudioOutputState::Draining) {
+      // Ownership still held; nothing to commit into a dead session.
+    } else if (!backend_reset) {
+      queue_.clear();
+      queue_head_ = 0;
+      reset_session_counters();
+      enter_error(AudioOutputError::Code::BackendFailure,
+                  backend_message.value_or("audio backend refused to reset"));
+      ++epoch_;
+    } else {
       queue_.clear();
       queue_head_ = 0;
       reset_session_counters();
@@ -279,8 +318,12 @@ bool AudioOutputEngine::flush() {
       ++epoch_;
       flushed = true;
     }
+    // Ownership still held across nothing further; released below.
   }
-  transition_cv_.notify_all();
+  {
+    std::lock_guard lock{mutex_};
+    transition_ = false;
+  }
   return flushed;
 }
 
@@ -315,30 +358,30 @@ bool AudioOutputEngine::transfer_to_backend() {
   }
 
   const std::size_t writable = backend_.writable_frames();
-  std::size_t transfer = buffered > writable ? writable : buffered;
+  const std::size_t transfer = buffered > writable ? writable : buffered;
 
-  // The queue stays authoritative until the backend confirms acceptance:
-  // pass a non-owning view of the contiguous pending region, then advance
-  // the head by exactly the confirmed count. Zero writes change nothing;
-  // short writes keep the untouched suffix in original order.
-  const void* pending_bytes = nullptr;
+  // Stable owned storage: copy the pending region while holding the lock,
+  // then write from the copy with no lock held. The backend never sees
+  // memory whose lifetime depends on queue_ reallocation, enqueue, flush,
+  // stop, or close. The copy is bounded by one writable quantum.
+  std::vector<std::uint8_t> attempt;
   {
     std::lock_guard lock{mutex_};
     if (transition_ || epoch_ != observed_epoch || state_ != snapshot) {
       return true;
     }
-    if (transfer > buffered_frames()) {
-      transfer = buffered_frames();
-    }
-    pending_bytes = queue_.data() + queue_head_;
+    const std::size_t available = buffered_frames();
+    const std::size_t confirmed = transfer > available ? available : transfer;
+    attempt.assign(queue_.begin() + static_cast<std::ptrdiff_t>(queue_head_),
+                   queue_.begin() + static_cast<std::ptrdiff_t>(queue_head_) +
+                       static_cast<std::ptrdiff_t>(confirmed * frame_size_bytes()));
   }
+  const std::size_t attempted =
+      attempt.size() / (frame_size_bytes() == 0 ? 1 : frame_size_bytes());
 
   std::size_t written = 0;
-  if (transfer > 0) {
-    written = backend_.write_frames(pending_bytes, transfer);
-    if (written > transfer) {
-      written = transfer;
-    }
+  if (attempted > 0) {
+    written = backend_.write_frames(attempt.data(), attempted);
   }
   const std::uint64_t backend_processed = backend_.processed_frames();
   const bool exhausted = backend_.is_playback_exhausted();
@@ -346,7 +389,16 @@ bool AudioOutputEngine::transfer_to_backend() {
   bool just_completed = false;
   {
     std::lock_guard lock{mutex_};
+    if (written > attempted) {
+      // Backend contract violation: honest accounting is impossible.
+      enter_error(AudioOutputError::Code::BackendFailure,
+                  "audio backend reported an impossible write count");
+      return false;
+    }
     if (transition_ || epoch_ != observed_epoch || state_ != snapshot) {
+      // Session moved on (flush/stop/close): never consume bytes from the
+      // replacement queue. Backend-accepted old-session data is discarded
+      // by that lifecycle operation, as documented.
       return true;
     }
     queue_head_ += written * frame_size_bytes();

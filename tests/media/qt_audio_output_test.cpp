@@ -17,6 +17,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <future>
 #include <string>
 #include <thread>
 #include <vector>
@@ -62,6 +63,19 @@ bool have_device() {
   return !QMediaDevices::audioOutputs().empty();
 }
 
+// A listed device is not a usable backend (e.g. dead PulseAudio server):
+// prove open/close works before running device scenarios, otherwise SKIP.
+bool usable_backend() {
+  if (!have_device()) {
+    return false;
+  }
+  QtAudioOutput probe{QtAudioOutput::Options{{4096}, {}}};
+  if (!probe.open({44100, 1})) {
+    return false;
+  }
+  return probe.close();
+}
+
 // Always runs: unknown device id fails deterministically into Error.
 void bogus_device_open_fails() {
   QtAudioOutput output{QtAudioOutput::Options{{4096}, "no-such-pulsar-device"}};
@@ -70,7 +84,7 @@ void bogus_device_open_fails() {
   assert(output.state() == AudioOutputState::Error);
   assert(output.error().has_value());
   assert(output.error()->code == application::AudioOutputError::Code::NoDevice);
-  output.close();
+  assert(output.close());
   assert(output.state() == AudioOutputState::Closed);
   assert(!output.error().has_value());
 }
@@ -110,7 +124,7 @@ void drain_lifecycle_with_worker_producer() {
   assert(metrics.device_frames_processed <= expected_device_frames);
   assert(metrics.buffered_device_frames == 0);
   assert(metrics.underrun_count == 0);
-  output.close();
+  assert(output.close());
   assert(output.state() == AudioOutputState::Closed);
 }
 
@@ -133,7 +147,7 @@ void flush_resets_processed_epoch() {
   assert(poll_until([&] { return output.metrics().device_frames_processed > 0; }, 10000));
   assert(output.request_drain());
   assert(poll_until([&] { return output.state() == AudioOutputState::Completed; }, 20000));
-  output.close();
+  assert(output.close());
 }
 
 // B5/B6-Qt: full lifecycle driven from a foreign thread while the owner
@@ -165,7 +179,7 @@ void foreign_thread_lifecycle_no_deadlock() {
       worker_error = "flush";
       return;
     }
-    output.close();
+    assert(output.close());
     worker_done = true;
   });
   const bool finished =
@@ -199,10 +213,10 @@ void start_empty_stop_flush_reopen() {
   assert(output.metrics().buffered_device_frames == 0);
   assert(output.request_drain());
   assert(poll_until([&] { return output.state() == AudioOutputState::Completed; }, 20000));
-  output.close();
+  assert(output.close());
   assert(output.open({44100, 1}));
   assert(output.state() == AudioOutputState::Opened);
-  output.close();
+  assert(output.close());
 }
 
 void starvation_surfaces_underrun() {
@@ -212,7 +226,7 @@ void starvation_surfaces_underrun() {
   assert(output.start());
   assert(poll_until([&] { return output.metrics().underrun_count >= 1; }, 10000));
   assert(output.state() == AudioOutputState::Running);
-  output.close();
+  assert(output.close());
 }
 
 void multichannel_policy_without_guessing() {
@@ -220,12 +234,48 @@ void multichannel_policy_without_guessing() {
   if (output.open({44100, 6})) {
     // Exact passthrough only: the device took 6 channels as-is, no downmix.
     assert(output.device_format()->channel_count == 6);
-    output.close();
+    assert(output.close());
     return;
   }
   assert(output.state() == AudioOutputState::Error);
   assert(output.error()->code == application::AudioOutputError::Code::UnsupportedConversion);
-  output.close();
+  assert(output.close());
+}
+
+void owner_close_returns_during_foreign_open() {
+  QtAudioOutput output{QtAudioOutput::Options{{65536}, {}}};
+  bool open_result = false;
+  std::thread worker([&] { open_result = output.open({44100, 1}); });
+  // Close from this thread must return within bounds while the foreign
+  // open is in flight (true before the claim, false during it): it must
+  // never wait on the other operation. The owner keeps pumping so the
+  // worker's marshaled backend calls can proceed.
+  auto closing = std::async(std::launch::async, [&] { return output.close(); });
+  bool close_returned = false;
+  bool close_value = false;
+  QElapsedTimer timer;
+  timer.start();
+  while (!close_returned && timer.elapsed() < 5000) {
+    if (closing.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready) {
+      close_value = closing.get();
+      close_returned = true;
+    }
+    QCoreApplication::processEvents();
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+  }
+  assert(close_returned);
+  worker.join();
+  if (close_value) {
+    // Closed before the worker claimed: it may have opened afterwards.
+    if (output.state() == AudioOutputState::Opened) {
+      assert(output.close());
+    }
+  } else {
+    assert(open_result);
+    assert(output.state() == AudioOutputState::Opened);
+    assert(output.close());
+  }
+  assert(output.state() == AudioOutputState::Closed);
 }
 
 }  // namespace
@@ -233,7 +283,7 @@ void multichannel_policy_without_guessing() {
 int main(int argc, char** argv) {
   QCoreApplication app{argc, argv};
   bogus_device_open_fails();
-  if (!have_device()) {
+  if (!usable_backend()) {
     return 0;
   }
   drain_lifecycle_with_worker_producer();
@@ -242,4 +292,5 @@ int main(int argc, char** argv) {
   multichannel_policy_without_guessing();
   flush_resets_processed_epoch();
   foreign_thread_lifecycle_no_deadlock();
+  owner_close_returns_during_foreign_open();
 }
