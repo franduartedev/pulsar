@@ -9,7 +9,11 @@
 #include <filesystem>
 #include <functional>
 #include <memory>
+#include <chrono>
+#include <condition_variable>
+#include <mutex>
 #include <optional>
+#include <thread>
 #include <string>
 #include <vector>
 
@@ -114,6 +118,10 @@ struct WaveformSlice {
   int channel_count{0};
   std::uint64_t first_bucket{0};
   std::uint64_t bucket_count{0};
+  // Bucket i covers the exact half-open source sample interval
+  // [(first_bucket+i)*bucket_sample_span, (first_bucket+i+1)*bucket_sample_span).
+  // The final bucket may be shorter; callers must intersect this metadata with
+  // the requested source window rather than treating a bucket as a clipped pixel.
   std::vector<WaveformBucket> buckets; // bucket-major: [bucket][channel]
   WaveformCompleteness completeness{WaveformCompleteness::Missing};
 };
@@ -143,5 +151,52 @@ private:
 
 [[nodiscard]] std::filesystem::path waveform_cache_path(const std::filesystem::path& directory,
                                                          const WaveformCacheKey& key);
+
+struct WaveformProgress {
+  WaveformCacheStatus status{WaveformCacheStatus::Missing};
+  std::uint64_t generated_frames{0};
+  std::optional<std::uint64_t> total_frames;
+  std::uint32_t available_levels{0};
+  std::string error;
+};
+
+class WaveformCacheRequest {
+public:
+  ~WaveformCacheRequest();
+  WaveformCacheRequest(const WaveformCacheRequest&) = delete;
+  WaveformCacheRequest& operator=(const WaveformCacheRequest&) = delete;
+
+  [[nodiscard]] WaveformProgress progress() const;
+  [[nodiscard]] std::optional<WaveformSlice> query_partial(const WaveformQuery& query) const;
+  [[nodiscard]] bool wait_for(std::chrono::milliseconds timeout) const;
+  void cancel() const noexcept;
+
+private:
+  class Impl;
+  explicit WaveformCacheRequest(std::shared_ptr<Impl> impl);
+  std::shared_ptr<Impl> impl_;
+  friend class WaveformCacheManager;
+};
+
+class WaveformCacheManager {
+public:
+  using SourceFactory = std::function<std::unique_ptr<WaveformSource>()>;
+
+  explicit WaveformCacheManager(std::size_t maximum_active_jobs = 1);
+  ~WaveformCacheManager();
+  WaveformCacheManager(const WaveformCacheManager&) = delete;
+  WaveformCacheManager& operator=(const WaveformCacheManager&) = delete;
+
+  [[nodiscard]] std::shared_ptr<WaveformCacheRequest> request(
+      std::filesystem::path cache_directory, WaveformCacheKey key, SourceFactory source_factory,
+      std::optional<std::uint64_t> total_frames = std::nullopt);
+  void shutdown() noexcept;
+  [[nodiscard]] std::size_t maximum_active_jobs() const noexcept { return maximum_active_jobs_; }
+
+private:
+  class Impl;
+  const std::size_t maximum_active_jobs_;
+  std::unique_ptr<Impl> impl_;
+};
 
 } // namespace pulsar::application

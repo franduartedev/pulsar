@@ -1,11 +1,15 @@
 #include <pulsar/application/waveform/waveform_cache.hpp>
+#include <pulsar/application/timeline/timeline_clip_resolver.hpp>
 
 #include <cassert>
+#include <chrono>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <limits>
+#include <memory>
+#include <atomic>
 #include <optional>
 #include <vector>
 
@@ -58,6 +62,19 @@ void test_precision_and_query() {
   assert(positive && negative);
   const auto fine = reader->query({domain::MediaTime{0, domain::Rational{1, 48000}}, domain::MediaTime{1, domain::Rational{1, 48000}}, 100000, 1.0});
   assert(fine.level == 0);
+  for (const double density : {0.5, 1.0, 2.0}) {
+    const auto density_slice = reader->query({domain::MediaTime{0, domain::Rational{1, 48000}},
+                                               domain::MediaTime{1280, domain::Rational{1, 48000}}, 4, density});
+    bool impulse_interval_preserved = false;
+    for (std::size_t index = 0; index < density_slice.buckets.size(); index += 2) {
+      if (density_slice.buckets[index].maximum == 32767) {
+        const auto bucket = density_slice.first_bucket + index / 2;
+        impulse_interval_preserved = bucket * density_slice.bucket_sample_span <= 17 &&
+                                     17 < (bucket + 1) * density_slice.bucket_sample_span;
+      }
+    }
+    assert(impulse_interval_preserved);
+  }
   auto wrong = WaveformCacheReader::open(path, WaveformCacheKey{"other", 2, 48000, 2, domain::Rational{1, 48000}, domain::MediaTime::zero()});
   assert(!wrong.has_value());
   std::filesystem::remove_all(directory);
@@ -91,6 +108,12 @@ void test_corruption_origin_and_partial() {
   const auto before = reader->query({domain::MediaTime{0, domain::Rational{1, 1}}, domain::MediaTime{2, domain::Rational{1, 1}}, 10, 1.0});
   assert(before.buckets.empty());
   const auto corrupted = directory / "corrupt.pwfc";
+  std::filesystem::copy_file(directory / "origin.pwfc", corrupted, std::filesystem::copy_options::overwrite_existing);
+  {
+    std::fstream mutate(corrupted, std::ios::binary | std::ios::in | std::ios::out);
+    mutate.seekg(-1, std::ios::end); const int value = mutate.get(); mutate.seekp(-1, std::ios::end); mutate.put(static_cast<char>(value ^ 0x01));
+  }
+  assert(!WaveformCacheReader::open(corrupted, origin_key).has_value());
   std::filesystem::copy_file(directory / "origin.pwfc", corrupted, std::filesystem::copy_options::overwrite_existing);
   std::filesystem::resize_file(corrupted, 7);
   assert(!WaveformCacheReader::open(corrupted, origin_key).has_value());
@@ -135,6 +158,60 @@ void test_source_identity_changes() {
   std::filesystem::remove_all(directory);
 }
 
+void test_manager_coalesces_and_reuses() {
+  const auto directory = std::filesystem::temp_directory_path() / "pulsar-a7-manager";
+  std::filesystem::create_directories(directory);
+  const auto cache_key = WaveformCacheKey{"manager-source", 0, 1000, 1, domain::Rational{1, 1000}, domain::MediaTime::zero()};
+  std::atomic<int> factory_calls{0};
+  application::WaveformCacheManager manager{1};
+  const auto factory = [&] {
+    ++factory_calls;
+    return std::make_unique<SyntheticSource>(1000, 1, std::vector<float>(1000, 0.5f), 100);
+  };
+  auto first = manager.request(directory, cache_key, factory, 1000);
+  auto second = manager.request(directory, cache_key, factory, 1000);
+  assert(first->wait_for(std::chrono::seconds{5})); assert(second->wait_for(std::chrono::seconds{5}));
+  assert(first->progress().status == application::WaveformCacheStatus::Ready);
+  assert(second->progress().status == application::WaveformCacheStatus::Ready);
+  assert(factory_calls.load() == 1);
+  const auto slice = first->query_partial({domain::MediaTime::zero(), domain::MediaTime{1, domain::Rational{1, 1}}, 32, 1.0});
+  assert(slice.has_value() && !slice->buckets.empty());
+  manager.shutdown();
+  application::WaveformCacheManager reuse_manager{1};
+  auto reused = reuse_manager.request(directory, cache_key, [&] { ++factory_calls; return std::unique_ptr<application::WaveformSource>{}; });
+  assert(reused->wait_for(std::chrono::seconds{1})); assert(reused->progress().status == application::WaveformCacheStatus::Ready); assert(factory_calls.load() == 1);
+  reuse_manager.shutdown();
+  std::filesystem::remove_all(directory);
+}
+
+void test_a5_source_windows_reuse_asset_cache() {
+  using domain::MediaId; using domain::MediaTime; using domain::Rational; using domain::TimeRange;
+  const auto t = [](std::int64_t seconds) { return MediaTime{seconds, Rational{1, 1}}; };
+  const auto make_clip = [&](MediaTime timeline_start, MediaTime source_start, MediaTime duration) {
+    application::ResolvedClip clip{domain::ClipId{1}, MediaId{9}, timeline_start,
+      TimeRange{timeline_start, timeline_start + duration}, MediaTime::zero(),
+      TimeRange{source_start, source_start + duration}, MediaTime::zero(), 0.0, false, 0, {}, std::nullopt};
+    return clip;
+  };
+  const auto cache_key = WaveformCacheKey{"asset-file|size=1|mtime=1", 2, 48000, 2, Rational{1, 48000}, t(0)};
+  const auto original = make_clip(t(10), t(100), t(10));
+  const auto split = t(104);
+  const auto left = make_clip(t(10), t(100), t(4));
+  const auto right = make_clip(split, split, t(6));
+  assert(application::clip_source_position(left, t(13)) == t(103));
+  assert(application::clip_source_position(right, t(104)) == t(104));
+  assert(left.source_range.end() == right.source_range.start());
+  const auto left_trim = make_clip(t(10), t(103), t(7));
+  assert(application::clip_source_position(left_trim, t(10)) == t(103));
+  const auto right_trim = make_clip(t(10), t(100), t(5));
+  assert(right_trim.source_range.start() == original.source_range.start());
+  assert(right_trim.source_range.end() == t(105));
+  const auto moved = make_clip(t(30), t(100), t(10));
+  assert(moved.source_range.start() == original.source_range.start());
+  assert(moved.source_range.end() == original.source_range.end());
+  assert(cache_key == cache_key);
+}
+
 } // namespace
 
 int main() {
@@ -143,5 +220,7 @@ int main() {
   test_corruption_origin_and_partial();
   test_cancellation_and_transaction();
   test_source_identity_changes();
+  test_manager_coalesces_and_reuses();
+  test_a5_source_windows_reuse_asset_cache();
   std::cout << "waveform cache tests passed\n";
 }

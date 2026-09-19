@@ -86,6 +86,32 @@ std::int16_t quantize(float value) {
 
 struct LevelIndex { std::uint64_t offset{0}; std::uint64_t count{0}; };
 
+std::uint32_t crc32_update(std::uint32_t crc, const char* data, std::size_t size) {
+  for (std::size_t i = 0; i < size; ++i) {
+    crc ^= static_cast<std::uint8_t>(data[i]);
+    for (int bit = 0; bit < 8; ++bit) crc = (crc >> 1U) ^ (0xedb88320U & static_cast<std::uint32_t>(-(crc & 1U)));
+  }
+  return crc;
+}
+
+std::uint32_t crc32_file(const std::vector<std::filesystem::path>& paths) {
+  std::array<char, 64 * 1024> buffer{};
+  std::uint32_t crc = 0xffffffffU;
+  for (const auto& path : paths) {
+    std::ifstream input(path, std::ios::binary);
+    if (!input) throw std::runtime_error{"cannot checksum waveform level"};
+    while (input) { input.read(buffer.data(), static_cast<std::streamsize>(buffer.size())); const auto count = input.gcount(); if (count > 0) crc = crc32_update(crc, buffer.data(), static_cast<std::size_t>(count)); }
+  }
+  return crc ^ 0xffffffffU;
+}
+
+std::uint32_t crc32_stream(std::istream& input, std::uint64_t bytes) {
+  std::array<char, 64 * 1024> buffer{};
+  std::uint32_t crc = 0xffffffffU;
+  while (bytes != 0) { const auto wanted = std::min<std::uint64_t>(bytes, buffer.size()); input.read(buffer.data(), static_cast<std::streamsize>(wanted)); if (input.gcount() != static_cast<std::streamsize>(wanted)) throw std::runtime_error{"truncated waveform payload"}; crc = crc32_update(crc, buffer.data(), static_cast<std::size_t>(wanted)); bytes -= wanted; }
+  return crc ^ 0xffffffffU;
+}
+
 } // namespace
 
 std::string WaveformCacheKey::stable_text() const {
@@ -186,6 +212,7 @@ public:
     }
     report.level_count = static_cast<std::uint32_t>(indexes.size());
     report.level_zero_buckets = indexes.front().count;
+    const auto payload_checksum = crc32_file(level_paths_);
     std::ofstream out(publishing_path_, std::ios::binary | std::ios::trunc);
     if (!out) throw std::runtime_error{"cannot publish waveform cache"};
     out.write(kMagic.data(), static_cast<std::streamsize>(kMagic.size())); write_u32(out, kSchema); write_u32(out, kGenerator);
@@ -194,6 +221,7 @@ public:
     write_i64(out, key_.stream_origin ? key_.stream_origin->value() : 0); write_i64(out, key_.stream_origin ? key_.stream_origin->time_base().numerator() : 0); write_i64(out, key_.stream_origin ? key_.stream_origin->time_base().denominator() : 1);
     write_u32(out, options_.level_zero_samples); write_u32(out, options_.reduction_factor); write_u32(out, static_cast<std::uint32_t>(indexes.size())); write_u32(out, 1);
     write_u64(out, report.source_frames);
+    write_u32(out, payload_checksum);
     const auto index_start = static_cast<std::uint64_t>(out.tellp());
     for (const auto& index : indexes) { write_u64(out, 0); write_u64(out, index.count); }
     const std::uint64_t payload_start = static_cast<std::uint64_t>(out.tellp());
@@ -215,6 +243,7 @@ private:
       pending_max_.emplace_back(key_.channel_count, std::numeric_limits<std::int16_t>::min());
       pending_count_.push_back(0);
     }
+    report.level_count = std::max(report.level_count, level + 1);
     for (int channel = 0; channel < key_.channel_count; ++channel) { write_i16(level_out_[level], min[channel]); write_i16(level_out_[level], max[channel]); }
     reduce_bucket(level, min, max, report);
     if (level == 0) { frames_in_bucket_ = 0; std::fill(minimum_.begin(), minimum_.end(), std::numeric_limits<std::int16_t>::max()); std::fill(maximum_.begin(), maximum_.end(), std::numeric_limits<std::int16_t>::min()); }
@@ -264,7 +293,7 @@ std::optional<WaveformCacheReader> WaveformCacheReader::open(const std::filesyst
     auto impl = std::make_unique<Impl>(); impl->path = path; impl->key = expected_key; impl->sample_rate = static_cast<int>(read_u32(in)); impl->channels = static_cast<int>(read_u32(in)); impl->time_base = domain::Rational{read_i64(in), read_i64(in)};
     const auto origin_value = read_i64(in); const auto origin_num = read_i64(in); const auto origin_den = read_i64(in); if (origin_num != 0) impl->origin = domain::MediaTime{origin_value, domain::Rational{origin_num, origin_den}};
     if (impl->origin != expected_key.stream_origin) return std::nullopt;
-    impl->l0 = read_u32(in); impl->factor = read_u32(in); impl->levels = read_u32(in); const auto complete = read_u32(in); impl->frames = read_u64(in); if (complete != 1 || impl->l0 == 0 || impl->factor != 2 || impl->levels == 0 || impl->channels <= 0) return std::nullopt;
+    impl->l0 = read_u32(in); impl->factor = read_u32(in); impl->levels = read_u32(in); const auto complete = read_u32(in); impl->frames = read_u64(in); const auto expected_checksum = read_u32(in); if (complete != 1 || impl->l0 == 0 || impl->factor != 2 || impl->levels == 0 || impl->channels <= 0) return std::nullopt;
     if (impl->sample_rate != expected_key.sample_rate || impl->channels != expected_key.channel_count || impl->time_base != expected_key.time_base) return std::nullopt;
     impl->indexes.resize(impl->levels); const auto file_size = std::filesystem::file_size(path); const auto payload_start = static_cast<std::uint64_t>(in.tellg()) + static_cast<std::uint64_t>(impl->levels) * 16U; std::uint64_t expected_offset = payload_start;
     const auto record_bytes = static_cast<std::uint64_t>(impl->channels) * 4U;
@@ -277,6 +306,8 @@ std::optional<WaveformCacheReader> WaveformCacheReader::open(const std::filesyst
     }
     if (expected_offset != file_size || impl->indexes.front().count != (impl->frames + impl->l0 - 1) / impl->l0) return std::nullopt;
     for (std::size_t i = 1; i < impl->indexes.size(); ++i) if (impl->indexes[i].count != (impl->indexes[i - 1].count + 1) / 2) return std::nullopt;
+    in.clear(); in.seekg(static_cast<std::streamoff>(payload_start));
+    if (crc32_stream(in, file_size - payload_start) != expected_checksum) return std::nullopt;
     return WaveformCacheReader{std::move(impl)};
   } catch (...) { return std::nullopt; }
 }
