@@ -181,6 +181,21 @@ target_compile_definitions(pulsar_audio_model_tests PRIVATE PULSAR_SOURCE_DIR="$
 
 add_test(NAME pulsar.application.audio_model COMMAND pulsar_audio_model_tests)
 
+add_executable(pulsar_waveform_cache_tests
+  application/waveform_cache_test.cpp
+)
+
+target_link_libraries(pulsar_waveform_cache_tests
+  PRIVATE
+    pulsar::application
+    pulsar::domain
+)
+
+pulsar_apply_project_options(pulsar_waveform_cache_tests)
+pulsar_apply_compiler_warnings(pulsar_waveform_cache_tests)
+
+add_test(NAME pulsar.application.waveform_cache COMMAND pulsar_waveform_cache_tests)
+
 add_executable(pulsar_audio_output_engine_tests
   application/audio_output_engine_test.cpp
 )
@@ -296,6 +311,19 @@ pulsar_apply_compiler_warnings(pulsar_ffmpeg_audio_decode_session_tests)
 
 add_test(NAME pulsar.media.ffmpeg_audio_decode_session
          COMMAND pulsar_ffmpeg_audio_decode_session_tests)
+
+add_executable(pulsar_ffmpeg_waveform_source_tests
+  media/ffmpeg_waveform_source_test.cpp
+)
+target_compile_definitions(pulsar_ffmpeg_waveform_source_tests
+  PRIVATE PULSAR_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+target_link_libraries(pulsar_ffmpeg_waveform_source_tests
+  PRIVATE pulsar::media_ffmpeg pulsar::application pulsar::domain
+)
+pulsar_apply_project_options(pulsar_ffmpeg_waveform_source_tests)
+pulsar_apply_compiler_warnings(pulsar_ffmpeg_waveform_source_tests)
+add_test(NAME pulsar.media.ffmpeg_waveform_source COMMAND pulsar_ffmpeg_waveform_source_tests)
 
 add_executable(pulsar_ffmpeg_video_decode_session_tests
   media/ffmpeg_video_decode_session_test.cpp

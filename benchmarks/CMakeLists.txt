@@ -2,6 +2,13 @@ add_executable(pulsar_benchmarks
   main.cpp
 )
 
+add_executable(pulsar_waveform_cache_benchmark
+  waveform_cache_benchmark.cpp
+)
+target_link_libraries(pulsar_waveform_cache_benchmark PRIVATE pulsar::application pulsar::domain)
+pulsar_apply_project_options(pulsar_waveform_cache_benchmark)
+pulsar_apply_compiler_warnings(pulsar_waveform_cache_benchmark)
+
 set_target_properties(pulsar_benchmarks
   PROPERTIES
     OUTPUT_NAME pulsar-benchmarks
