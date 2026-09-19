@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <stdexcept>
 #include <utility>
 #include <vector>
 
@@ -59,6 +60,7 @@ public:
   }
   bool start() override {
     if (state_ != AudioOutputState::Opened || pending_ == 0) return false;
+    if (!start_ok) return false;
     state_ = AudioOutputState::Running;
     return true;
   }
@@ -94,6 +96,7 @@ public:
   void report_underrun() { ++metrics_.underrun_count; }
 
   bool open_ok{true};
+  bool start_ok{true};
   bool reject_enqueue{false};
   std::vector<AudioBlock> accepted_blocks;
 
@@ -128,6 +131,16 @@ private:
   std::optional<MediaTime> stream_origin_;
 };
 
+class FailingSource final : public AudioPlaybackSource {
+public:
+  int sample_rate() const noexcept override { return 1000; }
+  int channel_count() const noexcept override { return 1; }
+  bool seek_to(domain::MediaTime) override { return true; }
+  std::optional<AudioBlock> decode_next() override {
+    throw std::runtime_error{"synthetic decode failure"};
+  }
+};
+
 application::ResolvedClip clip(bool with_audio = true) {
   std::optional<application::AudioSourceBinding> audio;
   if (with_audio) {
@@ -144,6 +157,7 @@ void video_only_is_intentional_silence() {
   AudioPlaybackSession session{nullptr, {}};
   session.configure(clip(false), time(0));
   assert(session.state() == AudioPlaybackState::IntentionalSilence);
+  assert(session.condition() == application::AudioPlaybackCondition::IntentionalSilence);
   session.play();
   assert(!session.has_device_clock());
 }
@@ -158,6 +172,7 @@ void source_origin_creates_silence_without_clock_jump() {
       }};
   session.configure(clip(), time(0));
   assert(session.state() == AudioPlaybackState::Ready);
+  assert(session.condition() == application::AudioPlaybackCondition::Present);
   assert(!output.accepted_blocks.empty());
   assert(output.accepted_blocks.front().samples()[0] == 0.0F);
   session.play();
@@ -194,6 +209,23 @@ void underrun_is_not_intentional_silence() {
   output.report_underrun();
   session.update(time(0));
   assert(session.state() == AudioPlaybackState::Starved);
+  assert(session.condition() == application::AudioPlaybackCondition::Starved);
+}
+
+void underrun_recovers_through_prebuffer() {
+  FakeOutput output;
+  AudioPlaybackSession session{
+      &output, [](const auto&, int) { return std::make_unique<FakeSource>(std::nullopt, 3); }};
+  session.configure(clip(), time(0));
+  session.play();
+  output.report_underrun();
+  session.update(time(0));
+  assert(session.condition() == application::AudioPlaybackCondition::Starved);
+  session.update(time(0));
+  assert(session.state() == AudioPlaybackState::Ready);
+  assert(session.condition() == application::AudioPlaybackCondition::Present);
+  session.play();
+  assert(session.state() == AudioPlaybackState::Running);
 }
 
 void no_device_is_explicit_fallback() {
@@ -201,6 +233,30 @@ void no_device_is_explicit_fallback() {
       nullptr, [](const auto&, int) { return std::make_unique<FakeSource>(std::nullopt); }};
   session.configure(clip(), time(0));
   assert(session.state() == AudioPlaybackState::DeviceUnavailable);
+  assert(session.condition() == application::AudioPlaybackCondition::DeviceUnavailable);
+}
+
+void decode_failure_is_terminal_and_not_silence() {
+  FakeOutput output;
+  AudioPlaybackSession session{
+      &output, [](const auto&, int) { return std::make_unique<FailingSource>(); }};
+  session.configure(clip(), time(0));
+  assert(session.state() == AudioPlaybackState::Error);
+  assert(session.condition() == application::AudioPlaybackCondition::Error);
+  assert(session.error_message().has_value());
+  session.update(time(0));
+  assert(session.state() == AudioPlaybackState::Error);
+}
+
+void device_start_failure_is_degraded_not_media_eof() {
+  FakeOutput output;
+  output.start_ok = false;
+  AudioPlaybackSession session{
+      &output, [](const auto&, int) { return std::make_unique<FakeSource>(std::nullopt, 2); }};
+  session.configure(clip(), time(0));
+  session.play();
+  assert(session.condition() == application::AudioPlaybackCondition::DeviceUnavailable);
+  assert(session.condition() != application::AudioPlaybackCondition::SourceEndedEarly);
 }
 
 void legitimate_audio_eof_is_not_starvation() {
@@ -216,6 +272,9 @@ void legitimate_audio_eof_is_not_starvation() {
   session.update(time(0));
   assert(session.state() == AudioPlaybackState::EndedEarly ||
          session.state() == AudioPlaybackState::Running);
+  if (session.state() == AudioPlaybackState::EndedEarly) {
+    assert(session.condition() == application::AudioPlaybackCondition::SourceEndedEarly);
+  }
 }
 
 void long_run_clock_has_no_accumulating_float_drift() {
@@ -239,7 +298,10 @@ int main() {
   source_origin_creates_silence_without_clock_jump();
   stream_origin_maps_presentation_relative_source();
   underrun_is_not_intentional_silence();
+  underrun_recovers_through_prebuffer();
   no_device_is_explicit_fallback();
+  decode_failure_is_terminal_and_not_silence();
+  device_start_failure_is_degraded_not_media_eof();
   legitimate_audio_eof_is_not_starvation();
   long_run_clock_has_no_accumulating_float_drift();
 }

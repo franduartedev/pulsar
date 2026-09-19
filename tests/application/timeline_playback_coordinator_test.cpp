@@ -205,6 +205,8 @@ public:
     metrics_.device_frames_processed += consumed;
     metrics_.buffered_device_frames = pending_;
   }
+  void report_underrun() { ++metrics_.underrun_count; }
+  bool running() const noexcept { return state_ == application::AudioOutputState::Running; }
 
 private:
   application::AudioOutputState state_{application::AudioOutputState::Closed};
@@ -219,15 +221,15 @@ public:
   int channel_count() const noexcept override { return 1; }
   bool seek_to(domain::MediaTime) override { return true; }
   std::optional<application::AudioBlock> decode_next() override {
-    if (sent_) return std::nullopt;
-    sent_ = true;
+    if (sent_ >= 2) return std::nullopt;
+    ++sent_;
     return application::AudioBlock{
         44100, 1, 44100 * 10, std::vector<float>(44100 * 10, 0.25F),
         Rational{1, 44100}, MediaTime{0, Rational{1, 44100}}};
   }
 
 private:
-  bool sent_{false};
+  int sent_{0};
 };
 
 ProjectSnapshot snapshot_with_clip(Fixture& fixture, MediaId media, TimeRange source, MediaTime start) {
@@ -271,6 +273,8 @@ void gaps_and_missing_continue_clock() {
   coordinator.seek(time(12));
   auto presentation = coordinator.update();
   assert(std::holds_alternative<TimelineGapPresentation>(presentation));
+  assert(coordinator.semantic_condition() ==
+         application::PlaybackSemanticCondition::SourceGap);
   coordinator.play();
   clock.advance(time(2));
   assert(coordinator.timeline_position() == time(14));
@@ -282,6 +286,8 @@ void gaps_and_missing_continue_clock() {
   coordinator.seek(time(6));
   presentation = coordinator.update();
   assert(std::holds_alternative<TimelineMissingMediaPresentation>(presentation));
+  assert(coordinator.semantic_condition() ==
+         application::PlaybackSemanticCondition::IntentionalSilence);
   coordinator.play();
   clock.advance(time(1));
   assert(coordinator.timeline_position() == time(7));
@@ -553,6 +559,8 @@ void advance_permission_matrix_tests() {
     coordinator.set_snapshot(fixture.document.snapshot());
     coordinator.seek(time(20));
     assert(std::holds_alternative<TimelineEndedPresentation>(coordinator.update()));
+    assert(coordinator.semantic_condition() ==
+           application::PlaybackSemanticCondition::TimelineEnded);
     coordinator.play();
     clock.advance(time(1));
     assert(coordinator.timeline_position() == time(5));
@@ -678,6 +686,57 @@ void audio_device_is_the_single_running_clock() {
   assert(coordinator.timeline_position() == time(1, Rational{1, 10}));
 }
 
+void paused_starvation_recovery_does_not_resume() {
+  Fixture fixture;
+  auto snapshot = snapshot_with_clip(fixture, fixture.media_one, TimeRange{time(0), time(10)},
+                                     time(0));
+  auto& asset = snapshot.assets.front();
+  snapshot.assets.front() = application::MediaAsset{
+      asset.id(), asset.source_locator(), asset.video_stream_index(), asset.playable_duration(),
+      asset.metadata(), asset.availability(), asset.availability_reason(),
+      application::AudioAssetMetadata{7, 44100, 1, Rational{1, 44100}, time(10)}};
+  FakeClock clock;
+  SyncOutput output;
+  TimelinePlaybackCoordinator coordinator{
+      clock, fixture.factory(),
+      [](const std::filesystem::path&, int) { return std::make_unique<SyncAudioSource>(); },
+      &output};
+  coordinator.set_snapshot(snapshot);
+  (void)coordinator.update();
+  coordinator.play();
+  output.report_underrun();
+  (void)coordinator.update();
+  assert(coordinator.semantic_condition() == application::PlaybackSemanticCondition::Starved);
+  coordinator.pause();
+  const auto paused_position = coordinator.timeline_position();
+  (void)coordinator.update();
+  assert(coordinator.timeline_position() == paused_position);
+  assert(coordinator.intent() == application::PlaybackIntent::Paused);
+  assert(coordinator.semantic_condition() == application::PlaybackSemanticCondition::Starved);
+  assert(!output.running());
+}
+
+void no_audio_clip_is_healthy_silence_and_advances() {
+  Fixture fixture;
+  const auto snapshot = snapshot_with_clip(fixture, fixture.media_one, TimeRange{time(0), time(5)},
+                                           time(0));
+  FakeClock clock;
+  const auto history = fixture.document.history_state_id();
+  const auto generation = fixture.document.document_generation();
+  const auto dirty = fixture.document.is_dirty();
+  TimelinePlaybackCoordinator coordinator{clock, fixture.factory()};
+  coordinator.set_snapshot(snapshot);
+  (void)coordinator.update();
+  assert(coordinator.semantic_condition() ==
+         application::PlaybackSemanticCondition::IntentionalSilence);
+  coordinator.play();
+  clock.advance(time(2));
+  assert(coordinator.timeline_position() == time(2));
+  assert(fixture.document.history_state_id() == history);
+  assert(fixture.document.document_generation() == generation);
+  assert(fixture.document.is_dirty() == dirty);
+}
+
 } // namespace
 
 int main() {
@@ -697,4 +756,6 @@ int main() {
   seek_preserves_intent_tests();
   edit_shrinking_timeline_reanchors_stale_playhead();
   audio_device_is_the_single_running_clock();
+  paused_starvation_recovery_does_not_resume();
+  no_audio_clip_is_healthy_silence_and_advances();
 }

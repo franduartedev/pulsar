@@ -36,12 +36,27 @@ using AudioPlaybackSourceFactory = std::function<std::unique_ptr<AudioPlaybackSo
 enum class AudioPlaybackState {
   Inactive,
   Preparing,
+  Recovering,
   Ready,
   Running,
   Paused,
   IntentionalSilence,
   Starved,
   EndedEarly,
+  DeviceUnavailable,
+  Error,
+};
+
+// Semantic condition reported to the playback coordinator. Operational
+// states above describe the output pipeline; this enum describes why audio
+// is or is not contributing media time.
+enum class AudioPlaybackCondition {
+  Inactive,
+  Present,
+  IntentionalSilence,
+  SourceEndedEarly,
+  Starved,
+  Recovering,
   DeviceUnavailable,
   Error,
 };
@@ -64,6 +79,10 @@ public:
   void reset();
 
   [[nodiscard]] AudioPlaybackState state() const noexcept { return state_; }
+  [[nodiscard]] AudioPlaybackCondition condition() const noexcept { return condition_; }
+  [[nodiscard]] const std::optional<std::string>& error_message() const noexcept {
+    return error_message_;
+  }
   [[nodiscard]] bool has_device_clock() const noexcept;
   [[nodiscard]] std::optional<domain::MediaTime> clock_position() const;
   [[nodiscard]] std::uint64_t generation() const noexcept { return generation_; }
@@ -79,7 +98,8 @@ private:
   [[nodiscard]] std::size_t source_frames_for(domain::MediaTime duration) const;
   [[nodiscard]] std::uint64_t buffered_device_frames() const;
   void close_output();
-  void set_error();
+  void set_device_unavailable();
+  void set_decode_error(const char* message);
 
   AudioOutput* output_{nullptr};
   AudioPlaybackSourceFactory source_factory_;
@@ -96,6 +116,8 @@ private:
   std::optional<domain::MediaTime> stream_origin_;
   bool drain_requested_{false};
   AudioPlaybackState state_{AudioPlaybackState::Inactive};
+  AudioPlaybackCondition condition_{AudioPlaybackCondition::Inactive};
+  std::optional<std::string> error_message_;
 };
 
 } // namespace pulsar::application

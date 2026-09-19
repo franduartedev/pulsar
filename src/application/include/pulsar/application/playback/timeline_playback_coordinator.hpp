@@ -83,6 +83,19 @@ enum class PlaybackClockSource {
   Paused,
 };
 
+enum class PlaybackSemanticCondition {
+  Inactive,
+  Present,
+  IntentionalSilence,
+  SourceGap,
+  SourceEndedEarly,
+  Starved,
+  Recovering,
+  DeviceUnavailable,
+  Error,
+  TimelineEnded,
+};
+
 class TimelinePlaybackCoordinator {
 public:
   TimelinePlaybackCoordinator(const MonotonicClock& clock, PlaybackWorkerFactory worker_factory,
@@ -102,6 +115,9 @@ public:
   [[nodiscard]] domain::MediaTime timeline_position() const;
   [[nodiscard]] PlaybackIntent intent() const noexcept { return intent_; }
   [[nodiscard]] PlaybackClockSource clock_source() const noexcept { return clock_source_; }
+  [[nodiscard]] PlaybackSemanticCondition semantic_condition() const noexcept {
+    return semantic_condition_;
+  }
 
 private:
   enum class SegmentKind {
@@ -139,6 +155,7 @@ private:
   [[nodiscard]] domain::MediaTime next_gap_boundary(domain::MediaTime position) const;
   void reset_source();
   void synchronize_audio_clock();
+  void apply_audio_condition(AudioPlaybackCondition condition);
 
   const MonotonicClock& clock_;
   PlaybackWorkerFactory worker_factory_;
@@ -153,6 +170,7 @@ private:
   std::optional<std::string> source_creation_error_;
   PlaybackIntent intent_{PlaybackIntent::Paused};
   PlaybackClockSource clock_source_{PlaybackClockSource::Paused};
+  PlaybackSemanticCondition semantic_condition_{PlaybackSemanticCondition::Inactive};
   SegmentKind segment_kind_{SegmentKind::None};
   TimelineAdvancePermission advance_permission_{TimelineAdvancePermission::Hold};
 };

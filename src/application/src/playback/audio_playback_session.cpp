@@ -36,6 +36,8 @@ void AudioPlaybackSession::configure(const ResolvedClip& clip,
   clip_ = clip;
   configured_timeline_ = timeline_position;
   source_eof_ = false;
+  error_message_.reset();
+  condition_ = AudioPlaybackCondition::Inactive;
   stream_origin_.reset();
   drain_requested_ = false;
   pending_block_.reset();
@@ -46,16 +48,22 @@ void AudioPlaybackSession::configure(const ResolvedClip& clip,
 
   if (!clip.audio.has_value() || output_ == nullptr || !source_factory_) {
     close_output();
-    state_ = clip.audio.has_value() && output_ == nullptr
-                 ? AudioPlaybackState::DeviceUnavailable
-                 : AudioPlaybackState::IntentionalSilence;
+    if (clip.audio.has_value() && output_ == nullptr) {
+      state_ = AudioPlaybackState::DeviceUnavailable;
+      condition_ = AudioPlaybackCondition::DeviceUnavailable;
+    } else {
+      state_ = AudioPlaybackState::IntentionalSilence;
+      condition_ = AudioPlaybackCondition::IntentionalSilence;
+    }
     return;
   }
 
   state_ = AudioPlaybackState::Preparing;
+  condition_ = AudioPlaybackCondition::Recovering;
   if (!prepare_audio_at(timeline_position)) {
     if (state_ == AudioPlaybackState::Preparing) {
       state_ = AudioPlaybackState::Error;
+      condition_ = AudioPlaybackCondition::Error;
     }
   }
 }
@@ -67,6 +75,8 @@ void AudioPlaybackSession::seek(domain::MediaTime timeline_position) {
   ++generation_;
   configured_timeline_ = timeline_position;
   source_eof_ = false;
+  error_message_.reset();
+  condition_ = AudioPlaybackCondition::Inactive;
   stream_origin_.reset();
   drain_requested_ = false;
   pending_block_.reset();
@@ -76,14 +86,20 @@ void AudioPlaybackSession::seek(domain::MediaTime timeline_position) {
   audio_clock_anchor_ = timeline_position;
   if (!clip_->audio.has_value() || output_ == nullptr || !source_factory_) {
     close_output();
-    state_ = clip_->audio.has_value() && output_ == nullptr
-                 ? AudioPlaybackState::DeviceUnavailable
-                 : AudioPlaybackState::IntentionalSilence;
+    if (clip_->audio.has_value() && output_ == nullptr) {
+      state_ = AudioPlaybackState::DeviceUnavailable;
+      condition_ = AudioPlaybackCondition::DeviceUnavailable;
+    } else {
+      state_ = AudioPlaybackState::IntentionalSilence;
+      condition_ = AudioPlaybackCondition::IntentionalSilence;
+    }
     return;
   }
   state_ = AudioPlaybackState::Preparing;
+  condition_ = AudioPlaybackCondition::Recovering;
   if (!prepare_audio_at(timeline_position) && state_ == AudioPlaybackState::Preparing) {
     state_ = AudioPlaybackState::Error;
+    condition_ = AudioPlaybackCondition::Error;
   }
 }
 
@@ -99,7 +115,7 @@ void AudioPlaybackSession::play() {
     return;
   }
   if (!output_->start()) {
-    set_error();
+    set_device_unavailable();
     return;
   }
   const auto metrics = output_->metrics();
@@ -107,9 +123,10 @@ void AudioPlaybackSession::play() {
   audio_clock_anchor_ = configured_timeline_;
   observed_underruns_ = metrics.underrun_count;
   state_ = AudioPlaybackState::Running;
+  condition_ = AudioPlaybackCondition::Present;
   if (source_eof_) {
     if (!output_->request_drain()) {
-      set_error();
+      set_device_unavailable();
       return;
     }
     drain_requested_ = true;
@@ -123,7 +140,7 @@ void AudioPlaybackSession::pause() {
       configured_timeline_ = *position;
     }
     if (!output_->stop()) {
-      set_error();
+      set_device_unavailable();
       return;
     }
     state_ = AudioPlaybackState::Paused;
@@ -139,12 +156,12 @@ void AudioPlaybackSession::update(domain::MediaTime timeline_position) {
   }
   const auto output_state = output_->state();
   if (output_state == AudioOutputState::Error) {
-    set_error();
+    set_device_unavailable();
     return;
   }
   if (source_eof_ && !drain_requested_ && output_state == AudioOutputState::Running) {
     if (!output_->request_drain()) {
-      set_error();
+      set_device_unavailable();
       return;
     }
     drain_requested_ = true;
@@ -153,6 +170,7 @@ void AudioPlaybackSession::update(domain::MediaTime timeline_position) {
   if (metrics.underrun_count > observed_underruns_) {
     observed_underruns_ = metrics.underrun_count;
     state_ = AudioPlaybackState::Starved;
+    condition_ = AudioPlaybackCondition::Starved;
     (void)output_->stop();
     return;
   }
@@ -166,20 +184,24 @@ void AudioPlaybackSession::update(domain::MediaTime timeline_position) {
     }
   }
   if (state_ == AudioPlaybackState::Preparing || state_ == AudioPlaybackState::Starved) {
+    state_ = AudioPlaybackState::Recovering;
+    condition_ = AudioPlaybackCondition::Recovering;
     if (fill_until(static_cast<std::uint64_t>(output_->device_format()->sample_rate) *
                    kStartBufferMilliseconds / 1000)) {
       state_ = AudioPlaybackState::Ready;
+      condition_ = AudioPlaybackCondition::Present;
     }
   }
   if (source_eof_ && !drain_requested_ && state_ == AudioPlaybackState::Running) {
     if (!output_->request_drain()) {
-      set_error();
+      set_device_unavailable();
       return;
     }
     drain_requested_ = true;
   }
   if (drain_requested_ && output_->state() == AudioOutputState::Completed) {
     state_ = AudioPlaybackState::EndedEarly;
+    condition_ = AudioPlaybackCondition::SourceEndedEarly;
   }
 }
 
@@ -192,6 +214,8 @@ void AudioPlaybackSession::reset() {
   clip_.reset();
   stream_origin_.reset();
   state_ = AudioPlaybackState::Inactive;
+  condition_ = AudioPlaybackCondition::Inactive;
+  error_message_.reset();
 }
 
 bool AudioPlaybackSession::has_device_clock() const noexcept {
@@ -218,23 +242,24 @@ bool AudioPlaybackSession::open_source_at(domain::MediaTime timeline_position) {
   try {
     source_ = source_factory_(clip_->audio->source_locator, clip_->audio->metadata.stream_index);
   } catch (...) {
-    state_ = AudioPlaybackState::Error;
+    set_decode_error("audio source creation failed");
     return false;
   }
   if (!source_) {
-    state_ = AudioPlaybackState::Error;
+    set_decode_error("audio source factory returned no source");
     return false;
   }
   stream_origin_ = source_->stream_origin();
   if (!source_->seek_to(audio_target_for(timeline_position))) {
-    state_ = AudioPlaybackState::Error;
+    set_decode_error("audio source seek failed");
     return false;
   }
   if (!output_->open({source_->sample_rate(), source_->channel_count()})) {
-    state_ = output_->error().has_value() &&
-                      output_->error()->code == AudioOutputError::Code::NoDevice
-                  ? AudioPlaybackState::DeviceUnavailable
-                  : AudioPlaybackState::Error;
+    state_ = AudioPlaybackState::DeviceUnavailable;
+    condition_ = AudioPlaybackCondition::DeviceUnavailable;
+    if (output_->error().has_value()) {
+      error_message_ = output_->error()->message;
+    }
     return false;
   }
   configured_timeline_ = timeline_position;
@@ -252,7 +277,7 @@ bool AudioPlaybackSession::prepare_audio_at(domain::MediaTime timeline_position)
     try {
       next = source_->decode_next();
     } catch (...) {
-      state_ = AudioPlaybackState::Error;
+      set_decode_error("audio decoder failed while preparing audio");
       return false;
     }
     if (!next.has_value()) {
@@ -267,9 +292,11 @@ bool AudioPlaybackSession::prepare_audio_at(domain::MediaTime timeline_position)
   }
   if (source_eof_ && buffered_device_frames() == 0) {
     state_ = AudioPlaybackState::EndedEarly;
+    condition_ = AudioPlaybackCondition::SourceEndedEarly;
     return true;
   }
   state_ = AudioPlaybackState::Ready;
+  condition_ = AudioPlaybackCondition::Present;
   return true;
 }
 
@@ -319,7 +346,7 @@ bool AudioPlaybackSession::enqueue_block(const AudioBlock& block) {
   if (result == AudioEnqueueResult::Backpressure) {
     return false;
   }
-  set_error();
+  set_device_unavailable();
   return false;
 }
 
@@ -358,7 +385,7 @@ bool AudioPlaybackSession::fill_until(std::uint64_t target_device_frames) {
       try {
         next = source_->decode_next();
       } catch (...) {
-        state_ = AudioPlaybackState::Error;
+        set_decode_error("audio decoder failed while refilling audio");
         return false;
       }
       if (!next.has_value()) {
@@ -419,12 +446,18 @@ void AudioPlaybackSession::close_output() {
   }
 }
 
-void AudioPlaybackSession::set_error() {
+void AudioPlaybackSession::set_device_unavailable() {
+  state_ = AudioPlaybackState::DeviceUnavailable;
+  condition_ = AudioPlaybackCondition::DeviceUnavailable;
   if (output_ != nullptr && output_->error().has_value()) {
-    state_ = AudioPlaybackState::Error;
-  } else {
-    state_ = AudioPlaybackState::Error;
+    error_message_ = output_->error()->message;
   }
+}
+
+void AudioPlaybackSession::set_decode_error(const char* message) {
+  state_ = AudioPlaybackState::Error;
+  condition_ = AudioPlaybackCondition::Error;
+  error_message_ = message;
 }
 
 } // namespace pulsar::application
