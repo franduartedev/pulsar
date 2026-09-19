@@ -40,6 +40,16 @@ struct SplitClipCommand {
   domain::ClipId right_clip_id;
 };
 
+struct SetClipAudioGainCommand {
+  domain::ClipId clip_id;
+  double gain_db;
+};
+
+struct SetClipMutedCommand {
+  domain::ClipId clip_id;
+  bool muted;
+};
+
 // Value-only inverse operations. They are not user-facing editing tools.
 struct RestoreClipCommand {
   domain::TrackId track_id;
@@ -62,7 +72,7 @@ struct RemoveAssetCommand {
 
 using Command = std::variant<AddClipCommand, RemoveClipCommand, MoveClipCommand,
                              TrimClipStartCommand, TrimClipEndCommand, SplitClipCommand,
-                             RestoreClipCommand, RestoreSplitCommand, ImportAssetCommand,
-                             RemoveAssetCommand>;
+                             SetClipAudioGainCommand, SetClipMutedCommand, RestoreClipCommand,
+                             RestoreSplitCommand, ImportAssetCommand, RemoveAssetCommand>;
 
 } // namespace pulsar::application

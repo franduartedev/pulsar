@@ -46,6 +46,8 @@ class DesktopController final : public QObject {
   Q_PROPERTY(QVariantList timelineRulerTicks READ timelineRulerTicks NOTIFY timelineChanged)
   Q_PROPERTY(double timelinePlayheadProgress READ timelinePlayheadProgress NOTIFY timelinePlayheadChanged)
   Q_PROPERTY(QString selectedClipKey READ selectedClipKey NOTIFY timelineChanged)
+  Q_PROPERTY(double selectedClipGainDb READ selectedClipGainDb NOTIFY timelineChanged)
+  Q_PROPERTY(bool selectedClipMuted READ selectedClipMuted NOTIFY timelineChanged)
   Q_PROPERTY(bool canSplit READ canSplit NOTIFY editActionStateChanged)
   Q_PROPERTY(bool canUndo READ canUndo NOTIFY timelineChanged)
   Q_PROPERTY(bool canRedo READ canRedo NOTIFY timelineChanged)
@@ -79,6 +81,8 @@ public:
   [[nodiscard]] QVariantList timelineRulerTicks() const { return timeline_ruler_ticks_; }
   [[nodiscard]] double timelinePlayheadProgress() const { return timeline_playhead_progress_; }
   [[nodiscard]] QString selectedClipKey() const { return selected_clip_key_; }
+  [[nodiscard]] double selectedClipGainDb() const;
+  [[nodiscard]] bool selectedClipMuted() const;
   [[nodiscard]] bool canSplit() const { return active_session_ && active_session_->can_split(); }
   [[nodiscard]] bool canUndo() const { return active_session_ && active_session_->can_undo(); }
   [[nodiscard]] bool canRedo() const { return active_session_ && active_session_->can_redo(); }
@@ -99,6 +103,8 @@ public:
   Q_INVOKABLE void trimTimelineClipEnd(const QString&, double, double);
   Q_INVOKABLE void splitSelectedClip();
   Q_INVOKABLE void deleteSelectedClip();
+  Q_INVOKABLE void setSelectedClipGainDb(double gain_db);
+  Q_INVOKABLE void toggleSelectedClipMute();
   Q_INVOKABLE void undoEdit();
   Q_INVOKABLE void redoEdit();
   Q_INVOKABLE void saveProject(const QString& path);

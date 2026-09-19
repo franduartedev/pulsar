@@ -1,4 +1,5 @@
 #include <pulsar/application/commands/command_processor.hpp>
+#include <pulsar/application/audio/clip_gain.hpp>
 #include <pulsar/application/media/media_probe.hpp>
 #include <pulsar/application/playback/timeline_playback_coordinator.hpp>
 #include <pulsar/application/project/project_codec.hpp>
@@ -10,6 +11,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <string>
@@ -337,6 +339,80 @@ void audio_metadata_does_not_change_playback() {
   assert(silent_streams.front() == 2);
 }
 
+void clip_gain_dsp_preserves_shape_and_timing() {
+  application::AudioBlock block{48000, 2, 2, {0.5F, -0.5F, 1.0F, -1.0F},
+                                Rational{1, 48000}, time(12, Rational{1, 48000})};
+  const auto original_pts = block.presentation_timestamp();
+  application::apply_clip_gain(block, application::ClipGain::from_decibels(-6.0, false));
+  assert(block.frame_count() == 2 && block.channel_count() == 2);
+  assert(block.samples()[0] > 0.24F && block.samples()[0] < 0.26F);
+  assert(block.samples()[1] < -0.24F && block.samples()[1] > -0.26F);
+  assert(block.presentation_timestamp() == original_pts);
+
+  application::apply_clip_gain(block, application::ClipGain::from_decibels(0.0, true));
+  for (const auto sample : block.samples()) assert(sample == 0.0F);
+}
+
+void clip_properties_follow_edits_history_and_persistence() {
+  ProjectDocument document;
+  CommandProcessor processor{document};
+  const auto media = processor.import_asset("media/av.mp4", FakeProbe{{audio_stream(4)} });
+  const auto clip = processor.add_clip(media, TimeRange{time(0), time(10)}, time(0));
+  const auto* defaults = document.timeline().find_clip(clip);
+  assert(defaults->audio_gain_db() == 0.0 && !defaults->muted());
+
+  processor.set_clip_audio_gain(clip, -6.0);
+  processor.set_clip_muted(clip, true);
+  processor.set_clip_muted(clip, false);
+  assert(document.timeline().find_clip(clip)->audio_gain_db() == -6.0);
+  processor.set_clip_muted(clip, true);
+  const auto right = processor.split_clip(clip, time(4));
+  for (const auto id : {clip, right}) {
+    const auto* child = document.timeline().find_clip(id);
+    assert(child->audio_gain_db() == -6.0 && child->muted());
+  }
+  processor.trim_clip_start(right, time(5));
+  processor.move_clip(right, document.video_track_id(), time(20));
+  const auto* moved = document.timeline().find_clip(right);
+  assert(moved->audio_gain_db() == -6.0 && moved->muted());
+
+  assert(processor.undo());
+  assert(document.timeline().find_clip(right)->timeline_start() == time(5));
+  assert(processor.undo());
+  assert(document.timeline().find_clip(right)->audio_gain_db() == -6.0);
+  assert(processor.undo());
+  assert(document.timeline().find_clip(clip)->audio_gain_db() == -6.0);
+  assert(document.timeline().find_clip(clip)->muted());
+  assert(processor.undo());
+  assert(!document.timeline().find_clip(clip)->muted());
+  assert(processor.redo());
+  assert(document.timeline().find_clip(clip)->muted());
+
+  const auto encoded = ProjectCodec::encode(document.snapshot());
+  auto restored = ProjectDocument::restore(ProjectCodec::decode(encoded));
+  const auto* restored_clip = restored.timeline().find_clip(clip);
+  assert(restored_clip->audio_gain_db() == -6.0 && restored_clip->muted());
+  assert(ProjectCodec::encode(restored.snapshot()) == encoded);
+}
+
+void invalid_clip_gain_is_rejected() {
+  ProjectDocument document;
+  CommandProcessor processor{document};
+  const auto media = processor.import_asset("media/av.mp4", FakeProbe{{audio_stream(4)} });
+  const auto clip = processor.add_clip(media, TimeRange{time(0), time(2)}, time(0));
+  for (const auto value : {-61.0, 13.0, std::numeric_limits<double>::quiet_NaN(),
+                           std::numeric_limits<double>::infinity()}) {
+    bool rejected = false;
+    try {
+      processor.set_clip_audio_gain(clip, value);
+    } catch (const std::invalid_argument&) {
+      rejected = true;
+    }
+    assert(rejected);
+    assert(document.timeline().find_clip(clip)->audio_gain_db() == 0.0);
+  }
+}
+
 }  // namespace
 
 int main() {
@@ -348,4 +424,7 @@ int main() {
   malformed_audio_suffix_rejected();
   resolver_exposes_audio_identity();
   audio_metadata_does_not_change_playback();
+  clip_gain_dsp_preserves_shape_and_timing();
+  clip_properties_follow_edits_history_and_persistence();
+  invalid_clip_gain_is_rejected();
 }

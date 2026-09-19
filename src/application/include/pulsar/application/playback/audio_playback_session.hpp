@@ -1,6 +1,7 @@
 #pragma once
 
 #include <pulsar/application/audio/audio_output.hpp>
+#include <pulsar/application/audio/clip_gain.hpp>
 #include <pulsar/application/media/audio_block.hpp>
 #include <pulsar/application/timeline/timeline_clip_resolver.hpp>
 #include <pulsar/domain/time/media_time.hpp>
@@ -124,6 +125,7 @@ private:
   std::uint64_t generation_{0};
   bool source_eof_{false};
   std::optional<domain::MediaTime> stream_origin_;
+  ClipGain gain_{1.0F, false};
   bool drain_requested_{false};
   AudioPlaybackState state_{AudioPlaybackState::Inactive};
   AudioPlaybackCondition condition_{AudioPlaybackCondition::Inactive};

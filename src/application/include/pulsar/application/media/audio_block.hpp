@@ -24,6 +24,9 @@ public:
   [[nodiscard]] int channel_count() const noexcept { return channel_count_; }
   [[nodiscard]] std::size_t frame_count() const noexcept { return frame_count_; }
   [[nodiscard]] const std::vector<float>& samples() const noexcept { return samples_; }
+  // The block owns this storage. Callers may mutate it only while they own
+  // the block exclusively; timing and shape metadata are intentionally fixed.
+  [[nodiscard]] std::vector<float>& samples_mutable() noexcept { return samples_; }
   [[nodiscard]] const domain::Rational& time_base() const noexcept { return time_base_; }
   [[nodiscard]] const std::optional<domain::MediaTime>& presentation_timestamp() const noexcept {
     return presentation_timestamp_;

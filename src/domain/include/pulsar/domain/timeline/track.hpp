@@ -41,6 +41,8 @@ private:
   void trim_clip_start(ClipId id, MediaTime timeline_start);
   void trim_clip_end(ClipId id, MediaTime timeline_end);
   void split_clip(ClipId id, MediaTime split_timeline_position, ClipId right_clip_id);
+  void set_clip_audio_gain(ClipId id, double gain_db);
+  void set_clip_muted(ClipId id, bool muted);
 
   TrackId id_;
   TrackKind kind_;

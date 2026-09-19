@@ -32,6 +32,8 @@ public:
                  domain::MediaTime timeline_start);
   void trim_clip_start(domain::ClipId clip_id, domain::MediaTime timeline_start);
   void trim_clip_end(domain::ClipId clip_id, domain::MediaTime timeline_end);
+  void set_clip_audio_gain(domain::ClipId clip_id, double gain_db);
+  void set_clip_muted(domain::ClipId clip_id, bool muted);
   [[nodiscard]] domain::ClipId split_clip(domain::ClipId clip_id,
                                            domain::MediaTime split_timeline_position);
   [[nodiscard]] domain::MediaId import_asset(const std::filesystem::path& source_locator,

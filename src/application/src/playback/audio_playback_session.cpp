@@ -45,6 +45,7 @@ void AudioPlaybackSession::configure(const ResolvedClip& clip,
   observed_underruns_ = 0;
   processed_anchor_ = 0;
   audio_clock_anchor_ = timeline_position;
+  gain_ = ClipGain::from_decibels(clip.audio_gain_db, clip.muted);
 
   if (!clip.audio.has_value() || output_ == nullptr || !source_factory_) {
     close_output();
@@ -84,6 +85,7 @@ void AudioPlaybackSession::seek(domain::MediaTime timeline_position) {
   observed_underruns_ = 0;
   processed_anchor_ = 0;
   audio_clock_anchor_ = timeline_position;
+  gain_ = ClipGain::from_decibels(clip_->audio_gain_db, clip_->muted);
   if (!clip_->audio.has_value() || output_ == nullptr || !source_factory_) {
     close_output();
     if (clip_->audio.has_value() && output_ == nullptr) {
@@ -344,7 +346,9 @@ bool AudioPlaybackSession::enqueue_block(const AudioBlock& block) {
   if (output_ == nullptr) {
     return false;
   }
-  const auto result = output_->enqueue(block);
+  AudioBlock processed = block;
+  apply_clip_gain(processed, gain_);
+  const auto result = output_->enqueue(processed);
   if (result == AudioEnqueueResult::Accepted) {
     return true;
   }

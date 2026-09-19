@@ -85,6 +85,8 @@ public:
   void move_clip(domain::ClipId clip, double press_pixel, double current_pixel, double width);
   void trim_clip_start(domain::ClipId clip, double pixel, double width);
   void trim_clip_end(domain::ClipId clip, double pixel, double width);
+  void set_clip_audio_gain(domain::ClipId clip, double gain_db);
+  void set_clip_muted(domain::ClipId clip, bool muted);
   [[nodiscard]] bool can_split() const;
   [[nodiscard]] domain::ClipId split_selected_at_playhead();
   void delete_selected();

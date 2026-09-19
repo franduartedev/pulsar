@@ -111,6 +111,25 @@ void editing_actions_use_document_commands() {
   assert(session.document().timeline().find_clip(clip) == nullptr);
 }
 
+void live_audio_property_edit_preserves_playback_position_and_intent() {
+  Probe probe;
+  EditorSession session;
+  const auto media = session.processor().import_asset("live.mp4", probe);
+  const auto clip = session.processor().add_clip(
+      media, TimeRange{MediaTime::zero(), MediaTime{10, Rational{1, 1}}}, MediaTime::zero());
+  session.synchronize_document_state();
+  session.seek(MediaTime{3, Rational{1, 1}});
+  session.play();
+  session.set_clip_audio_gain(clip, -6.0);
+  const auto expected = MediaTime{3, Rational{1, 1}};
+  const auto upper = MediaTime{3001, Rational{1, 1000}};
+  assert(session.playback_position() >= expected && session.playback_position() < upper);
+  assert(session.playback_intent() == application::PlaybackIntent::Playing);
+  session.set_clip_muted(clip, true);
+  assert(session.playback_position() >= expected && session.playback_position() < upper);
+  assert(session.playback_intent() == application::PlaybackIntent::Playing);
+}
+
 void session_read_model_and_selection() {
   EditorSession session;
   Probe probe;
@@ -633,6 +652,7 @@ void runtime_media_path_resolution() {
 int main() {
   viewport_is_exactly_guarded();
   editing_actions_use_document_commands();
+  live_audio_property_edit_preserves_playback_position_and_intent();
   session_read_model_and_selection();
   final_pointer_edit_regressions();
   synchronization_diagnostics_semantics();

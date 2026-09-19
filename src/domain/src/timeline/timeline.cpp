@@ -74,7 +74,8 @@ void Timeline::move_clip(ClipId clip_id, TrackId destination_track_id, MediaTime
   }
 
   const Clip moved_clip{original_clip->id(), original_clip->media_id(),
-                        original_clip->source_range(), timeline_start};
+                        original_clip->source_range(), timeline_start,
+                        original_clip->audio_gain_db(), original_clip->muted()};
 
   Track replacement_source = tracks_[source_index];
   replacement_source.remove_clip(clip_id);
@@ -122,6 +123,28 @@ void Timeline::split_clip(ClipId clip_id, MediaTime split_timeline_position, Cli
     if (tracks_[i].find_clip(clip_id) == nullptr) continue;
     Track replacement = tracks_[i];
     replacement.split_clip(clip_id, split_timeline_position, right_clip_id);
+    tracks_[i] = std::move(replacement);
+    return;
+  }
+  throw std::invalid_argument{"clip id does not exist in timeline"};
+}
+
+void Timeline::set_clip_audio_gain(domain::ClipId clip_id, double gain_db) {
+  for (std::size_t i = 0; i < tracks_.size(); ++i) {
+    if (tracks_[i].find_clip(clip_id) == nullptr) continue;
+    Track replacement = tracks_[i];
+    replacement.set_clip_audio_gain(clip_id, gain_db);
+    tracks_[i] = std::move(replacement);
+    return;
+  }
+  throw std::invalid_argument{"clip id does not exist in timeline"};
+}
+
+void Timeline::set_clip_muted(domain::ClipId clip_id, bool muted) {
+  for (std::size_t i = 0; i < tracks_.size(); ++i) {
+    if (tracks_[i].find_clip(clip_id) == nullptr) continue;
+    Track replacement = tracks_[i];
+    replacement.set_clip_muted(clip_id, muted);
     tracks_[i] = std::move(replacement);
     return;
   }

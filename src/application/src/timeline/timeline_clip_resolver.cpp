@@ -76,7 +76,8 @@ TimelineResolveOutcome resolve_clip_at(const ProjectSnapshot& snapshot,
   }
   ResolvedClip resolved{clip->id(), clip->media_id(), timeline_position, timeline_range,
                         timeline_position - timeline_range.start(), source_range,
-                        domain::MediaTime::zero(), asset->video_stream_index(),
+                        domain::MediaTime::zero(), clip->audio_gain_db(), clip->muted(),
+                        asset->video_stream_index(),
                         asset->source_locator(), std::move(audio)};
   resolved.source_time = clip_source_position(resolved, timeline_position);
   return resolved;

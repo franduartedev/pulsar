@@ -29,6 +29,8 @@ public:
   void trim_clip_start(ClipId clip_id, MediaTime timeline_start);
   void trim_clip_end(ClipId clip_id, MediaTime timeline_end);
   void split_clip(ClipId clip_id, MediaTime split_timeline_position, ClipId right_clip_id);
+  void set_clip_audio_gain(ClipId clip_id, double gain_db);
+  void set_clip_muted(ClipId clip_id, bool muted);
 
   // Internal value restoration used by application history; validates the complete replacement
   // before publishing it.

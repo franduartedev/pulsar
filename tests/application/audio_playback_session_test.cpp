@@ -1,6 +1,7 @@
 #include <pulsar/application/playback/audio_playback_session.hpp>
 
 #include <cassert>
+#include <cmath>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -164,7 +165,7 @@ private:
   bool sent_{false};
 };
 
-application::ResolvedClip clip(bool with_audio = true) {
+application::ResolvedClip clip(bool with_audio = true, double gain_db = 0.0, bool muted = false) {
   std::optional<application::AudioSourceBinding> audio;
   if (with_audio) {
     audio = application::AudioSourceBinding{
@@ -173,7 +174,7 @@ application::ResolvedClip clip(bool with_audio = true) {
   }
   return application::ResolvedClip{ClipId{1}, MediaId{1}, time(0),
                                    TimeRange{time(0), time(2)}, time(0),
-                                   TimeRange{time(0), time(2)}, time(0), 0, "fixture", audio};
+                                   TimeRange{time(0), time(2)}, time(0), gain_db, muted, 0, "fixture", audio};
 }
 
 void video_only_is_intentional_silence() {
@@ -221,6 +222,23 @@ void stream_origin_maps_presentation_relative_source() {
   assert(session.state() == AudioPlaybackState::Ready);
   assert(!output.accepted_blocks.empty());
   assert(output.accepted_blocks.front().samples()[0] == 0.5F);
+}
+
+void clip_gain_reaches_output_without_changing_audio_semantics() {
+  FakeOutput attenuated_output;
+  AudioPlaybackSession attenuated{
+      &attenuated_output, [](const auto&, int) { return std::make_unique<FakeSource>(std::nullopt); }};
+  attenuated.configure(clip(true, -6.0), time(0));
+  assert(attenuated.condition() == application::AudioPlaybackCondition::Present);
+  assert(attenuated_output.accepted_blocks.front().samples()[0] > 0.24F);
+  assert(attenuated_output.accepted_blocks.front().samples()[0] < 0.26F);
+
+  FakeOutput muted_output;
+  AudioPlaybackSession muted{
+      &muted_output, [](const auto&, int) { return std::make_unique<FakeSource>(std::nullopt); }};
+  muted.configure(clip(true, -6.0, true), time(0));
+  assert(muted.condition() == application::AudioPlaybackCondition::Present);
+  for (const auto sample : muted_output.accepted_blocks.front().samples()) assert(sample == 0.0F);
 }
 
 void underrun_is_not_intentional_silence() {
@@ -332,6 +350,7 @@ int main() {
   video_only_is_intentional_silence();
   source_origin_creates_silence_without_clock_jump();
   stream_origin_maps_presentation_relative_source();
+  clip_gain_reaches_output_without_changing_audio_semantics();
   underrun_is_not_intentional_silence();
   underrun_recovers_through_prebuffer();
   no_device_is_explicit_fallback();

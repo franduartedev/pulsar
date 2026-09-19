@@ -55,6 +55,15 @@ Panel {
     }
     property var metaGroups: parseMeta(controller.metadata)
 
+    Connections {
+        target: controller
+        function onTimelineChanged() {
+            if (!gainInput.activeFocus) {
+                gainInput.text = Number(controller.selectedClipGainDb).toFixed(1)
+            }
+        }
+    }
+
     Row {
         id: titleRow
         anchors.left: parent.left
@@ -107,6 +116,35 @@ Panel {
                 spacing: 8
                 Rectangle { width: 2; height: errorText.height; color: Theme.danger }
                 Text { id: errorText; width: parent.width - 10; text: controller.errorMessage; color: Theme.danger; font.pixelSize: Theme.fontSizeM; wrapMode: Text.WordWrap }
+            }
+            Column {
+                visible: controller.selectedClipKey.length > 0
+                width: parent.width
+                spacing: 6
+                SectionLabel { width: parent.width; text: "AUDIO CLIP" }
+                Rectangle { width: parent.width; height: 1; color: Theme.borderSoft }
+                Row {
+                    width: parent.width
+                    spacing: 6
+                    Text { text: "Gain"; color: Theme.faint; font.pixelSize: Theme.fontSizeS; anchors.verticalCenter: parent.verticalCenter }
+                    TextInput {
+                        id: gainInput
+                        width: 72
+                        color: Theme.text
+                        font.pixelSize: Theme.fontSizeM
+                        inputMethodHints: Qt.ImhFormattedNumbersOnly
+                        text: Number(controller.selectedClipGainDb).toFixed(1)
+                        selectByMouse: true
+                        onEditingFinished: controller.setSelectedClipGainDb(Number(text))
+                    }
+                    Text { text: "dB"; color: Theme.faint; font.pixelSize: Theme.fontSizeS; anchors.verticalCenter: parent.verticalCenter }
+                    PButton {
+                        width: 76; height: 24
+                        text: controller.selectedClipMuted ? "Unmute" : "Mute"
+                        onClicked: controller.toggleSelectedClipMute()
+                    }
+                }
+                Text { width: parent.width; text: "-60 to +12 dB; mute preserves gain"; color: Theme.faint; font.pixelSize: Theme.fontSizeXS; wrapMode: Text.WordWrap }
             }
             Column {
                 width: parent.width

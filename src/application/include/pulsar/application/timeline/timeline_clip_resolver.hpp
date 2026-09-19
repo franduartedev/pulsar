@@ -25,6 +25,8 @@ struct ResolvedClip {
   domain::MediaTime clip_offset;
   domain::TimeRange source_range;
   domain::MediaTime source_time;
+  double audio_gain_db;
+  bool muted;
   int video_stream_index;
   std::filesystem::path source_locator;
   std::optional<AudioSourceBinding> audio;

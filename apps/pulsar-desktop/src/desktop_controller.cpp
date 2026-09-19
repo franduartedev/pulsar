@@ -160,12 +160,42 @@ void DesktopController::installTimelineAsset(const pulsar::application::MediaPro
   } catch (const std::exception& error) { setBusy(false); setError(QString::fromUtf8(error.what())); setStatus("Error"); }
 }
 void DesktopController::selectTimelineClip(const QString& key) { if (!active_session_) return; if (key.isEmpty()) active_session_->select_clip(std::nullopt); else { bool ok=false; auto value=key.toULongLong(&ok); if (ok && value) active_session_->select_clip(pulsar::domain::ClipId{value}); } publishTimeline(); }
+double DesktopController::selectedClipGainDb() const {
+  if (!active_session_ || !active_session_->selected_clip()) return 0.0;
+  const auto* clip = active_session_->document().timeline().find_clip(*active_session_->selected_clip());
+  return clip ? clip->audio_gain_db() : 0.0;
+}
+bool DesktopController::selectedClipMuted() const {
+  if (!active_session_ || !active_session_->selected_clip()) return false;
+  const auto* clip = active_session_->document().timeline().find_clip(*active_session_->selected_clip());
+  return clip != nullptr && clip->muted();
+}
 void DesktopController::seekTimelineAt(double pixel, double width) { if (!active_session_) return; const auto target=active_session_->time_at(pixel,width); if (!target) return; active_session_->seek(*target); clearProgram("loading"); updatePositionProperties(); }
 void DesktopController::moveTimelineClip(const QString& key,double press,double current,double width) { if (!active_session_) return; bool ok=false; auto value=key.toULongLong(&ok); if(!ok||!value)return; try { active_session_->move_clip(pulsar::domain::ClipId{value},press,current,width); clearError(); clearProgram("loading"); publishTimeline(); } catch (...) { setError("El movimiento no es válido."); publishTimeline(); } }
 void DesktopController::trimTimelineClipStart(const QString& key,double pixel,double width) { if(!active_session_)return; bool ok=false;auto value=key.toULongLong(&ok);if(!ok||!value)return;try{active_session_->trim_clip_start(pulsar::domain::ClipId{value},pixel,width);clearError();clearProgram("loading");publishTimeline();}catch(...){setError("El recorte no es válido.");publishTimeline();} }
 void DesktopController::trimTimelineClipEnd(const QString& key,double pixel,double width) { if(!active_session_)return; bool ok=false;auto value=key.toULongLong(&ok);if(!ok||!value)return;try{active_session_->trim_clip_end(pulsar::domain::ClipId{value},pixel,width);clearError();clearProgram("loading");publishTimeline();}catch(...){setError("El recorte no es válido.");publishTimeline();} }
 void DesktopController::splitSelectedClip(){if(!active_session_)return;try{(void)active_session_->split_selected_at_playhead();clearError();clearProgram("loading");publishTimeline();}catch(...){setError("El punto de corte debe estar dentro del clip.");}}
 void DesktopController::deleteSelectedClip(){if(!active_session_)return;try{active_session_->delete_selected();clearError();clearProgram("loading");publishTimeline();}catch(...){} }
+void DesktopController::setSelectedClipGainDb(double gain_db) {
+  if (!active_session_ || !active_session_->selected_clip() || !std::isfinite(gain_db)) return;
+  try {
+    active_session_->set_clip_audio_gain(*active_session_->selected_clip(), gain_db);
+    clearError();
+    publishTimeline();
+  } catch (const std::exception& error) {
+    setError(QString::fromUtf8(error.what()));
+  }
+}
+void DesktopController::toggleSelectedClipMute() {
+  if (!active_session_ || !active_session_->selected_clip()) return;
+  try {
+    active_session_->set_clip_muted(*active_session_->selected_clip(), !selectedClipMuted());
+    clearError();
+    publishTimeline();
+  } catch (const std::exception& error) {
+    setError(QString::fromUtf8(error.what()));
+  }
+}
 void DesktopController::undoEdit(){if(active_session_&&active_session_->undo()){clearProgram("loading");publishTimeline();}}
 void DesktopController::redoEdit(){if(active_session_&&active_session_->redo()){clearProgram("loading");publishTimeline();}}
 void DesktopController::saveProject(const QString& path) {

@@ -2,7 +2,9 @@
 
 #include <algorithm>
 #include <charconv>
+#include <cmath>
 #include <cstdint>
+#include <iomanip>
 #include <limits>
 #include <sstream>
 #include <string>
@@ -117,6 +119,18 @@ int int_number(const Token& token, std::size_t line, std::string_view field) {
     parse_fail(line, "invalid " + std::string{field});
   }
   return static_cast<int>(value);
+}
+
+double double_number(const Token& token, std::size_t line, std::string_view field) {
+  if (token.quoted || token.text.empty()) parse_fail(line, "invalid " + std::string{field});
+  double value = 0.0;
+  const auto result = std::from_chars(token.text.data(), token.text.data() + token.text.size(),
+                                      value, std::chars_format::general);
+  if (result.ec != std::errc{} || result.ptr != token.text.data() + token.text.size() ||
+      !std::isfinite(value)) {
+    parse_fail(line, "invalid " + std::string{field});
+  }
+  return value;
 }
 
 domain::MediaTime media_time(const std::vector<Token>& tokens, std::size_t& index,
@@ -242,6 +256,10 @@ std::string ProjectCodec::encode(const ProjectSnapshot& snapshot) {
       append_time(output, clip.source_range().end());
       output << ' ';
       append_time(output, clip.timeline_start());
+      if (clip.audio_gain_db() != 0.0 || clip.muted()) {
+        output << " CLIP_AUDIO " << std::setprecision(17) << clip.audio_gain_db() << ' '
+               << (clip.muted() ? 1 : 0);
+      }
       output << "\n";
     }
   }
@@ -387,7 +405,9 @@ ProjectRestoreState ProjectCodec::decode(std::string_view bytes) {
                                   MediaAvailability::Available, std::nullopt, std::move(audio));
         section = Section::Assets;
       } else if (tokens[0].text == "CLIP") {
-        if (!video_track || (section != Section::Assets && section != Section::Clips) || tokens.size() != 13) parse_fail(line_number, "invalid CLIP");
+        if (!video_track || (section != Section::Assets && section != Section::Clips) ||
+            (tokens.size() != 13 && tokens.size() != 16))
+          parse_fail(line_number, "invalid CLIP");
         std::size_t i = 1;
         const auto clip_id = domain::ClipId{unsigned_number(tokens[i++], line_number, "clip id")};
         const auto track_id = domain::TrackId{unsigned_number(tokens[i++], line_number, "clip track id")};
@@ -395,6 +415,18 @@ ProjectRestoreState ProjectCodec::decode(std::string_view bytes) {
         const auto source_start = media_time(tokens, i, line_number, "source start");
         const auto source_end = media_time(tokens, i, line_number, "source end");
         const auto timeline_start = media_time(tokens, i, line_number, "timeline start");
+        double audio_gain_db = 0.0;
+        bool muted = false;
+        if (tokens.size() == 16) {
+          if (tokens[i].quoted || tokens[i].text != "CLIP_AUDIO") {
+            parse_fail(line_number, "invalid CLIP audio properties");
+          }
+          ++i;
+          audio_gain_db = double_number(tokens[i++], line_number, "clip audio gain");
+          const auto mute_value = unsigned_number(tokens[i++], line_number, "clip mute");
+          if (mute_value > 1) parse_fail(line_number, "invalid clip mute");
+          muted = mute_value != 0;
+        }
         if (i != tokens.size()) parse_fail(line_number, "extra CLIP fields");
         const auto track = std::find_if(state.tracks.begin(), state.tracks.end(),
                                         [track_id](const auto& item) { return item.id == track_id; });
@@ -403,7 +435,13 @@ ProjectRestoreState ProjectCodec::decode(std::string_view bytes) {
                          [media_id](const auto& item) { return item.id() == media_id; })) {
           parse_fail(line_number, "unknown clip media id");
         }
-        track->clips.emplace_back(clip_id, media_id, domain::TimeRange{source_start, source_end}, timeline_start);
+        try {
+          track->clips.emplace_back(clip_id, media_id,
+                                   domain::TimeRange{source_start, source_end}, timeline_start,
+                                   audio_gain_db, muted);
+        } catch (const std::exception& error) {
+          parse_fail(line_number, error.what());
+        }
         section = Section::Clips;
       } else if (tokens[0].text == "ALLOCATOR") {
         if (allocator || !video_track || (section != Section::Clips && section != Section::Assets) || tokens.size() != 5) parse_fail(line_number, "invalid ALLOCATOR");

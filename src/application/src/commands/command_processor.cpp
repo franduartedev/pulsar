@@ -81,6 +81,22 @@ void CommandProcessor::trim_clip_end(domain::ClipId clip_id, domain::MediaTime t
   execute(TrimClipEndCommand{clip_id, timeline_end});
 }
 
+void CommandProcessor::set_clip_audio_gain(domain::ClipId clip_id, double gain_db) {
+  if (const auto* clip = document_.timeline().find_clip(clip_id);
+      clip != nullptr && clip->audio_gain_db() == gain_db) {
+    return;
+  }
+  execute(SetClipAudioGainCommand{clip_id, gain_db});
+}
+
+void CommandProcessor::set_clip_muted(domain::ClipId clip_id, bool muted) {
+  if (const auto* clip = document_.timeline().find_clip(clip_id);
+      clip != nullptr && clip->muted() == muted) {
+    return;
+  }
+  execute(SetClipMutedCommand{clip_id, muted});
+}
+
 domain::ClipId CommandProcessor::split_clip(domain::ClipId clip_id,
                                              domain::MediaTime split_timeline_position) {
   const domain::ClipId right_id = document_.next_clip_id();
@@ -182,6 +198,10 @@ void CommandProcessor::apply(ProjectDocument& document, const Command& command, 
           if (mode == ApplyMode::NewEdit) {
             document.allocator_.consume_clip();
           }
+        } else if constexpr (std::is_same_v<CommandType, SetClipAudioGainCommand>) {
+          timeline.set_clip_audio_gain(concrete_command.clip_id, concrete_command.gain_db);
+        } else if constexpr (std::is_same_v<CommandType, SetClipMutedCommand>) {
+          timeline.set_clip_muted(concrete_command.clip_id, concrete_command.muted);
         } else if constexpr (std::is_same_v<CommandType, RestoreClipCommand>) {
           timeline.restore_clip(concrete_command.track_id, concrete_command.clip);
         } else if constexpr (std::is_same_v<CommandType, RestoreSplitCommand>) {
@@ -226,6 +246,10 @@ Command CommandProcessor::build_inverse(const ProjectDocument& document, const C
           const ClipLocation location = find_clip_location(document, concrete_command.clip_id);
           return RestoreSplitCommand{location.track_id, location.clip,
                                      concrete_command.right_clip_id};
+        } else if constexpr (std::is_same_v<CommandType, SetClipAudioGainCommand> ||
+                             std::is_same_v<CommandType, SetClipMutedCommand>) {
+          const ClipLocation location = find_clip_location(document, concrete_command.clip_id);
+          return RestoreClipCommand{location.track_id, location.clip};
         } else if constexpr (std::is_same_v<CommandType, ImportAssetCommand>) {
           return RemoveAssetCommand{concrete_command.asset.id()};
         } else {

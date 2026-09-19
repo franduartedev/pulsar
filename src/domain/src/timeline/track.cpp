@@ -78,7 +78,8 @@ void Track::trim_clip_start(ClipId id, MediaTime timeline_start) {
   const MediaTime offset = timeline_start - timeline_range.start();
   const TimeRange source_range{original.source_range().start() + offset,
                                original.source_range().end()};
-  *iterator = Clip{original.id(), original.media_id(), source_range, timeline_start};
+  *iterator = Clip{original.id(), original.media_id(), source_range, timeline_start,
+                   original.audio_gain_db(), original.muted()};
 }
 
 void Track::trim_clip_end(ClipId id, MediaTime timeline_end) {
@@ -97,7 +98,8 @@ void Track::trim_clip_end(ClipId id, MediaTime timeline_end) {
   const MediaTime duration = timeline_end - timeline_range.start();
   const TimeRange source_range{original.source_range().start(),
                                original.source_range().start() + duration};
-  *iterator = Clip{original.id(), original.media_id(), source_range, original.timeline_start()};
+  *iterator = Clip{original.id(), original.media_id(), source_range, original.timeline_start(),
+                   original.audio_gain_db(), original.muted()};
 }
 
 void Track::split_clip(ClipId id, MediaTime split_timeline_position, ClipId right_clip_id) {
@@ -121,10 +123,10 @@ void Track::split_clip(ClipId id, MediaTime split_timeline_position, ClipId righ
   const MediaTime source_split = original.source_range().start() + left_duration;
   const Clip left{original.id(), original.media_id(),
                   TimeRange{original.source_range().start(), source_split},
-                  original.timeline_start()};
+                  original.timeline_start(), original.audio_gain_db(), original.muted()};
   const Clip right{right_clip_id, original.media_id(),
                    TimeRange{source_split, original.source_range().end()},
-                   split_timeline_position};
+                   split_timeline_position, original.audio_gain_db(), original.muted()};
 
   Track replacement{id_, kind_};
   for (const auto& existing : clips_) {
@@ -136,6 +138,28 @@ void Track::split_clip(ClipId id, MediaTime split_timeline_position, ClipId righ
     }
   }
   clips_ = std::move(replacement.clips_);
+}
+
+void Track::set_clip_audio_gain(ClipId id, double gain_db) {
+  const auto iterator = std::find_if(
+      clips_.begin(), clips_.end(), [id](const Clip& clip) { return clip.id() == id; });
+  if (iterator == clips_.end()) {
+    throw std::invalid_argument{"clip id does not exist in track"};
+  }
+  const Clip original = *iterator;
+  *iterator = Clip{original.id(), original.media_id(), original.source_range(),
+                   original.timeline_start(), gain_db, original.muted()};
+}
+
+void Track::set_clip_muted(ClipId id, bool muted) {
+  const auto iterator = std::find_if(
+      clips_.begin(), clips_.end(), [id](const Clip& clip) { return clip.id() == id; });
+  if (iterator == clips_.end()) {
+    throw std::invalid_argument{"clip id does not exist in track"};
+  }
+  const Clip original = *iterator;
+  *iterator = Clip{original.id(), original.media_id(), original.source_range(),
+                   original.timeline_start(), original.audio_gain_db(), muted};
 }
 
 MediaTime Track::duration() const {

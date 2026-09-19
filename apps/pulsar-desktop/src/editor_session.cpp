@@ -204,6 +204,16 @@ void EditorSession::trim_clip_end(domain::ClipId clip_id, double pixel, double w
   synchronize_document_state();
 }
 
+void EditorSession::set_clip_audio_gain(domain::ClipId clip_id, double gain_db) {
+  processor_.set_clip_audio_gain(clip_id, gain_db);
+  synchronize_document_state();
+}
+
+void EditorSession::set_clip_muted(domain::ClipId clip_id, bool muted) {
+  processor_.set_clip_muted(clip_id, muted);
+  synchronize_document_state();
+}
+
 bool EditorSession::can_split() const {
   if (!selected_clip_.has_value()) return false;
   const auto* clip = document_.timeline().find_clip(*selected_clip_);
