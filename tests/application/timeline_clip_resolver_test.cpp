@@ -140,6 +140,21 @@ void split_left_and_right_mapping() {
   assert(right_result.clip_id == right && right_result.source_time == time(9));
   assert(same_range(left.timeline_range, TimeRange{time(0), time(4)}));
   assert(same_range(right_result.timeline_range, TimeRange{time(4), time(10)}));
+
+  assert(application::clip_relative_position(left, time(3)) == time(3));
+  assert(application::clip_source_position(left, time(3)) == time(8));
+  assert(application::clip_relative_position(right_result, time(4)) == time(0));
+  assert(application::clip_source_position(right_result, time(4)) == time(9));
+  assert(application::audio_source_position(right_result, time(4), time(477, Rational{1, 1000})) ==
+         time(9477, Rational{1, 1000}));
+
+  bool boundary_rejected = false;
+  try {
+    (void)application::clip_source_position(right_result, time(10));
+  } catch (const std::invalid_argument&) {
+    boundary_rejected = true;
+  }
+  assert(boundary_rejected);
 }
 
 void mixed_time_bases_are_exact() {
@@ -153,6 +168,8 @@ void mixed_time_bases_are_exact() {
   assert(resolved.clip_id == clip);
   assert(resolved.clip_offset == time(50, Rational{1, 1000}));
   assert(resolved.source_time == time(13500, Rational{1, 90000}));
+  assert(application::clip_source_position(resolved, time(1050, Rational{1, 1000})) ==
+         time(13500, Rational{1, 90000}));
 }
 
 void unavailable_and_absent_assets_are_distinct_from_gaps() {

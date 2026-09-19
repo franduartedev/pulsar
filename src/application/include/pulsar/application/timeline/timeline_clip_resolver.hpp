@@ -10,9 +10,8 @@
 
 namespace pulsar::application {
 
-// A0 identity-only audio binding: which audio stream of the clip's source
-// was selected at import. No audio presentation timestamp: the
-// timeline-to-audio mapping is a later M10 step.
+// The audio binding identifies which stream was selected at import. Runtime
+// stream timestamp origin is supplied by the decoder when audio is opened.
 struct AudioSourceBinding {
   std::filesystem::path source_locator;
   AudioAssetMetadata metadata;
@@ -30,6 +29,17 @@ struct ResolvedClip {
   std::filesystem::path source_locator;
   std::optional<AudioSourceBinding> audio;
 };
+
+// Canonical editorial mapping shared by video and embedded-audio playback.
+// Clip geometry is half-open: timeline_position must be in
+// [timeline_range.start(), timeline_range.end()).
+[[nodiscard]] domain::MediaTime clip_relative_position(const ResolvedClip& clip,
+                                                        domain::MediaTime timeline_position);
+[[nodiscard]] domain::MediaTime clip_source_position(const ResolvedClip& clip,
+                                                      domain::MediaTime timeline_position);
+[[nodiscard]] domain::MediaTime audio_source_position(
+    const ResolvedClip& clip, domain::MediaTime timeline_position,
+    std::optional<domain::MediaTime> stream_origin);
 
 struct TimelineGap {
   domain::MediaTime position;

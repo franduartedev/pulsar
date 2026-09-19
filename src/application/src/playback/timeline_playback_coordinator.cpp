@@ -85,14 +85,11 @@ void TimelinePlaybackCoordinator::seek(domain::MediaTime timeline_position_value
   if (!snapshot_.has_value()) {
     throw std::invalid_argument{"cannot seek without a project snapshot"};
   }
-  reanchor_transport(timeline_position_value);
-  if (audio_session_ != nullptr) {
-    audio_session_->seek(timeline_position_value);
-  }
-  clock_source_ = intent_ == PlaybackIntent::Playing ? PlaybackClockSource::Software
-                                                       : PlaybackClockSource::Paused;
   const auto outcome = resolve_clip_at(*snapshot_, snapshot_->video_track_id,
                                        timeline_position_value);
+  reanchor_transport(timeline_position_value);
+  clock_source_ = intent_ == PlaybackIntent::Playing ? PlaybackClockSource::Software
+                                                       : PlaybackClockSource::Paused;
   reconcile(outcome, timeline_position_value, true);
   synchronize_transport();
 }
@@ -293,8 +290,7 @@ TimelinePresentation TimelinePlaybackCoordinator::evaluate_clip(const ResolvedCl
     return *current_presentation_;
   }
 
-  const domain::MediaTime source_time =
-      clip.source_range.start() + (position - clip.timeline_range.start());
+  const domain::MediaTime source_time = clip_source_position(clip, position);
   const PresentationDecision decision =
       source_session_->update_at(PlaybackPosition{source_time});
 

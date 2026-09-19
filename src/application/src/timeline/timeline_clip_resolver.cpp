@@ -17,6 +17,26 @@ namespace {
 
 } // namespace
 
+domain::MediaTime clip_relative_position(const ResolvedClip& clip,
+                                          domain::MediaTime timeline_position) {
+  if (!clip.timeline_range.contains(timeline_position)) {
+    throw std::invalid_argument{"timeline position is outside resolved clip range"};
+  }
+  return timeline_position - clip.timeline_range.start();
+}
+
+domain::MediaTime clip_source_position(const ResolvedClip& clip,
+                                       domain::MediaTime timeline_position) {
+  return clip.source_range.start() + clip_relative_position(clip, timeline_position);
+}
+
+domain::MediaTime audio_source_position(const ResolvedClip& clip,
+                                        domain::MediaTime timeline_position,
+                                        std::optional<domain::MediaTime> stream_origin) {
+  return stream_origin.value_or(domain::MediaTime::zero()) +
+         clip_source_position(clip, timeline_position);
+}
+
 TimelineResolveOutcome resolve_clip_at(const ProjectSnapshot& snapshot,
                                        domain::TrackId track_id,
                                        domain::MediaTime timeline_position) {
@@ -37,9 +57,7 @@ TimelineResolveOutcome resolve_clip_at(const ProjectSnapshot& snapshot,
   }
 
   const domain::TimeRange timeline_range = clip->timeline_range();
-  const domain::MediaTime clip_offset = timeline_position - timeline_range.start();
   const domain::TimeRange source_range = clip->source_range();
-  const domain::MediaTime source_time = source_range.start() + clip_offset;
   const MediaAsset* asset = find_asset(snapshot, clip->media_id());
   if (asset == nullptr) {
     return MissingClipMedia{clip->id(), clip->media_id(), timeline_position, timeline_range,
@@ -56,9 +74,12 @@ TimelineResolveOutcome resolve_clip_at(const ProjectSnapshot& snapshot,
   if (asset->audio().has_value()) {
     audio = AudioSourceBinding{asset->source_locator(), *asset->audio()};
   }
-  return ResolvedClip{clip->id(), clip->media_id(), timeline_position, timeline_range, clip_offset,
-                      source_range, source_time, asset->video_stream_index(),
-                      asset->source_locator(), std::move(audio)};
+  ResolvedClip resolved{clip->id(), clip->media_id(), timeline_position, timeline_range,
+                        timeline_position - timeline_range.start(), source_range,
+                        domain::MediaTime::zero(), asset->video_stream_index(),
+                        asset->source_locator(), std::move(audio)};
+  resolved.source_time = clip_source_position(resolved, timeline_position);
+  return resolved;
 }
 
 } // namespace pulsar::application

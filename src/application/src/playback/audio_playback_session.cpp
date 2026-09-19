@@ -427,9 +427,7 @@ std::size_t AudioPlaybackSession::source_frames_for(domain::MediaTime duration) 
 
 domain::MediaTime AudioPlaybackSession::audio_target_for(
     domain::MediaTime timeline_position) const {
-  const auto source_relative = clip_->source_range.start() +
-                               (timeline_position - clip_->timeline_range.start());
-  return (stream_origin_.value_or(domain::MediaTime::zero()) + source_relative);
+  return audio_source_position(*clip_, timeline_position, stream_origin_);
 }
 
 std::uint64_t AudioPlaybackSession::buffered_device_frames() const {
