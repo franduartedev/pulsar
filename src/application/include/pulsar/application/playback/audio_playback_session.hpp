@@ -28,6 +28,16 @@ public:
   }
   [[nodiscard]] virtual bool seek_to(domain::MediaTime) { return false; }
   [[nodiscard]] virtual std::optional<AudioBlock> decode_next() = 0;
+  enum class ReadState { Block, Starved, Ended };
+  struct ReadResult {
+    ReadState state;
+    std::optional<AudioBlock> block;
+  };
+  [[nodiscard]] virtual ReadResult read_next() {
+    auto block = decode_next();
+    return block.has_value() ? ReadResult{ReadState::Block, std::move(block)}
+                             : ReadResult{ReadState::Ended, std::nullopt};
+  }
 };
 
 using AudioPlaybackSourceFactory = std::function<std::unique_ptr<AudioPlaybackSource>(

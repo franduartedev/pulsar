@@ -141,6 +141,29 @@ public:
   }
 };
 
+class TemporarilyStarvedSource final : public AudioPlaybackSource {
+public:
+  int sample_rate() const noexcept override { return 1000; }
+  int channel_count() const noexcept override { return 1; }
+  bool seek_to(domain::MediaTime) override { return true; }
+  std::optional<AudioBlock> decode_next() override { return std::nullopt; }
+  ReadResult read_next() override {
+    if (first_read_) {
+      first_read_ = false;
+      return {ReadState::Starved, std::nullopt};
+    }
+    if (sent_) return {ReadState::Ended, std::nullopt};
+    sent_ = true;
+    return {ReadState::Block,
+            AudioBlock{1000, 1, 1000, std::vector<float>(1000, 0.5F), Rational{1, 1000},
+                       std::nullopt}};
+  }
+
+private:
+  bool first_read_{true};
+  bool sent_{false};
+};
+
 application::ResolvedClip clip(bool with_audio = true) {
   std::optional<application::AudioSourceBinding> audio;
   if (with_audio) {
@@ -259,6 +282,18 @@ void device_start_failure_is_degraded_not_media_eof() {
   assert(session.condition() != application::AudioPlaybackCondition::SourceEndedEarly);
 }
 
+void decoder_starvation_recovers_without_becoming_eof() {
+  FakeOutput output;
+  AudioPlaybackSession session{
+      &output, [](const auto&, int) { return std::make_unique<TemporarilyStarvedSource>(); }};
+  session.configure(clip(), time(0));
+  assert(session.state() == AudioPlaybackState::Starved);
+  assert(session.condition() == application::AudioPlaybackCondition::Starved);
+  session.update(time(0));
+  assert(session.state() == AudioPlaybackState::Ready);
+  assert(session.condition() == application::AudioPlaybackCondition::Present);
+}
+
 void legitimate_audio_eof_is_not_starvation() {
   FakeOutput output;
   AudioPlaybackSession session{
@@ -302,6 +337,7 @@ int main() {
   no_device_is_explicit_fallback();
   decode_failure_is_terminal_and_not_silence();
   device_start_failure_is_degraded_not_media_eof();
+  decoder_starvation_recovers_without_becoming_eof();
   legitimate_audio_eof_is_not_starvation();
   long_run_clock_has_no_accumulating_float_drift();
 }

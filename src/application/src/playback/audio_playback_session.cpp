@@ -273,18 +273,23 @@ bool AudioPlaybackSession::prepare_audio_at(domain::MediaTime timeline_position)
     return false;
   }
   while (!pending_block_.has_value() && !source_eof_) {
-    std::optional<AudioBlock> next;
+    AudioPlaybackSource::ReadResult result{AudioPlaybackSource::ReadState::Ended, std::nullopt};
     try {
-      next = source_->decode_next();
+      result = source_->read_next();
     } catch (...) {
       set_decode_error("audio decoder failed while preparing audio");
       return false;
     }
-    if (!next.has_value()) {
+    if (result.state == AudioPlaybackSource::ReadState::Starved) {
+      state_ = AudioPlaybackState::Starved;
+      condition_ = AudioPlaybackCondition::Starved;
+      return false;
+    }
+    if (result.state == AudioPlaybackSource::ReadState::Ended || !result.block.has_value()) {
       source_eof_ = true;
       break;
     }
-    pending_block_ = align_block(std::move(*next));
+    pending_block_ = align_block(std::move(*result.block));
   }
   if (!fill_until(static_cast<std::uint64_t>(output_->device_format()->sample_rate) *
                   kStartBufferMilliseconds / 1000)) {
@@ -381,18 +386,23 @@ bool AudioPlaybackSession::fill_until(std::uint64_t target_device_frames) {
       if (source_eof_) {
         break;
       }
-      std::optional<AudioBlock> next;
+      AudioPlaybackSource::ReadResult result{AudioPlaybackSource::ReadState::Ended, std::nullopt};
       try {
-        next = source_->decode_next();
+        result = source_->read_next();
       } catch (...) {
         set_decode_error("audio decoder failed while refilling audio");
         return false;
       }
-      if (!next.has_value()) {
+      if (result.state == AudioPlaybackSource::ReadState::Starved) {
+        state_ = AudioPlaybackState::Starved;
+        condition_ = AudioPlaybackCondition::Starved;
+        return false;
+      }
+      if (result.state == AudioPlaybackSource::ReadState::Ended || !result.block.has_value()) {
         source_eof_ = true;
         break;
       }
-      pending_block_ = align_block(std::move(*next));
+      pending_block_ = align_block(std::move(*result.block));
       if (!pending_block_.has_value()) {
         continue;
       }
