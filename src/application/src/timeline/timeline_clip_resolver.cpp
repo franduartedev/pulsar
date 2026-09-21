@@ -1,4 +1,5 @@
 #include <pulsar/application/timeline/timeline_clip_resolver.hpp>
+#include <pulsar/application/project/project_document.hpp>
 
 #include <stdexcept>
 
@@ -35,6 +36,12 @@ domain::MediaTime audio_source_position(const ResolvedClip& clip,
                                         std::optional<domain::MediaTime> stream_origin) {
   return stream_origin.value_or(domain::MediaTime::zero()) +
          clip_source_position(clip, timeline_position);
+}
+
+domain::TimeRange audio_source_range(const ResolvedClip& clip,
+                                     std::optional<domain::MediaTime> stream_origin) {
+  const auto origin = stream_origin.value_or(domain::MediaTime::zero());
+  return {origin + clip.source_range.start(), origin + clip.source_range.end()};
 }
 
 TimelineResolveOutcome resolve_clip_at(const ProjectSnapshot& snapshot,
@@ -80,6 +87,25 @@ TimelineResolveOutcome resolve_clip_at(const ProjectSnapshot& snapshot,
                         asset->video_stream_index(),
                         asset->source_locator(), std::move(audio)};
   resolved.source_time = clip_source_position(resolved, timeline_position);
+  return resolved;
+}
+
+std::optional<ResolvedClip> resolve_clip_by_id(const ProjectDocument& document,
+                                               domain::ClipId clip_id) {
+  const auto* clip = document.timeline().find_clip(clip_id);
+  if (clip == nullptr) return std::nullopt;
+  const auto asset = document.find_asset(clip->media_id());
+  if (!asset.has_value() || asset->availability() == MediaAvailability::Unavailable)
+    return std::nullopt;
+  const auto timeline_range = clip->timeline_range();
+  const auto source_range = clip->source_range();
+  std::optional<AudioSourceBinding> audio;
+  if (asset->audio().has_value())
+    audio = AudioSourceBinding{asset->source_locator(), *asset->audio()};
+  ResolvedClip resolved{clip->id(), clip->media_id(), timeline_range.start(), timeline_range,
+                        domain::MediaTime::zero(), source_range, source_range.start(),
+                        clip->audio_gain_db(), clip->muted(), asset->video_stream_index(),
+                        asset->source_locator(), std::move(audio)};
   return resolved;
 }
 

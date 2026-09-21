@@ -2,6 +2,7 @@
 
 #include <pulsar/application/project/project_snapshot.hpp>
 #include <pulsar/domain/time/media_time.hpp>
+#include <pulsar/domain/time/time_range.hpp>
 
 #include <filesystem>
 #include <optional>
@@ -9,6 +10,8 @@
 #include <variant>
 
 namespace pulsar::application {
+
+class ProjectDocument;
 
 // The audio binding identifies which stream was selected at import. Runtime
 // stream timestamp origin is supplied by the decoder when audio is opened.
@@ -42,6 +45,10 @@ struct ResolvedClip {
 [[nodiscard]] domain::MediaTime audio_source_position(
     const ResolvedClip& clip, domain::MediaTime timeline_position,
     std::optional<domain::MediaTime> stream_origin);
+// Maps the clip's authoritative A5 source window into raw stream timestamp
+// coordinates. The half-open source interval is preserved.
+[[nodiscard]] domain::TimeRange audio_source_range(
+    const ResolvedClip& clip, std::optional<domain::MediaTime> stream_origin);
 
 struct TimelineGap {
   domain::MediaTime position;
@@ -66,5 +73,9 @@ using TimelineResolveOutcome =
 [[nodiscard]] TimelineResolveOutcome resolve_clip_at(const ProjectSnapshot& snapshot,
                                                      domain::TrackId track_id,
                                                      domain::MediaTime timeline_position);
+// Resolves one already-known clip without copying a full project snapshot.
+// Useful for viewport-bounded editor presentation such as waveform requests.
+[[nodiscard]] std::optional<ResolvedClip> resolve_clip_by_id(
+    const ProjectDocument& document, domain::ClipId clip_id);
 
 } // namespace pulsar::application

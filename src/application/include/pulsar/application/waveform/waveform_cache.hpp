@@ -30,6 +30,9 @@ struct WaveformCacheKey {
   int sample_rate{0};
   int channel_count{0};
   domain::Rational time_base;
+  // Canonical source metadata. Stored and validated with the cache, but not
+  // lookup identity: it is derived from the exact file+stream identity above.
+  // If supplied, it is an expected value and must match.
   std::optional<domain::MediaTime> stream_origin;
 
   [[nodiscard]] std::string stable_text() const;
@@ -167,6 +170,9 @@ public:
   WaveformCacheRequest& operator=(const WaveformCacheRequest&) = delete;
 
   [[nodiscard]] WaveformProgress progress() const;
+  // Available after cache validation or source metadata resolution. A key
+  // whose stream_origin is empty is a resolved source with no origin.
+  [[nodiscard]] std::optional<WaveformCacheKey> resolved_key() const;
   [[nodiscard]] std::optional<WaveformSlice> query_partial(const WaveformQuery& query) const;
   [[nodiscard]] bool wait_for(std::chrono::milliseconds timeout) const;
   void cancel() const noexcept;

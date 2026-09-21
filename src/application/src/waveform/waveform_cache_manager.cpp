@@ -14,6 +14,7 @@ public:
   std::optional<WaveformCacheReader> reader;
   WaveformProgress progress;
   WaveformCacheKey key;
+  bool key_resolved{false};
   std::filesystem::path destination;
   std::function<bool()> cancelled;
   bool cancellation_requested{false};
@@ -26,6 +27,12 @@ WaveformCacheRequest::~WaveformCacheRequest() = default;
 WaveformProgress WaveformCacheRequest::progress() const {
   std::lock_guard lock{impl_->mutex};
   return impl_->progress;
+}
+
+std::optional<WaveformCacheKey> WaveformCacheRequest::resolved_key() const {
+  std::lock_guard lock{impl_->mutex};
+  if (!impl_->key_resolved) return std::nullopt;
+  return impl_->key;
 }
 
 std::optional<WaveformSlice> WaveformCacheRequest::query_partial(const WaveformQuery& query) const {
@@ -78,22 +85,22 @@ public:
       if (stopping) throw std::logic_error{"waveform cache manager is shut down"};
       if (const auto found = registry.find(identity); found != registry.end()) {
         std::lock_guard request_lock{found->second->mutex};
+        if (key.stream_origin.has_value()) {
+          auto& existing = found->second->key.stream_origin;
+          if (existing.has_value() && existing != key.stream_origin)
+            throw std::invalid_argument{"conflicting expected waveform stream origin"};
+          if (!found->second->key_resolved) existing = key.stream_origin;
+          else if (existing != key.stream_origin)
+            throw std::invalid_argument{"waveform stream origin does not match cached source"};
+        }
         if (found->second->progress.status != WaveformCacheStatus::Failed) return found->second;
         registry.erase(found);
       }
     }
     const auto destination = waveform_cache_path(directory, key);
-    if (auto reader = WaveformCacheReader::open(destination, key)) {
-      auto request = std::make_shared<WaveformCacheRequest::Impl>();
-      request->key = key; request->destination = destination; request->reader = std::move(reader);
-      request->progress = {WaveformCacheStatus::Ready, request->reader->source_frames(), request->reader->source_frames(), request->reader->level_count(), {}};
-      request->terminal = true;
-      std::lock_guard lock{mutex};
-      auto [it, inserted] = registry.emplace(identity, request);
-      return inserted ? request : it->second;
-    }
     auto request = std::make_shared<WaveformCacheRequest::Impl>();
-    request->key = key; request->destination = destination;
+    request->key = key; request->key_resolved = key.stream_origin.has_value();
+    request->destination = destination;
     request->progress.status = WaveformCacheStatus::Missing; request->progress.total_frames = total_frames;
     std::lock_guard lock{mutex};
     auto [it, inserted] = registry.emplace(identity, request);
@@ -127,12 +134,41 @@ private:
         std::lock_guard lock{request->mutex};
         if (request->cancellation_requested) { request->progress.status = WaveformCacheStatus::Failed; request->progress.error = "cancelled"; request->terminal = true; request->condition.notify_all(); return; }
         request->progress.status = WaveformCacheStatus::Generating;
-        request->builder = std::make_unique<WaveformCacheBuilder>(request->key, request->destination);
+      }
+      // Cache validation reads/checksums the cache file. Keep that work on the
+      // bounded A7 worker, never on the Qt owner thread calling request().
+      if (auto reader = WaveformCacheReader::open(request->destination, request->key)) {
+        std::lock_guard lock{request->mutex};
+        request->key = reader->key();
+        request->key_resolved = true;
+        request->progress = {WaveformCacheStatus::Ready, reader->source_frames(),
+                             reader->source_frames(), reader->level_count(), {}};
+        request->reader = std::move(reader);
+        request->terminal = true;
+        request->condition.notify_all();
+        return;
       }
       auto source = job.factory();
       if (!source) throw std::runtime_error{"waveform source factory returned null"};
       const auto info = source->info();
-      if (info.sample_rate != request->key.sample_rate || info.channel_count != request->key.channel_count || info.time_base != request->key.time_base || info.stream_origin != request->key.stream_origin) throw std::runtime_error{"waveform source metadata changed"};
+      WaveformCacheKey resolved_key;
+      {
+        std::lock_guard lock{request->mutex};
+        const auto& requested_key = request->key;
+        if (info.sample_rate != requested_key.sample_rate ||
+            info.channel_count != requested_key.channel_count ||
+            info.time_base != requested_key.time_base ||
+            (requested_key.stream_origin.has_value() &&
+             info.stream_origin != requested_key.stream_origin)) {
+          throw std::runtime_error{"waveform source metadata changed"};
+        }
+        resolved_key = requested_key;
+        resolved_key.stream_origin = info.stream_origin;
+        request->key = resolved_key;
+        request->key_resolved = true;
+        request->builder = std::make_unique<WaveformCacheBuilder>(resolved_key,
+                                                                   request->destination);
+      }
       for (;;) {
         {
           std::lock_guard lock{request->mutex};

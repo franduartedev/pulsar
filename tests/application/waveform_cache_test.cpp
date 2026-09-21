@@ -11,6 +11,7 @@
 #include <memory>
 #include <atomic>
 #include <optional>
+#include <stdexcept>
 #include <vector>
 
 namespace {
@@ -23,10 +24,12 @@ using application::WaveformCacheReader;
 
 class SyntheticSource final : public application::WaveformSource {
 public:
-  SyntheticSource(int rate, int channels, std::vector<float> samples, std::size_t block)
-      : rate_{rate}, channels_{channels}, samples_{std::move(samples)}, block_{block} {}
+  SyntheticSource(int rate, int channels, std::vector<float> samples, std::size_t block,
+                  std::optional<domain::MediaTime> origin = domain::MediaTime::zero())
+      : rate_{rate}, channels_{channels}, samples_{std::move(samples)}, block_{block},
+        origin_{origin} {}
   application::WaveformSourceInfo info() const override {
-    return {rate_, channels_, domain::Rational{1, rate_}, domain::MediaTime::zero()};
+    return {rate_, channels_, domain::Rational{1, rate_}, origin_};
   }
   std::optional<AudioBlock> next_block() override {
     if (position_ == samples_.size()) return std::nullopt;
@@ -38,7 +41,12 @@ public:
   }
 private:
   int rate_; int channels_; std::vector<float> samples_; std::size_t block_; std::size_t position_{0};
+  std::optional<domain::MediaTime> origin_;
 };
+
+void check(bool condition) {
+  if (!condition) throw std::runtime_error{"waveform origin bridge regression"};
+}
 
 WaveformCacheKey key() {
   return {"synthetic-source-v1", 2, 48000, 2, domain::Rational{1, 48000}, domain::MediaTime::zero()};
@@ -154,6 +162,10 @@ void test_source_identity_changes() {
   const auto first = application::make_waveform_cache_key(source_path, 1, 48000, 2, domain::Rational{1, 48000}, domain::MediaTime::zero());
   { std::ofstream out(source_path, std::ios::binary | std::ios::app); out << "changed"; }
   const auto second = application::make_waveform_cache_key(source_path, 1, 48000, 2, domain::Rational{1, 48000}, domain::MediaTime::zero());
+  check(!(first == second));
+  const auto other_stream = application::make_waveform_cache_key(
+      source_path, 2, 48000, 2, domain::Rational{1, 48000}, domain::MediaTime::zero());
+  check(!(second == other_stream));
   assert(!(first == second));
   std::filesystem::remove_all(directory);
 }
@@ -184,6 +196,82 @@ void test_manager_coalesces_and_reuses() {
   std::filesystem::remove_all(directory);
 }
 
+void test_manager_resolves_origin_and_reuses_without_pcm_decode() {
+  const auto directory = std::filesystem::temp_directory_path() / "pulsar-a7-origin-bridge";
+  std::filesystem::create_directories(directory);
+  const auto origin = domain::MediaTime{7, domain::Rational{1, 2}};
+  const auto identity_key = WaveformCacheKey{
+      "audio-late-source|size=12|mtime=34", 3, 1000, 1, domain::Rational{1, 1000},
+      std::nullopt};
+  const auto known_origin_key = WaveformCacheKey{
+      "audio-late-source|size=12|mtime=34", 3, 1000, 1, domain::Rational{1, 1000}, origin};
+  check(identity_key == known_origin_key);
+  std::atomic<int> factory_calls{0};
+  application::WaveformCacheManager manager{1};
+  const auto factory = [&] {
+    ++factory_calls;
+    return std::make_unique<SyntheticSource>(1000, 1, std::vector<float>(1000, 0.5f),
+                                              128, origin);
+  };
+  auto first = manager.request(directory, identity_key, factory, 1000);
+  auto second = manager.request(directory, identity_key, factory, 1000);
+  const bool first_done = first->wait_for(std::chrono::seconds{5});
+  const bool second_done = second->wait_for(std::chrono::seconds{5});
+  check(first_done && second_done);
+  check(first->progress().status == application::WaveformCacheStatus::Ready);
+  check(factory_calls.load() == 1);
+  const auto resolved = first->resolved_key();
+  check(resolved.has_value() && resolved->stream_origin == origin);
+  const auto visible = first->query_partial({origin, origin + domain::MediaTime{1, domain::Rational{1, 1}}, 32, 1.0});
+  check(visible.has_value() && !visible->buckets.empty());
+  const auto before = first->query_partial({domain::MediaTime::zero(), origin, 32, 1.0});
+  check(before.has_value() && before->buckets.empty());
+  manager.shutdown();
+
+  application::WaveformCacheManager reuse_manager{1};
+  auto reused = reuse_manager.request(directory, identity_key, [&] {
+    ++factory_calls;
+    return std::unique_ptr<application::WaveformSource>{};
+  });
+  const bool reused_done = reused->wait_for(std::chrono::seconds{5});
+  check(reused_done && reused->progress().status == application::WaveformCacheStatus::Ready);
+  check(factory_calls.load() == 1);
+  const auto cached_origin = reused->resolved_key();
+  check(cached_origin.has_value() && cached_origin->stream_origin == origin);
+  reuse_manager.shutdown();
+
+  const auto cache_path = application::waveform_cache_path(directory, identity_key);
+  const auto corrupt_path = directory / "corrupt-origin.pwfc";
+  std::filesystem::copy_file(cache_path, corrupt_path,
+                             std::filesystem::copy_options::overwrite_existing);
+  const auto origin_byte = static_cast<std::streamoff>(
+      8 + 4 + 4 + 8 + static_cast<std::streamoff>(identity_key.stable_text().size()) +
+      4 + 4 + 8 + 8);
+  {
+    std::fstream cache{corrupt_path, std::ios::binary | std::ios::in | std::ios::out};
+    cache.seekg(origin_byte);
+    const auto byte = cache.get();
+    cache.seekp(origin_byte);
+    cache.put(static_cast<char>(byte ^ 0x01));
+  }
+  check(!WaveformCacheReader::open(corrupt_path, identity_key).has_value());
+
+  const WaveformCacheKey absent_origin_key{
+      "origin-absent-source|size=4|mtime=5", 3, 1000, 1,
+      domain::Rational{1, 1000}, std::nullopt};
+  application::WaveformCacheManager absent_manager{1};
+  auto absent = absent_manager.request(directory / "absent", absent_origin_key, [] {
+    return std::make_unique<SyntheticSource>(1000, 1, std::vector<float>(256, 0.0f),
+                                              64, std::nullopt);
+  });
+  const bool absent_done = absent->wait_for(std::chrono::seconds{5});
+  check(absent_done && absent->progress().status == application::WaveformCacheStatus::Ready);
+  const auto absent_resolved = absent->resolved_key();
+  check(absent_resolved.has_value() && !absent_resolved->stream_origin.has_value());
+  absent_manager.shutdown();
+  std::filesystem::remove_all(directory);
+}
+
 void test_a5_source_windows_reuse_asset_cache() {
   using domain::MediaId; using domain::MediaTime; using domain::Rational; using domain::TimeRange;
   const auto t = [](std::int64_t seconds) { return MediaTime{seconds, Rational{1, 1}}; };
@@ -195,6 +283,10 @@ void test_a5_source_windows_reuse_asset_cache() {
   };
   const auto cache_key = WaveformCacheKey{"asset-file|size=1|mtime=1", 2, 48000, 2, Rational{1, 48000}, t(0)};
   const auto original = make_clip(t(10), t(100), t(10));
+  const auto origin = MediaTime{2, Rational{1, 1}};
+  const auto raw_stream_window = application::audio_source_range(original, origin);
+  assert(raw_stream_window.start() == t(102));
+  assert(raw_stream_window.end() == t(112));
   const auto split = t(104);
   const auto left = make_clip(t(10), t(100), t(4));
   const auto right = make_clip(split, split, t(6));
@@ -221,6 +313,7 @@ int main() {
   test_cancellation_and_transaction();
   test_source_identity_changes();
   test_manager_coalesces_and_reuses();
+  test_manager_resolves_origin_and_reuses_without_pcm_decode();
   test_a5_source_windows_reuse_asset_cache();
   std::cout << "waveform cache tests passed\n";
 }

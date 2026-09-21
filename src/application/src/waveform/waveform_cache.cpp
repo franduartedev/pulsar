@@ -19,7 +19,9 @@ namespace pulsar::application {
 namespace {
 
 constexpr std::array<char, 8> kMagic{'P', 'U', 'L', 'S', 'A', 'R', 'W', 'F'};
-constexpr std::uint32_t kSchema = 1;
+// Schema 2 makes origin validated source metadata rather than lookup identity.
+// Schema 1 cache paths included origin and are intentionally treated as stale.
+constexpr std::uint32_t kSchema = 2;
 constexpr std::uint32_t kGenerator = 1;
 
 void write_u32(std::ostream& out, std::uint32_t value) {
@@ -94,6 +96,20 @@ std::uint32_t crc32_update(std::uint32_t crc, const char* data, std::size_t size
   return crc;
 }
 
+std::uint32_t origin_metadata_crc(std::int64_t value, std::int64_t numerator,
+                                  std::int64_t denominator) {
+  std::uint32_t crc = 0xffffffffU;
+  for (const auto field : {value, numerator, denominator}) {
+    std::array<char, 8> bytes{};
+    const auto bits = static_cast<std::uint64_t>(field);
+    for (int index = 0; index < 8; ++index)
+      bytes[static_cast<std::size_t>(index)] =
+          static_cast<char>((bits >> (index * 8)) & 0xffU);
+    crc = crc32_update(crc, bytes.data(), bytes.size());
+  }
+  return crc ^ 0xffffffffU;
+}
+
 std::uint32_t crc32_file(const std::vector<std::filesystem::path>& paths) {
   std::array<char, 64 * 1024> buffer{};
   std::uint32_t crc = 0xffffffffU;
@@ -117,8 +133,7 @@ std::uint32_t crc32_stream(std::istream& input, std::uint64_t bytes) {
 std::string WaveformCacheKey::stable_text() const {
   return source_identity + "|" + std::to_string(stream_index) + "|" + std::to_string(sample_rate) + "|" +
          std::to_string(channel_count) + "|" + std::to_string(time_base.numerator()) + "/" +
-         std::to_string(time_base.denominator()) + "|" +
-         (stream_origin ? std::to_string(stream_origin->value()) + ":" + std::to_string(stream_origin->time_base().numerator()) + "/" + std::to_string(stream_origin->time_base().denominator()) : "none");
+         std::to_string(time_base.denominator());
 }
 bool WaveformCacheKey::operator==(const WaveformCacheKey& other) const { return stable_text() == other.stable_text(); }
 
@@ -218,7 +233,11 @@ public:
     out.write(kMagic.data(), static_cast<std::streamsize>(kMagic.size())); write_u32(out, kSchema); write_u32(out, kGenerator);
     write_string(out, key_.stable_text()); write_u32(out, static_cast<std::uint32_t>(key_.sample_rate)); write_u32(out, static_cast<std::uint32_t>(key_.channel_count));
     write_i64(out, key_.time_base.numerator()); write_i64(out, key_.time_base.denominator());
-    write_i64(out, key_.stream_origin ? key_.stream_origin->value() : 0); write_i64(out, key_.stream_origin ? key_.stream_origin->time_base().numerator() : 0); write_i64(out, key_.stream_origin ? key_.stream_origin->time_base().denominator() : 1);
+    const auto origin_value = key_.stream_origin ? key_.stream_origin->value() : 0;
+    const auto origin_num = key_.stream_origin ? key_.stream_origin->time_base().numerator() : 0;
+    const auto origin_den = key_.stream_origin ? key_.stream_origin->time_base().denominator() : 1;
+    write_i64(out, origin_value); write_i64(out, origin_num); write_i64(out, origin_den);
+    write_u32(out, origin_metadata_crc(origin_value, origin_num, origin_den));
     write_u32(out, options_.level_zero_samples); write_u32(out, options_.reduction_factor); write_u32(out, static_cast<std::uint32_t>(indexes.size())); write_u32(out, 1);
     write_u64(out, report.source_frames);
     write_u32(out, payload_checksum);
@@ -291,8 +310,12 @@ std::optional<WaveformCacheReader> WaveformCacheReader::open(const std::filesyst
     if (read_u32(in) != kSchema || read_u32(in) != kGenerator) return std::nullopt;
     if (read_string(in) != expected_key.stable_text()) return std::nullopt;
     auto impl = std::make_unique<Impl>(); impl->path = path; impl->key = expected_key; impl->sample_rate = static_cast<int>(read_u32(in)); impl->channels = static_cast<int>(read_u32(in)); impl->time_base = domain::Rational{read_i64(in), read_i64(in)};
-    const auto origin_value = read_i64(in); const auto origin_num = read_i64(in); const auto origin_den = read_i64(in); if (origin_num != 0) impl->origin = domain::MediaTime{origin_value, domain::Rational{origin_num, origin_den}};
-    if (impl->origin != expected_key.stream_origin) return std::nullopt;
+    const auto origin_value = read_i64(in); const auto origin_num = read_i64(in); const auto origin_den = read_i64(in);
+    if (read_u32(in) != origin_metadata_crc(origin_value, origin_num, origin_den)) return std::nullopt;
+    if (origin_num == 0 && (origin_value != 0 || origin_den != 1)) return std::nullopt;
+    if (origin_num != 0) impl->origin = domain::MediaTime{origin_value, domain::Rational{origin_num, origin_den}};
+    if (expected_key.stream_origin.has_value() && impl->origin != expected_key.stream_origin) return std::nullopt;
+    impl->key.stream_origin = impl->origin;
     impl->l0 = read_u32(in); impl->factor = read_u32(in); impl->levels = read_u32(in); const auto complete = read_u32(in); impl->frames = read_u64(in); const auto expected_checksum = read_u32(in); if (complete != 1 || impl->l0 == 0 || impl->factor != 2 || impl->levels == 0 || impl->channels <= 0) return std::nullopt;
     if (impl->sample_rate != expected_key.sample_rate || impl->channels != expected_key.channel_count || impl->time_base != expected_key.time_base) return std::nullopt;
     impl->indexes.resize(impl->levels); const auto file_size = std::filesystem::file_size(path); const auto payload_start = static_cast<std::uint64_t>(in.tellg()) + static_cast<std::uint64_t>(impl->levels) * 16U; std::uint64_t expected_offset = payload_start;
