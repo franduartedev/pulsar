@@ -8,17 +8,20 @@ Item {
     Repeater {
         model: controller.timelineClips
         delegate: ClipBlock {
+            visible: model.inViewport
             y: 9
-            canonicalStartX: modelData.startProgress * track.width
-            canonicalWidth: Math.max(3, (modelData.endProgress - modelData.startProgress) * track.width)
+            canonicalStartX: model.startProgress * track.width
+            canonicalWidth: Math.max(3, (model.endProgress - model.startProgress) * track.width)
             height: track.height - 14
             timelineWidth: track.width
-            clipName: modelData.name
-            startText: modelData.start
-            endText: modelData.end
-            missing: modelData.missing
-            selected: modelData.selected
-            clipKey: modelData.clipKey
+            clipName: model.clipName
+            startText: model.startText
+            endText: model.endText
+            missing: model.missing
+            selected: model.selected
+            muted: model.muted
+            gainDb: model.gainDb
+            clipKey: model.clipKey
             onActivated: controller.selectTimelineClip(clipKey)
         }
     }

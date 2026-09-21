@@ -45,32 +45,37 @@ std::optional<domain::MediaTime> TimelineViewport::time_at(double pixel, double 
   if (!std::isfinite(pixel) || !std::isfinite(width) || width <= 0.0) {
     return std::nullopt;
   }
-  if (duration_ <= domain::MediaTime::zero()) return domain::MediaTime::zero();
+  if (duration_ <= domain::MediaTime::zero()) return view_start_;
   const double bounded = std::clamp(pixel, 0.0, width);
   const long double fraction = static_cast<long double>(bounded / width);
   const long double seconds = static_cast<long double>(duration_.value()) *
                               static_cast<long double>(duration_.time_base().numerator()) /
                               static_cast<long double>(duration_.time_base().denominator());
   const long double quantized = std::round(seconds * fraction * display_quantum_denominator);
-  if (quantized <= 0.0L) return domain::MediaTime::zero();
-  if (quantized >= seconds * display_quantum_denominator) return duration_;
+  if (quantized <= 0.0L) return view_start_;
+  if (quantized >= seconds * display_quantum_denominator) return view_start_ + duration_;
   if (quantized > static_cast<long double>(std::numeric_limits<std::int64_t>::max())) {
-    return duration_;
+    return view_start_ + duration_;
   }
-  return domain::MediaTime{static_cast<std::int64_t>(quantized),
-                           domain::Rational{1, display_quantum_denominator}};
+  return view_start_ + domain::MediaTime{static_cast<std::int64_t>(quantized),
+                                         domain::Rational{1, display_quantum_denominator}};
 }
 
 double TimelineViewport::pixel_at(domain::MediaTime time, double width) const {
+  return std::clamp(pixel_at_unclamped(time, width), 0.0, std::max(0.0, width));
+}
+
+double TimelineViewport::pixel_at_unclamped(domain::MediaTime time, double width) const {
   if (!std::isfinite(width) || width <= 0.0 || duration_ <= domain::MediaTime::zero()) return 0.0;
-  const long double numerator = static_cast<long double>(time.value()) *
-                                static_cast<long double>(time.time_base().numerator()) /
-                                static_cast<long double>(time.time_base().denominator());
+  const auto offset = time - view_start_;
+  const long double numerator = static_cast<long double>(offset.value()) *
+                                static_cast<long double>(offset.time_base().numerator()) /
+                                static_cast<long double>(offset.time_base().denominator());
   const long double denominator = static_cast<long double>(duration_.value()) *
                                   static_cast<long double>(duration_.time_base().numerator()) /
                                   static_cast<long double>(duration_.time_base().denominator());
   if (denominator <= 0.0L) return 0.0;
-  return static_cast<double>(std::clamp(numerator / denominator, 0.0L, 1.0L) * width);
+  return static_cast<double>((numerator / denominator) * width);
 }
 
 EditorSession::EditorSession()
@@ -183,8 +188,13 @@ void EditorSession::move_clip(domain::ClipId clip_id, double press_pixel, double
   const auto press = time_at(press_pixel, width);
   const auto current = time_at(current_pixel, width);
   if (!press.has_value() || !current.has_value()) throw std::invalid_argument{"invalid move gesture"};
+  move_clip(clip_id, *press, *current);
+}
+
+void EditorSession::move_clip(domain::ClipId clip_id, domain::MediaTime press_time,
+                              domain::MediaTime current_time) {
   const auto& original = require_clip(document_, clip_id);
-  const auto delta = *current - *press;
+  const auto delta = current_time - press_time;
   processor_.move_clip(clip_id, document_.video_track_id(), original.timeline_start() + delta);
   selected_clip_ = clip_id;
   synchronize_document_state();
@@ -193,14 +203,22 @@ void EditorSession::move_clip(domain::ClipId clip_id, double press_pixel, double
 void EditorSession::trim_clip_start(domain::ClipId clip_id, double pixel, double width) {
   const auto target = time_at(pixel, width);
   if (!target.has_value()) throw std::invalid_argument{"invalid trim gesture"};
-  processor_.trim_clip_start(clip_id, *target);
+  trim_clip_start(clip_id, *target);
+}
+
+void EditorSession::trim_clip_start(domain::ClipId clip_id, domain::MediaTime timeline_start) {
+  processor_.trim_clip_start(clip_id, timeline_start);
   synchronize_document_state();
 }
 
 void EditorSession::trim_clip_end(domain::ClipId clip_id, double pixel, double width) {
   const auto target = time_at(pixel, width);
   if (!target.has_value()) throw std::invalid_argument{"invalid trim gesture"};
-  processor_.trim_clip_end(clip_id, *target);
+  trim_clip_end(clip_id, *target);
+}
+
+void EditorSession::trim_clip_end(domain::ClipId clip_id, domain::MediaTime timeline_end) {
+  processor_.trim_clip_end(clip_id, timeline_end);
   synchronize_document_state();
 }
 

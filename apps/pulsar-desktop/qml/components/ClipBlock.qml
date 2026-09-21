@@ -1,4 +1,5 @@
 import QtQuick
+import Pulsar.Desktop 1.0
 import "../theme/Theme.js" as Theme
 
 Rectangle {
@@ -9,6 +10,8 @@ Rectangle {
     property string endText: ""
     property bool missing: false
     property bool selected: false
+    property bool muted: false
+    property real gainDb: 0
     property real canonicalStartX: 0
     property real canonicalWidth: 3
     property real timelineWidth: 1
@@ -29,10 +32,41 @@ Rectangle {
     border.color: missing ? Theme.danger : (selected ? Theme.accent : (body.containsMouse ? Theme.edge : Theme.border))
     border.width: selected ? 2 : 1
     radius: Theme.radiusS
+    clip: true
 
     Rectangle { anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top; height: 2; color: missing ? Theme.danger : (selected ? Theme.accent : Theme.edge); opacity: selected || missing ? 0.9 : 0.5 }
+    WaveformItem {
+        id: waveform
+        x: 4
+        y: 25
+        width: Math.max(0, parent.width - 8)
+        height: Math.max(0, parent.height - 48)
+        clipKey: block.clipKey
+        selected: block.selected
+        muted: block.muted
+        density: controller.waveformDensity
+        normalColor: Theme.waveform
+        selectedColor: Theme.waveformSelected
+        pendingColor: Theme.waveformPending
+        unavailableColor: Theme.waveformUnavailable
+        baselineColor: Theme.waveformBaseline
+        visible: width >= 10 && height >= 8
+        Component.onCompleted: controller.attachWaveformItem(block.clipKey, waveform)
+        Component.onDestruction: controller.detachWaveformItem(waveform)
+    }
     Text { anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top; anchors.margins: 7; text: block.clipName; color: Theme.textBright; font.pixelSize: Theme.fontSizeS; font.bold: block.selected; elide: Text.ElideRight }
-    Text { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; anchors.leftMargin: 7; anchors.rightMargin: 7; anchors.bottomMargin: 6; text: block.missing ? "OFFLINE  ·  " + block.startText : block.startText + "  →  " + block.endText; color: block.missing ? Theme.danger : Theme.muted; font.pixelSize: Theme.fontSizeXS; font.family: "monospace"; elide: Text.ElideRight }
+    Text { anchors.left: parent.left; anchors.bottom: parent.bottom; anchors.leftMargin: 7; anchors.bottomMargin: 6; text: block.missing ? "OFFLINE" : (block.muted ? "MUTED" : (Math.abs(block.gainDb) >= 0.05 ? block.gainDb.toFixed(0) + " dB" : "")); color: block.missing ? Theme.danger : (block.muted ? Theme.waveformPending : Theme.muted); font.pixelSize: Theme.fontSizeXS; font.bold: block.muted; font.family: "monospace"; visible: width > 24 }
+    Text { anchors.right: parent.right; anchors.bottom: parent.bottom; anchors.rightMargin: 7; anchors.bottomMargin: 6; text: block.startText + "  →  " + block.endText; color: block.missing ? Theme.danger : Theme.muted; font.pixelSize: Theme.fontSizeXS; font.family: "monospace"; elide: Text.ElideRight; width: Math.max(0, parent.width - 18); horizontalAlignment: Text.AlignRight }
+    Text {
+        anchors.centerIn: waveform
+        text: waveform.waveformState === WaveformItem.Failed ? "WAVEFORM UNAVAILABLE" :
+              (waveform.waveformState === WaveformItem.Missing || waveform.waveformState === WaveformItem.Generating ? "WAVEFORM PENDING" :
+              (waveform.hasUnavailableRange ? "NO SOURCE AUDIO" : ""))
+        color: Theme.waveformPending
+        font.pixelSize: Theme.fontSizeXS
+        font.family: "monospace"
+        visible: waveform.visible && text.length > 0
+    }
 
     Rectangle {
         id: leftHandle

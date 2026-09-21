@@ -19,10 +19,12 @@ struct WaveformSegment {
 struct WaveformGeometry {
   std::vector<WaveformSegment> segments;
   std::vector<std::uint32_t> pending_columns;
+  std::vector<std::uint32_t> unavailable_columns;
   std::uint32_t width{0};
 };
 
 struct WaveformRenderPolicy {
+  // Used with the source-range query to select A7 LOD; never alters timing.
   double density{1.0};
   bool combine_channels{false};
   std::uint32_t raster_width{0};
@@ -32,8 +34,14 @@ struct WaveformRenderPolicy {
 
 // Prepares at most one extrema segment per occupied pixel column and displayed
 // channel. Bucket extrema are merged, never stride sampled. A partial slice's
-// unavailable suffix is represented separately as pending columns.
+// unavailable source prefix is distinct from its pending suffix.
 [[nodiscard]] WaveformGeometry prepare_waveform_geometry(
     const WaveformSlice& slice, int sample_rate, const WaveformRenderPolicy& policy);
+// Boundary refinements replace the base LOD's contribution in every raster
+// column touched by their requested intervals. Each refined slice is queried
+// at a finer A7 LOD by the caller.
+[[nodiscard]] WaveformGeometry prepare_waveform_geometry(
+    const WaveformSlice& slice, const std::vector<WaveformSlice>& boundary_refinements,
+    int sample_rate, const WaveformRenderPolicy& policy);
 
 } // namespace pulsar::application

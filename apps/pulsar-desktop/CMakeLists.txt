@@ -7,6 +7,10 @@ qt_add_executable(pulsar_desktop
   src/main.cpp
   src/desktop_controller.cpp
   src/desktop_controller.hpp
+  src/timeline_clip_list_model.cpp
+  src/timeline_clip_list_model.hpp
+  src/waveform_quick_item.cpp
+  src/waveform_quick_item.hpp
   src/editor_session.cpp
   src/editor_session.hpp
   src/preview_image_provider.cpp

@@ -5,6 +5,7 @@ Item {
     id: head
     property real progress: 0
     property bool dragging: false
+    visible: progress >= 0
     width: 12
     x: Math.max(0, Math.min(parent.width - width, progress * parent.width - width / 2))
     Rectangle { anchors.horizontalCenter: parent.horizontalCenter; width: 2; height: parent.height; color: Theme.accentHover; opacity: 0.95 }

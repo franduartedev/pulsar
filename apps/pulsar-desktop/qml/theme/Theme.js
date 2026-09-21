@@ -43,6 +43,11 @@ var track = "#202b38"
 
 // Semantic
 var danger = "#ff6b6b"
+var waveform = "#71a4ff"
+var waveformSelected = "#c7dcff"
+var waveformPending = "#d3a85d"
+var waveformBaseline = "#56667b"
+var waveformUnavailable = "#69717c"
 
 // Overlay
 var badge = "#aa101820"

@@ -42,11 +42,15 @@ struct EditorSyncDiagnostics {
 
 class TimelineViewport {public:
   explicit TimelineViewport(domain::MediaTime duration) : duration_{duration} {}
+  TimelineViewport(domain::MediaTime view_start, domain::MediaTime view_duration)
+      : duration_{view_duration}, view_start_{view_start} {}
   [[nodiscard]] std::optional<domain::MediaTime> time_at(double pixel, double width) const;
   [[nodiscard]] double pixel_at(domain::MediaTime time, double width) const;
+  [[nodiscard]] double pixel_at_unclamped(domain::MediaTime time, double width) const;
 
 private:
   domain::MediaTime duration_;
+  domain::MediaTime view_start_{domain::MediaTime::zero()};
 };
 
 class EditorSession final {
@@ -83,8 +87,12 @@ public:
   void seek(domain::MediaTime position);
   [[nodiscard]] domain::MediaTime playback_position() const;
   void move_clip(domain::ClipId clip, double press_pixel, double current_pixel, double width);
+  void move_clip(domain::ClipId clip, domain::MediaTime press_time,
+                 domain::MediaTime current_time);
   void trim_clip_start(domain::ClipId clip, double pixel, double width);
+  void trim_clip_start(domain::ClipId clip, domain::MediaTime timeline_start);
   void trim_clip_end(domain::ClipId clip, double pixel, double width);
+  void trim_clip_end(domain::ClipId clip, domain::MediaTime timeline_end);
   void set_clip_audio_gain(domain::ClipId clip, double gain_db);
   void set_clip_muted(domain::ClipId clip, bool muted);
   [[nodiscard]] bool can_split() const;

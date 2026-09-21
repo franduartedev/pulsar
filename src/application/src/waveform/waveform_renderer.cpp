@@ -8,20 +8,43 @@
 namespace pulsar::application {
 namespace {
 
-long double seconds(domain::MediaTime time) {
-  const auto value = time.seconds();
-  return static_cast<long double>(value.numerator()) /
-         static_cast<long double>(value.denominator());
-}
+// Rational pixel mapping uses 128-bit products of normalized int64 rationals.
+// The largest cross product is below 2^126. Multiplication by pixel width is
+// performed as bounded modular doubling so it cannot overflow that product.
+__extension__ typedef unsigned __int128 WideUnsigned;
 
-std::uint32_t pixel_floor(long double value, std::uint32_t width) {
-  return static_cast<std::uint32_t>(std::clamp(std::floor(value), 0.0L,
-                                               static_cast<long double>(width)));
-}
-
-std::uint32_t pixel_ceil(long double value, std::uint32_t width) {
-  return static_cast<std::uint32_t>(std::clamp(std::ceil(value), 0.0L,
-                                               static_cast<long double>(width)));
+std::uint32_t fraction_pixel(domain::MediaTime time, domain::MediaTime start,
+                             domain::MediaTime end, std::uint32_t width,
+                             bool round_up) {
+  if (time <= start) return 0;
+  if (time >= end) return width;
+  const auto offset = (time - start).seconds();
+  const auto duration = (end - start).seconds();
+  const WideUnsigned numerator = static_cast<WideUnsigned>(offset.numerator()) *
+                                 static_cast<WideUnsigned>(duration.denominator());
+  const WideUnsigned denominator = static_cast<WideUnsigned>(offset.denominator()) *
+                                   static_cast<WideUnsigned>(duration.numerator());
+  WideUnsigned remainder = 0;
+  std::uint32_t quotient = 0;
+  int top_bit = 31;
+  while (top_bit > 0 && ((width >> top_bit) & 1U) == 0U) --top_bit;
+  for (int bit = top_bit; bit >= 0; --bit) {
+    quotient *= 2U;
+    remainder *= 2U;
+    if (remainder >= denominator) {
+      remainder -= denominator;
+      ++quotient;
+    }
+    if (((width >> bit) & 1U) != 0U) {
+      remainder += numerator;
+      if (remainder >= denominator) {
+        remainder -= denominator;
+        ++quotient;
+      }
+    }
+  }
+  if (round_up && remainder != 0) ++quotient;
+  return std::min(quotient, width);
 }
 
 struct Extrema {
@@ -34,6 +57,12 @@ struct Extrema {
 
 WaveformGeometry prepare_waveform_geometry(const WaveformSlice& slice, int sample_rate,
                                             const WaveformRenderPolicy& policy) {
+  return prepare_waveform_geometry(slice, {}, sample_rate, policy);
+}
+
+WaveformGeometry prepare_waveform_geometry(
+    const WaveformSlice& slice, const std::vector<WaveformSlice>& boundary_refinements,
+    int sample_rate, const WaveformRenderPolicy& policy) {
   if (sample_rate <= 0 || !std::isfinite(policy.density) || policy.density <= 0.0 ||
       !std::isfinite(policy.content_height) || policy.content_height < 0.0 ||
       slice.channel_count <= 0 || slice.bucket_sample_span == 0 ||
@@ -45,8 +74,21 @@ WaveformGeometry prepare_waveform_geometry(const WaveformSlice& slice, int sampl
       slice.buckets.size() != slice.bucket_count * static_cast<std::size_t>(slice.channel_count)) {
     throw std::invalid_argument{"invalid waveform geometry input"};
   }
-  const auto source_width = seconds(slice.requested_end) - seconds(slice.requested_start);
-  if (!(source_width > 0.0L)) throw std::invalid_argument{"invalid waveform source interval"};
+  if (slice.requested_end <= slice.requested_start)
+    throw std::invalid_argument{"invalid waveform source interval"};
+  for (const auto& refinement : boundary_refinements) {
+    if (refinement.channel_count != slice.channel_count ||
+        refinement.bucket_sample_span == 0 ||
+        refinement.requested_end <= refinement.requested_start ||
+        refinement.bucket_count > std::numeric_limits<std::uint64_t>::max() -
+                                      refinement.first_bucket ||
+        refinement.bucket_count > std::numeric_limits<std::size_t>::max() /
+                                      static_cast<std::size_t>(refinement.channel_count) ||
+        refinement.buckets.size() != refinement.bucket_count *
+                                          static_cast<std::size_t>(refinement.channel_count)) {
+      throw std::invalid_argument{"invalid waveform boundary refinement"};
+    }
+  }
   const std::uint32_t width = policy.raster_width;
   WaveformGeometry result;
   result.width = width;
@@ -55,47 +97,83 @@ WaveformGeometry prepare_waveform_geometry(const WaveformSlice& slice, int sampl
   const double lane_height = policy.content_height / static_cast<double>(display_channels);
   if (lane_height <= 0.0) return result;
   std::vector<Extrema> columns(static_cast<std::size_t>(width) * display_channels);
+  std::vector<bool> refined_columns(width, false);
+  std::vector<bool> unresolved_boundary_columns(width, false);
+  for (const auto& refinement : boundary_refinements) {
+    if (refinement.channel_count != slice.channel_count ||
+        refinement.requested_end <= refinement.requested_start) continue;
+    const auto x0 = fraction_pixel(refinement.requested_start, slice.requested_start,
+                                   slice.requested_end, width, false);
+    const auto x1 = fraction_pixel(refinement.requested_end, slice.requested_start,
+                                   slice.requested_end, width, true);
+    for (auto x = x0; x < x1; ++x) refined_columns[x] = true;
+  }
 
-  const long double requested_start = seconds(slice.requested_start);
-  const long double requested_end = seconds(slice.requested_end);
-  const long double origin = seconds(slice.available_start);
-  const long double sample_period = 1.0L / static_cast<long double>(sample_rate);
-  for (std::uint64_t i = 0; i < slice.bucket_count; ++i) {
-    const std::uint64_t bucket = slice.first_bucket + i;
-    const long double first_sample = static_cast<long double>(bucket) *
-                                     static_cast<long double>(slice.bucket_sample_span);
-    const long double bucket_start = origin + first_sample * sample_period;
-    const long double bucket_end = bucket_start +
-        static_cast<long double>(slice.bucket_sample_span) * sample_period;
-    const long double left = std::max(bucket_start, requested_start);
-    const long double right = std::min(bucket_end, requested_end);
-    if (right <= left) continue;
-    const auto x0 = pixel_floor((left - requested_start) / source_width * width, width);
-    const auto x1 = std::max(x0 + (x0 < width ? 1U : 0U),
-                             pixel_ceil((right - requested_start) / source_width * width, width));
-    for (std::uint32_t x = x0; x < x1; ++x) {
-      if (policy.combine_channels) {
-        auto& target = columns[x];
-        for (int channel = 0; channel < slice.channel_count; ++channel) {
-          const auto& sample = slice.buckets[static_cast<std::size_t>(i) *
-                                               static_cast<std::size_t>(slice.channel_count) +
-                                               static_cast<std::size_t>(channel)];
-          target.minimum = std::min(target.minimum, sample.minimum);
-          target.maximum = std::max(target.maximum, sample.maximum);
+  const auto merge_slice = [&](const WaveformSlice& input, bool require_refined_column) {
+    for (std::uint64_t i = 0; i < input.bucket_count; ++i) {
+      const std::uint64_t bucket = input.first_bucket + i;
+      if (bucket > static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max()) /
+                       input.bucket_sample_span) {
+        throw std::overflow_error{"waveform bucket sample index overflow"};
+      }
+      const auto first_sample = static_cast<std::int64_t>(bucket * input.bucket_sample_span);
+      if (input.bucket_sample_span >
+          static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max() - first_sample)) {
+        throw std::overflow_error{"waveform bucket end sample index overflow"};
+      }
+      const auto bucket_start = input.available_start +
+          domain::MediaTime{first_sample, domain::Rational{1, sample_rate}};
+      const auto bucket_end = input.available_start + domain::MediaTime{
+          first_sample + static_cast<std::int64_t>(input.bucket_sample_span),
+          domain::Rational{1, sample_rate}};
+      const auto left = std::max(bucket_start, input.requested_start);
+      const auto right = std::min(bucket_end, input.requested_end);
+      if (right <= left) continue;
+      const bool unresolved_l0_boundary = input.level == 0 &&
+          ((bucket_start < slice.requested_start && slice.requested_start < bucket_end) ||
+           (bucket_start < slice.requested_end && slice.requested_end < bucket_end));
+      const auto x0 = fraction_pixel(left, slice.requested_start, slice.requested_end,
+                                     width, false);
+      const auto x1 = std::max(x0 + (x0 < width ? 1U : 0U),
+                               fraction_pixel(right, slice.requested_start,
+                                              slice.requested_end, width, true));
+      for (std::uint32_t x = x0; x < x1; ++x) {
+        if (refined_columns[x] != require_refined_column) continue;
+        if (unresolved_l0_boundary) {
+          unresolved_boundary_columns[x] = true;
+          continue;
         }
-        target.occupied = true;
-      } else {
-        for (int channel = 0; channel < slice.channel_count; ++channel) {
-          const auto& sample = slice.buckets[static_cast<std::size_t>(i) *
-                                               static_cast<std::size_t>(slice.channel_count) +
-                                               static_cast<std::size_t>(channel)];
-          auto& target = columns[static_cast<std::size_t>(channel) * width + x];
-          target.minimum = std::min(target.minimum, sample.minimum);
-          target.maximum = std::max(target.maximum, sample.maximum);
+        if (policy.combine_channels) {
+          auto& target = columns[x];
+          for (int channel = 0; channel < input.channel_count; ++channel) {
+            const auto& sample = input.buckets[static_cast<std::size_t>(i) *
+                                                static_cast<std::size_t>(input.channel_count) +
+                                                static_cast<std::size_t>(channel)];
+            target.minimum = std::min(target.minimum, sample.minimum);
+            target.maximum = std::max(target.maximum, sample.maximum);
+          }
           target.occupied = true;
+        } else {
+          for (int channel = 0; channel < input.channel_count; ++channel) {
+            const auto& sample = input.buckets[static_cast<std::size_t>(i) *
+                                                static_cast<std::size_t>(input.channel_count) +
+                                                static_cast<std::size_t>(channel)];
+            auto& target = columns[static_cast<std::size_t>(channel) * width + x];
+            target.minimum = std::min(target.minimum, sample.minimum);
+            target.maximum = std::max(target.maximum, sample.maximum);
+            target.occupied = true;
+          }
         }
       }
     }
+  };
+  merge_slice(slice, false);
+  for (const auto& refinement : boundary_refinements) merge_slice(refinement, true);
+  for (std::uint32_t x = 0; x < width; ++x) {
+    if (!unresolved_boundary_columns[x]) continue;
+    for (std::uint32_t channel = 0; channel < display_channels; ++channel)
+      columns[static_cast<std::size_t>(channel) * width + x].occupied = false;
+    result.unavailable_columns.push_back(x);
   }
 
   for (std::uint32_t channel = 0; channel < display_channels; ++channel) {
@@ -115,28 +193,34 @@ WaveformGeometry prepare_waveform_geometry(const WaveformSlice& slice, int sampl
     }
   }
 
-  if (slice.completeness != WaveformCompleteness::Complete) {
-    const long double available_start = seconds(slice.available_start);
-    const long double available_end = seconds(slice.available_end);
-    const auto add_pending = [&](long double left, long double right) {
-      left = std::max(left, requested_start);
-      right = std::min(right, requested_end);
+  const auto add_columns = [&](std::vector<std::uint32_t>& columns,
+                               domain::MediaTime left, domain::MediaTime right) {
+      left = std::max(left, slice.requested_start);
+      right = std::min(right, slice.requested_end);
       if (right <= left) return;
-      const auto x0 = pixel_floor((left - requested_start) / source_width * width, width);
-      const auto x1 = pixel_ceil((right - requested_start) / source_width * width, width);
-      for (auto x = x0; x < x1; ++x) result.pending_columns.push_back(x);
-    };
+      const auto x0 = fraction_pixel(left, slice.requested_start, slice.requested_end,
+                                     width, false);
+      const auto x1 = fraction_pixel(right, slice.requested_start, slice.requested_end,
+                                     width, true);
+      for (auto x = x0; x < x1; ++x) columns.push_back(x);
+  };
+  if (slice.completeness != WaveformCompleteness::Complete) {
     if (slice.completeness == WaveformCompleteness::Missing) {
-      add_pending(requested_start, requested_end);
+      add_columns(result.pending_columns, slice.requested_start, slice.requested_end);
     } else {
-      add_pending(requested_start, available_start);
-      add_pending(available_end, requested_end);
+      add_columns(result.unavailable_columns, slice.requested_start, slice.available_start);
+      add_columns(result.pending_columns, slice.available_end, slice.requested_end);
     }
-    std::sort(result.pending_columns.begin(), result.pending_columns.end());
-    result.pending_columns.erase(std::unique(result.pending_columns.begin(),
-                                              result.pending_columns.end()),
-                                 result.pending_columns.end());
+  } else {
+    add_columns(result.unavailable_columns, slice.requested_start, slice.available_start);
+    add_columns(result.unavailable_columns, slice.available_end, slice.requested_end);
   }
+  const auto canonicalize = [](std::vector<std::uint32_t>& columns) {
+    std::sort(columns.begin(), columns.end());
+    columns.erase(std::unique(columns.begin(), columns.end()), columns.end());
+  };
+  canonicalize(result.pending_columns);
+  canonicalize(result.unavailable_columns);
   return result;
 }
 

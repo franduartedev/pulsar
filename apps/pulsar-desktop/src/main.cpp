@@ -1,13 +1,19 @@
 #include "desktop_controller.hpp"
 #include "preview_image_provider.hpp"
+#include "waveform_quick_item.hpp"
+
+#include <pulsar/media/ffmpeg/ffmpeg_waveform_source.hpp>
 
 #include <QGuiApplication>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QTimer>
 #include <QUrl>
+#include <qqml.h>
 
 #include <iostream>
+#include <filesystem>
+#include <memory>
 #include <optional>
 
 int main(int argc, char** argv) {
@@ -19,9 +25,15 @@ int main(int argc, char** argv) {
   // controller first: QQmlApplicationEngine (sole owner of image_provider)
   // is destroyed only after every PreviewImageProvider& user is gone.
   QQmlApplicationEngine engine;
+  qmlRegisterType<WaveformQuickItem>("Pulsar.Desktop", 1, 0, "WaveformItem");
 
   auto* image_provider = new PreviewImageProvider{};
-  DesktopController controller{*image_provider};
+  DesktopController controller{
+      *image_provider,
+      [](const std::filesystem::path& path, int stream_index) {
+        return std::make_unique<pulsar::media::ffmpeg::FFmpegWaveformSource>(path,
+                                                                            stream_index);
+      }};
 
   engine.addImportPath(QStringLiteral("qrc:/pulsar/imports"));
   engine.addImageProvider(QStringLiteral("pulsar-preview"), image_provider);
@@ -63,5 +75,10 @@ int main(int argc, char** argv) {
   if (dump_performance_on_exit) {
     std::cout << controller.performanceSnapshot().toStdString() << '\n';
   }
+  // WaveformItem destruction calls back into the controller to detach. Destroy
+  // QML roots while the controller is still alive; the engine itself remains
+  // alive until after the controller, preserving image-provider ownership.
+  const auto roots = engine.rootObjects();
+  for (auto* root : roots) delete root;
   return exit_code;
 }
