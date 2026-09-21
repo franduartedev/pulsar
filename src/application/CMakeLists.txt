@@ -7,6 +7,7 @@ add_library(pulsar_application
   src/media/audio_block.cpp
   src/waveform/waveform_cache.cpp
   src/waveform/waveform_cache_manager.cpp
+  src/waveform/waveform_renderer.cpp
   src/media/media_probe_error.cpp
   src/project/media_asset.cpp
   src/project/project_document.cpp

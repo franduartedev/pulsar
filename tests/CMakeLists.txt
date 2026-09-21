@@ -196,6 +196,14 @@ pulsar_apply_compiler_warnings(pulsar_waveform_cache_tests)
 
 add_test(NAME pulsar.application.waveform_cache COMMAND pulsar_waveform_cache_tests)
 
+add_executable(pulsar_waveform_renderer_tests
+  application/waveform_renderer_test.cpp
+)
+target_link_libraries(pulsar_waveform_renderer_tests PRIVATE pulsar::application pulsar::domain)
+pulsar_apply_project_options(pulsar_waveform_renderer_tests)
+pulsar_apply_compiler_warnings(pulsar_waveform_renderer_tests)
+add_test(NAME pulsar.application.waveform_renderer COMMAND pulsar_waveform_renderer_tests)
+
 add_executable(pulsar_audio_output_engine_tests
   application/audio_output_engine_test.cpp
 )
