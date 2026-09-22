@@ -4,6 +4,7 @@
 
 #include <cassert>
 #include <algorithm>
+#include <cmath>
 #include <deque>
 #include <filesystem>
 #include <memory>
@@ -173,6 +174,8 @@ struct Fixture {
 
 class SyncOutput final : public application::AudioOutput {
 public:
+  explicit SyncOutput(std::vector<float>* observed_samples = nullptr)
+      : observed_samples_{observed_samples} {}
   bool open(const application::AudioSourceFormat& source) override {
     format_ = application::AudioDeviceFormat{source.sample_rate, source.channel_count,
                                               application::AudioSampleFormat::Float32};
@@ -192,6 +195,9 @@ public:
       return application::AudioEnqueueResult::InvalidState;
     }
     pending_ += block.frame_count();
+    if (observed_samples_ != nullptr && !block.samples().empty()) {
+      observed_samples_->push_back(block.samples().front());
+    }
     metrics_.device_frames_submitted += block.frame_count();
     metrics_.buffered_device_frames = pending_;
     return application::AudioEnqueueResult::Accepted;
@@ -232,23 +238,46 @@ private:
   application::AudioDeviceFormat format_{0, 0, application::AudioSampleFormat::Float32};
   application::AudioOutputMetrics metrics_{};
   std::uint64_t pending_{0};
+  std::vector<float>* observed_samples_{nullptr};
 };
 
 class SyncAudioSource final : public application::AudioPlaybackSource {
 public:
+  explicit SyncAudioSource(std::vector<MediaTime>* seek_targets = nullptr,
+                           std::vector<float>* decoded_first_samples = nullptr)
+      : seek_targets_{seek_targets}, decoded_first_samples_{decoded_first_samples} {}
   int sample_rate() const noexcept override { return 44100; }
   int channel_count() const noexcept override { return 1; }
-  bool seek_to(domain::MediaTime) override { return true; }
+  bool seek_to(domain::MediaTime target) override {
+    if (seek_targets_ != nullptr) seek_targets_->push_back(target);
+    const auto seconds = target.seconds();
+    next_timestamp_ = MediaTime{seconds.numerator() * 44100 / seconds.denominator(),
+                                Rational{1, 44100}};
+    seek_phase_ = target;
+    sent_ = 0;
+    return true;
+  }
   std::optional<application::AudioBlock> decode_next() override {
     if (sent_ >= 200) return std::nullopt;
     ++sent_;
+    const auto first = static_cast<float>(std::fmod(static_cast<double>(seek_phase_), 1.0));
+    if (decoded_first_samples_ != nullptr) decoded_first_samples_->push_back(first);
+    std::vector<float> samples(44100 / 10);
+    for (std::size_t index = 0; index < samples.size(); ++index) {
+      samples[index] = std::clamp(first + static_cast<float>(index) / 441000.0F, -1.0F, 1.0F);
+    }
+    const auto timestamp = next_timestamp_;
+    next_timestamp_ = next_timestamp_ + MediaTime{44100 / 10, Rational{1, 44100}};
     return application::AudioBlock{
-        44100, 1, 44100 / 10, std::vector<float>(44100 / 10, 0.25F),
-        Rational{1, 44100}, MediaTime{0, Rational{1, 44100}}};
+        44100, 1, 44100 / 10, std::move(samples), Rational{1, 44100}, timestamp};
   }
 
 private:
   int sent_{0};
+  std::vector<MediaTime>* seek_targets_{nullptr};
+  std::vector<float>* decoded_first_samples_{nullptr};
+  MediaTime next_timestamp_{MediaTime::zero()};
+  MediaTime seek_phase_{MediaTime::zero()};
 };
 
 ProjectSnapshot snapshot_with_clip(Fixture& fixture, MediaId media, TimeRange source, MediaTime start) {
@@ -859,6 +888,52 @@ void multitrack_audio_runs_through_video_gap_and_audio_only_project() {
   assert(audio_output.running());
 }
 
+void global_audio_seek_invalidates_old_pcm_and_reanchors_sources() {
+  Fixture fixture;
+  const auto audio_track = fixture.processor.add_track(domain::TrackKind::Audio);
+  (void)fixture.processor.add_clip(fixture.media_one, TimeRange{time(0), time(1)}, time(0));
+  (void)fixture.processor.add_clip(audio_track, fixture.media_one,
+                                   TimeRange{time(0), time(5)}, time(0));
+  const auto snapshot = fixture.document.snapshot();
+  std::vector<MediaTime> seek_targets;
+  std::vector<float> decoded_first_samples;
+  std::vector<float> output_samples;
+  FakeClock clock;
+  SyncOutput output{&output_samples};
+  TimelinePlaybackCoordinator coordinator{
+      clock, fixture.factory(),
+      [&seek_targets, &decoded_first_samples](const std::filesystem::path&, int) {
+        return std::make_unique<SyncAudioSource>(&seek_targets, &decoded_first_samples);
+      },
+      &output};
+  coordinator.set_snapshot(snapshot);
+  (void)coordinator.update();
+  coordinator.play();
+  assert(!output_samples.empty());
+  const auto first_pcm = output_samples.back();
+
+  coordinator.seek(time(2));
+  (void)coordinator.update();
+  assert(!seek_targets.empty());
+  assert(seek_targets.back() == time(2));
+  assert(!decoded_first_samples.empty());
+  assert(output_samples.back() != first_pcm);
+  assert(std::holds_alternative<TimelineGapPresentation>(coordinator.update()));
+
+  coordinator.pause();
+  coordinator.seek(time(3));
+  coordinator.play();
+  (void)coordinator.update();
+  assert(seek_targets.back() == time(3));
+
+  coordinator.seek(time(4));
+  coordinator.seek(time(1));
+  coordinator.seek(time(4));
+  (void)coordinator.update();
+  assert(seek_targets.back() == time(4));
+  assert(coordinator.timeline_position() >= time(4));
+}
+
 } // namespace
 
 int main() {
@@ -882,4 +957,5 @@ int main() {
   video_hold_recovery_resumes_audio_without_user_action();
   no_audio_clip_is_healthy_silence_and_advances();
   multitrack_audio_runs_through_video_gap_and_audio_only_project();
+  global_audio_seek_invalidates_old_pcm_and_reanchors_sources();
 }

@@ -88,6 +88,10 @@ void TimelinePlaybackCoordinator::seek(domain::MediaTime timeline_position_value
   const auto outcome = resolve_clip_at(*snapshot_, snapshot_->video_track_id,
                                        timeline_position_value);
   reanchor_transport(timeline_position_value);
+  // A seek is one authoritative discontinuity. Invalidate mixer sources and
+  // queued device PCM before publishing the new video segment or resuming the
+  // transport, so no old audio can observe the new editorial position.
+  audio_session_->seek(timeline_position_value);
   clock_source_ = intent_ == PlaybackIntent::Playing ? PlaybackClockSource::Software
                                                        : PlaybackClockSource::Paused;
   reconcile(outcome, timeline_position_value, true);
