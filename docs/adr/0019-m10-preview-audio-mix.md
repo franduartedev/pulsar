@@ -31,6 +31,14 @@ bounded to 32,768 frames per decoded block, output calls to 8,192 frames, and
 queued normalized PCM to 65,536 frames per contributor.
 
 Gain and mute are applied per contributor before deterministic summation.
+Mute is presentation silence, not contributor absence: a muted source remains
+open, decoded, aligned and clock-capable, and its PCM cursor advances normally.
+It contributes zero to the sum while preserving starvation/failure reporting.
+When a new project generation changes only gain/mute, the decoder, resampler
+and source-truth PCM remain continuous; presentation state is applied at
+summation, so unmute needs no seek and cannot replay old audio. Any change to
+identity, placement, source range, stream format or availability still drops
+all queued PCM and source sessions before the new generation can render.
 There is no track-count normalization, limiter, AGC or compressor. The final
 preview mix is hard-clamped to [-1, 1] before it crosses the output boundary.
 
@@ -38,8 +46,11 @@ A missing, starved, failed or early-ended contributor produces silence only
 for that contributor and an explicit issue; healthy contributors continue.
 The mixer emits one PCM block and never owns a device. A9.3 may feed that
 single stream to the existing single `AudioOutput`. The device clock is the
-master only while usable mixed audio is being submitted and the output is
-running; otherwise timeline playback uses its software clock.
+master while at least one contributor supplies aligned PCM and the output is
+running, including when every usable contributor is muted. `mixed_contributors`
+counts only unmuted sources admitted to summation; `usable_contributors` is the
+separate clock-capability signal. With no usable PCM, timeline playback uses
+its software clock.
 
 ## Consequences
 

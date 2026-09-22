@@ -47,6 +47,11 @@ struct AudioMixRenderResult {
   domain::MediaTime timeline_position;
   std::vector<AudioMixIssue> issues;
   std::size_t resolved_contributors{0};
+  // Sources whose aligned PCM advanced during this render. Muted contributors
+  // remain usable and clock-capable even though they contribute audible zero.
+  std::size_t usable_contributors{0};
+  // Unmuted usable contributors whose PCM passed through gain into the sum.
+  // This is deliberately not a clock-availability proxy.
   std::size_t mixed_contributors{0};
   AudioMixClockRecommendation clock{AudioMixClockRecommendation::Software};
 };

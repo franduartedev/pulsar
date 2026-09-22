@@ -54,6 +54,27 @@ namespace {
          lhs.media_id == rhs.media_id;
 }
 
+[[nodiscard]] bool same_source_mapping(const AudioContributor& lhs,
+                                       const AudioContributor& rhs) noexcept {
+  return same_identity(lhs, rhs) && lhs.track_kind == rhs.track_kind &&
+         lhs.track_order == rhs.track_order && lhs.source_locator == rhs.source_locator &&
+         lhs.stream_index == rhs.stream_index &&
+         lhs.timeline_range.start() == rhs.timeline_range.start() &&
+         lhs.timeline_range.end() == rhs.timeline_range.end() &&
+         lhs.source_range.start() == rhs.source_range.start() &&
+         lhs.source_range.end() == rhs.source_range.end() &&
+         lhs.stream_origin == rhs.stream_origin && lhs.sample_rate == rhs.sample_rate &&
+         lhs.channel_count == rhs.channel_count && lhs.time_base == rhs.time_base;
+}
+
+[[nodiscard]] bool same_unavailable_mapping(const UnavailableAudioContributor& lhs,
+                                            const UnavailableAudioContributor& rhs) noexcept {
+  return lhs.track_id == rhs.track_id && lhs.clip_id == rhs.clip_id &&
+         lhs.media_id == rhs.media_id &&
+         lhs.timeline_range.start() == rhs.timeline_range.start() &&
+         lhs.timeline_range.end() == rhs.timeline_range.end() && lhs.reason == rhs.reason;
+}
+
 [[nodiscard]] AudioMixIssue issue_for(const AudioContributor& contributor,
                                       AudioContributorFailure failure,
                                       std::string message) {
@@ -150,19 +171,39 @@ void AudioMixSession::configure(ProjectSnapshot snapshot) {
   }
   std::sort(resolution.contributors.begin(), resolution.contributors.end(), timeline_order);
   std::sort(resolution.unavailable.begin(), resolution.unavailable.end(), unavailable_order);
+  const bool presentation_only_change =
+      snapshot_.has_value() && next_timeline_position_.has_value() &&
+      contributors_.size() == resolution.contributors.size() &&
+      unavailable_.size() == resolution.unavailable.size() &&
+      std::equal(contributors_.begin(), contributors_.end(), resolution.contributors.begin(),
+                 same_source_mapping) &&
+      std::equal(unavailable_.begin(), unavailable_.end(), resolution.unavailable.begin(),
+                 same_unavailable_mapping);
   std::optional<ProjectSnapshot> next_snapshot{std::move(snapshot)};
   snapshot_.swap(next_snapshot);
   contributors_.swap(resolution.contributors);
   unavailable_.swap(resolution.unavailable);
-  sources_.clear();
   active_contributors_.clear();
   active_unavailable_.clear();
   next_contributor_ = 0;
   next_unavailable_ = 0;
-  next_timeline_position_.reset();
+  if (presentation_only_change) {
+    for (auto& source : sources_) {
+      const auto replacement = std::find_if(
+          contributors_.begin(), contributors_.end(), [&](const auto& contributor) {
+            return same_identity(source->contributor, contributor);
+          });
+      if (replacement != contributors_.end()) {
+        source->contributor = *replacement;
+      }
+    }
+    select_range(*next_timeline_position_, *next_timeline_position_, true);
+  } else {
+    sources_.clear();
+    next_timeline_position_.reset();
+  }
   ++generation_;
-  metrics_.live_sources = 0;
-  metrics_.queued_frames = 0;
+  update_metrics();
 }
 
 void AudioMixSession::reset() noexcept {
@@ -256,7 +297,7 @@ AudioMixSession::SourceState* AudioMixSession::open_source(
 void AudioMixSession::prune_sources(const std::vector<AudioContributor>& contributors) {
   std::erase_if(sources_, [&contributors](const auto& source) {
     return std::none_of(contributors.begin(), contributors.end(), [&](const auto& contributor) {
-      return same_identity(source->contributor, contributor) && !contributor.muted;
+      return same_identity(source->contributor, contributor);
     });
   });
 }
@@ -341,7 +382,7 @@ AudioMixRenderResult AudioMixSession::render(domain::MediaTime timeline_position
       AudioBlock{format_.sample_rate, format_.channel_count, frame_count,
                  std::vector<float>(checked_sample_count(frame_count, format_.channel_count), 0.0F),
                  domain::Rational{1, format_.sample_rate}, std::nullopt},
-      timeline_position, {}, 0, 0, AudioMixClockRecommendation::Software};
+      timeline_position, {}, 0, 0, 0, AudioMixClockRecommendation::Software};
   result.resolved_contributors = active_contributors_.size();
   for (const auto& missing : active_unavailable_) {
     result.issues.push_back({missing.track_id, missing.clip_id, missing.media_id,
@@ -350,9 +391,6 @@ AudioMixRenderResult AudioMixSession::render(domain::MediaTime timeline_position
   }
 
   for (const auto& contributor : active_contributors_) {
-    if (contributor.muted) {
-      continue;
-    }
     const auto overlap_start = std::max(timeline_position, contributor.timeline_range.start());
     const auto overlap_end = std::min(render_end, contributor.timeline_range.end());
     const auto output_begin = std::min(frame_count,
@@ -498,21 +536,24 @@ AudioMixRenderResult AudioMixSession::render(domain::MediaTime timeline_position
     if (available == 0) {
       continue;
     }
-    const auto gain = ClipGain::from_decibels(contributor.gain_db, false).linear;
+    ++result.usable_contributors;
+    const auto gain = ClipGain::from_decibels(contributor.gain_db, contributor.muted);
     auto& mixed = result.block.samples_mutable();
     const auto channels = static_cast<std::size_t>(format_.channel_count);
-    for (std::size_t frame = 0; frame < available; ++frame) {
-      for (std::size_t channel = 0; channel < channels; ++channel) {
-        const auto destination = (output_begin + frame) * channels + channel;
-        const auto source_index = state->pcm_offset + frame * channels + channel;
-        mixed[destination] += state->pcm[source_index] * gain;
+    if (!gain.muted) {
+      for (std::size_t frame = 0; frame < available; ++frame) {
+        for (std::size_t channel = 0; channel < channels; ++channel) {
+          const auto destination = (output_begin + frame) * channels + channel;
+          const auto source_index = state->pcm_offset + frame * channels + channel;
+          mixed[destination] += state->pcm[source_index] * gain.linear;
+        }
       }
+      ++result.mixed_contributors;
     }
     state->pcm_offset += available * channels;
     state->next_timeline = source_timeline + domain::MediaTime{
                                                 static_cast<std::int64_t>(available),
                                                 domain::Rational{1, format_.sample_rate}};
-    ++result.mixed_contributors;
   }
 
   // Preview policy: deterministic hard clipping only after summation. There
@@ -521,8 +562,8 @@ AudioMixRenderResult AudioMixSession::render(domain::MediaTime timeline_position
   for (float& sample : result.block.samples_mutable()) {
     sample = std::clamp(sample, -1.0F, 1.0F);
   }
-  result.clock = result.mixed_contributors == 0 ? AudioMixClockRecommendation::Software
-                                                 : AudioMixClockRecommendation::Device;
+  result.clock = result.usable_contributors == 0 ? AudioMixClockRecommendation::Software
+                                                  : AudioMixClockRecommendation::Device;
   prune_sources(active_contributors_);
   next_timeline_position_ = render_end;
   update_metrics();

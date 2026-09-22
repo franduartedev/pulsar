@@ -45,7 +45,9 @@ struct SignalSpec {
 
 class SignalSource final : public application::AudioPlaybackSource {
 public:
-  explicit SignalSource(SignalSpec spec) : spec_{std::move(spec)} {}
+  SignalSource(SignalSpec spec, std::size_t* decoded_frames,
+               std::vector<domain::MediaTime>* seek_targets)
+      : spec_{std::move(spec)}, decoded_frames_{decoded_frames}, seek_targets_{seek_targets} {}
 
   int sample_rate() const noexcept override { return spec_.rate; }
   int channel_count() const noexcept override { return spec_.channels; }
@@ -55,6 +57,7 @@ public:
   }
 
   bool seek_to(domain::MediaTime target) override {
+    seek_targets_->push_back(target);
     const auto relative = target - (spec_.has_origin ? frames(spec_.origin_frame, spec_.rate)
                                                      : domain::MediaTime::zero());
     if (relative < domain::MediaTime::zero()) return false;
@@ -80,6 +83,7 @@ public:
     }
     const auto pts = frames(spec_.origin_frame + static_cast<std::int64_t>(cursor_), spec_.rate);
     cursor_ += count;
+    *decoded_frames_ += count;
     return application::AudioBlock{spec_.rate, spec_.channels, count, std::move(samples),
                                    domain::Rational{1, spec_.rate}, pts};
   }
@@ -93,12 +97,20 @@ public:
 
 private:
   SignalSpec spec_;
+  std::size_t* decoded_frames_;
+  std::vector<domain::MediaTime>* seek_targets_;
   std::size_t cursor_{0};
 };
 
 struct SourceBank {
+  SourceBank() = default;
+  explicit SourceBank(std::map<std::string, SignalSpec> initial_specs)
+      : specs{std::move(initial_specs)} {}
+
   std::map<std::string, SignalSpec> specs;
   std::size_t opens{0};
+  std::size_t decoded_frames{0};
+  std::vector<domain::MediaTime> seek_targets;
 
   application::AudioPlaybackSourceFactory factory() {
     return [this](const std::filesystem::path& path, int) {
@@ -106,7 +118,7 @@ struct SourceBank {
       const auto found = specs.find(path.string());
       if (found == specs.end()) return std::unique_ptr<application::AudioPlaybackSource>{};
       return std::unique_ptr<application::AudioPlaybackSource>{
-          std::make_unique<SignalSource>(found->second)};
+          std::make_unique<SignalSource>(found->second, &decoded_frames, &seek_targets)};
     };
   }
 };
@@ -211,6 +223,7 @@ void mix_alignment_gain_mute_and_clipping() {
   mixer.configure(std::move(project));
   const auto result = mixer.render(frames(0), 1024);
   assert(result.mixed_contributors == 2);
+  assert(result.usable_contributors == 3);
   assert_near(left(result.block, 100), 0.25F);
   assert_near(left(result.block, 300), 0.75F);
   assert_near(left(result.block, 900), 0.25F);
@@ -222,6 +235,102 @@ void mix_alignment_gain_mute_and_clipping() {
                               {{{1, 1, 0, 0, 1024}}, {{2, 2, 0, 0, 1024}}}));
   const auto clipped = clipping.render(frames(0), 1024);
   assert_near(left(clipped.block, 10), 1.0F);
+}
+
+void mute_preserves_decode_and_clock_contract() {
+  SourceBank normal_bank{{{"normal", SignalSpec{.constant = 0.4F}}}};
+  application::AudioMixSession normal{normal_bank.factory()};
+  normal.configure(snapshot({audio_asset(1, "normal")}, std::nullopt,
+                            {{{1, 1, 0, 0, 2048}}}));
+  const auto audible = normal.render(frames(0), 256);
+  assert(audible.usable_contributors == 1);
+  assert(audible.mixed_contributors == 1);
+  assert(audible.clock == application::AudioMixClockRecommendation::Device);
+  assert_near(left(audible.block, 10), 0.4F);
+
+  SourceBank muted_bank{{{"muted", SignalSpec{.constant = 0.4F}}}};
+  application::AudioMixSession muted{muted_bank.factory()};
+  muted.configure(snapshot({audio_asset(1, "muted")}, std::nullopt,
+                           {{{1, 1, 0, 0, 2048, 0.0, true}}}));
+  const auto first = muted.render(frames(0), 256);
+  assert(first.usable_contributors == 1);
+  assert(first.mixed_contributors == 0);
+  assert(first.clock == application::AudioMixClockRecommendation::Device);
+  assert(std::all_of(first.block.samples().begin(), first.block.samples().end(),
+                     [](float value) { return value == 0.0F; }));
+  const auto decoded_after_first = muted_bank.decoded_frames;
+  const auto second = muted.render(frames(256), 256);
+  assert(second.usable_contributors == 1);
+  assert(second.clock == application::AudioMixClockRecommendation::Device);
+  assert(muted_bank.decoded_frames > decoded_after_first);
+  assert(muted_bank.opens == 1);
+  assert(muted_bank.seek_targets.size() == 1);
+}
+
+void mute_transitions_reanchor_to_current_truth_without_replay() {
+  SourceBank bank{{{"signal", SignalSpec{.constant = 0.2F, .impulse_frame = 300}}}};
+  application::AudioMixSession mixer{bank.factory()};
+
+  mixer.configure(snapshot({audio_asset(1, "signal")}, std::nullopt,
+                           {{{1, 1, 0, 0, 2048, 0.0, true}}}, 1));
+  const auto muted_first = mixer.render(frames(0), 256);
+  assert(muted_first.usable_contributors == 1);
+  assert(muted_first.mixed_contributors == 0);
+
+  mixer.configure(snapshot({audio_asset(1, "signal")}, std::nullopt,
+                           {{{1, 1, 0, 0, 2048, 0.0, false}}}, 2));
+  const auto unmuted = mixer.render(frames(256), 256);
+  assert(unmuted.usable_contributors == 1);
+  assert(unmuted.mixed_contributors == 1);
+  assert_near(left(unmuted.block, 44), 1.0F);
+  assert_near(left(unmuted.block, 0), 0.2F);
+
+  mixer.configure(snapshot({audio_asset(1, "signal")}, std::nullopt,
+                           {{{1, 1, 0, 0, 2048, 0.0, true}}}, 3));
+  const auto muted_again = mixer.render(frames(512), 256);
+  assert(muted_again.usable_contributors == 1);
+  assert(muted_again.mixed_contributors == 0);
+  assert(muted_again.clock == application::AudioMixClockRecommendation::Device);
+
+  mixer.configure(snapshot({audio_asset(1, "signal")}, std::nullopt,
+                           {{{1, 1, 0, 0, 2048, 0.0, false}}}, 4));
+  const auto unmuted_again = mixer.render(frames(768), 256);
+  assert(unmuted_again.usable_contributors == 1);
+  assert(unmuted_again.mixed_contributors == 1);
+  assert_near(left(unmuted_again.block, 0), 0.2F);
+  assert(bank.opens == 1);
+  assert(bank.seek_targets.size() == 1);
+  assert(bank.seek_targets[0] == frames(0));
+}
+
+void muted_embedded_and_parallel_audio_preserve_timing() {
+  SourceBank bank{{{"embedded", SignalSpec{.constant = 0.7F}},
+                   {"healthy", SignalSpec{.constant = 0.25F}}}};
+  application::AudioMixSession mixer{bank.factory()};
+  mixer.configure(snapshot({video_asset(1, "embedded"), audio_asset(2, "healthy")},
+                           ClipSpec{1, 1, 0, 0, 1024, 0.0, true},
+                           {{{2, 2, 0, 0, 1024}}}));
+  const auto result = mixer.render(frames(0), 512);
+  assert(result.usable_contributors == 2);
+  assert(result.mixed_contributors == 1);
+  assert(result.clock == application::AudioMixClockRecommendation::Device);
+  assert_near(left(result.block, 100), 0.25F);
+  assert(bank.opens == 2);
+}
+
+void muted_starvation_remains_observable() {
+  SourceBank bank{{{"starved", SignalSpec{.constant = 0.5F, .starve = true}}}};
+  application::AudioMixSession mixer{bank.factory()};
+  mixer.configure(snapshot({audio_asset(1, "starved")}, std::nullopt,
+                           {{{1, 1, 0, 0, 1024, 0.0, true}}}));
+  const auto result = mixer.render(frames(0), 256);
+  assert(result.usable_contributors == 0);
+  assert(result.mixed_contributors == 0);
+  assert(result.clock == application::AudioMixClockRecommendation::Software);
+  assert(std::any_of(result.issues.begin(), result.issues.end(), [](const auto& issue) {
+    return issue.failure == application::AudioContributorFailure::Starved;
+  }));
+  assert(bank.opens == 1);
 }
 
 void nonzero_source_trim_split_and_gap_mapping() {
@@ -414,6 +523,10 @@ void benchmark_mix_scaling() {
 int main() {
   contributor_resolution_is_complete_and_deterministic();
   mix_alignment_gain_mute_and_clipping();
+  mute_preserves_decode_and_clock_contract();
+  mute_transitions_reanchor_to_current_truth_without_replay();
+  muted_embedded_and_parallel_audio_preserve_timing();
+  muted_starvation_remains_observable();
   nonzero_source_trim_split_and_gap_mapping();
   gain_and_runtime_stream_origin_are_applied();
   editorial_split_is_pcm_equivalent_to_unsplit_source();
