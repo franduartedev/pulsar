@@ -7,7 +7,7 @@ import "../theme/Theme.js" as Theme
 Item {
     id: bar
 
-    Text { anchors.left: parent.left; anchors.leftMargin: 14; anchors.verticalCenter: parent.verticalCenter; text: "POSICIÓN"; color: Theme.faint; font.pixelSize: Theme.fontSizeS; font.letterSpacing: 1.5 }
+    Text { anchors.left: parent.left; anchors.leftMargin: 16; anchors.verticalCenter: parent.verticalCenter; text: "TRANSPORTE"; color: Theme.faint; font.pixelSize: Theme.fontSizeXS; font.bold: true; font.letterSpacing: 1.4 }
     Row {
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.verticalCenter: parent.verticalCenter
@@ -18,7 +18,7 @@ Item {
     }
     Row {
         anchors.right: parent.right
-        anchors.rightMargin: 14
+        anchors.rightMargin: 16
         anchors.verticalCenter: parent.verticalCenter
         spacing: 8
         Text { anchors.verticalCenter: parent.verticalCenter; text: controller.positionText; color: controller.hasMedia ? Theme.textBright : Theme.muted; font.family: "monospace"; font.pixelSize: Theme.fontSizeTC }

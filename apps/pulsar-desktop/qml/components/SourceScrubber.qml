@@ -3,21 +3,19 @@ import "../theme/Theme.js" as Theme
 
 // Program transport strip: timeline position with a precise, quiet seek control.
 Panel {
-    border.width: 0
-    radius: 0
     id: strip
 
     Row {
         id: head
         anchors.left: parent.left
         anchors.top: parent.top
-        anchors.leftMargin: 12
+        anchors.leftMargin: 16
         anchors.topMargin: 9
         spacing: 10
-        Text { anchors.verticalCenter: parent.verticalCenter; text: "NAVEGACIÓN"; color: Theme.muted; font.pixelSize: Theme.fontSizeS; font.letterSpacing: 1.5 }
+        Text { anchors.verticalCenter: parent.verticalCenter; text: "NAVEGACIÓN"; color: Theme.textBright; font.pixelSize: Theme.fontSizeS; font.bold: true; font.letterSpacing: 1.3 }
         Text { anchors.verticalCenter: parent.verticalCenter; text: controller.positionText; color: controller.hasMedia ? Theme.text : Theme.faint; font.family: "monospace"; font.pixelSize: Theme.fontSizeM }
     }
-    Text { anchors.right: parent.right; anchors.top: parent.top; anchors.rightMargin: 12; anchors.topMargin: 9; text: controller.durationText; color: Theme.faint; font.family: "monospace"; font.pixelSize: Theme.fontSizeM }
+    Text { anchors.right: parent.right; anchors.top: parent.top; anchors.rightMargin: 16; anchors.topMargin: 9; text: "/ " + controller.durationText; color: Theme.faint; font.family: "monospace"; font.pixelSize: Theme.fontSizeM }
 
     Item {
         id: track
@@ -25,8 +23,8 @@ Panel {
         anchors.right: parent.right
         anchors.top: head.bottom
         anchors.bottom: parent.bottom
-        anchors.leftMargin: 12
-        anchors.rightMargin: 12
+        anchors.leftMargin: 16
+        anchors.rightMargin: 16
         anchors.topMargin: 2
         anchors.bottomMargin: 6
 

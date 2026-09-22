@@ -6,6 +6,7 @@
 #include <pulsar/media/ffmpeg/ffmpeg_waveform_source.hpp>
 
 #include <QGuiApplication>
+#include <QQuickWindow>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QTimer>
@@ -50,6 +51,8 @@ int main(int argc, char** argv) {
 
   std::optional<QString> initial_path;
   std::optional<int> smoke_exit_ms;
+  std::optional<QSize> smoke_size;
+  std::optional<QString> smoke_screenshot;
   bool dump_performance_on_exit = false;
   for (int index = 1; index < argc; ++index) {
     const QString argument = QString::fromLocal8Bit(argv[index]);
@@ -59,10 +62,35 @@ int main(int argc, char** argv) {
       if (ok && value >= 0) {
         smoke_exit_ms = value;
       }
+    } else if (argument == QStringLiteral("--smoke-size") && index + 1 < argc) {
+      const auto parts = QString::fromLocal8Bit(argv[++index]).split(QLatin1Char('x'));
+      bool width_ok = false;
+      bool height_ok = false;
+      const int width = parts.value(0).toInt(&width_ok);
+      const int height = parts.value(1).toInt(&height_ok);
+      if (width_ok && height_ok && width >= 960 && height >= 600) {
+        smoke_size = QSize{width, height};
+      }
+    } else if (argument == QStringLiteral("--smoke-screenshot") && index + 1 < argc) {
+      smoke_screenshot = QString::fromLocal8Bit(argv[++index]);
     } else if (argument == QStringLiteral("--dump-performance-on-exit")) {
       dump_performance_on_exit = true;
     } else if (!argument.startsWith(QLatin1String("--")) && !initial_path.has_value()) {
       initial_path = argument;
+    }
+  }
+
+  if (smoke_size.has_value() && !engine.rootObjects().isEmpty()) {
+    if (auto* window = qobject_cast<QQuickWindow*>(engine.rootObjects().constFirst())) {
+      window->resize(*smoke_size);
+    }
+  }
+  if (smoke_screenshot.has_value() && !engine.rootObjects().isEmpty()) {
+    if (auto* window = qobject_cast<QQuickWindow*>(engine.rootObjects().constFirst())) {
+      QTimer::singleShot(1200, window, [window, path = *smoke_screenshot] {
+        window->grabWindow().save(path);
+      });
+      if (!smoke_exit_ms.has_value()) smoke_exit_ms = 1500;
     }
   }
 

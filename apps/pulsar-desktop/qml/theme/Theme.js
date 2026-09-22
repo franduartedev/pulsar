@@ -2,38 +2,38 @@
 
 // Backgrounds: three levels — workspace frame, monitor module, quiet panels.
 var base      = "#0d1117"
-var workspace = "#080b10"
-var header    = "#0a0e14"
-var panel     = "#101720"
-var panelAlt  = "#0c131c"
-var surfaceRaised = "#151f2b"
+var workspace = "#080c12"
+var header    = "#0b1119"
+var panel     = "#101923"
+var panelAlt  = "#0d151f"
+var surfaceRaised = "#172432"
 var ruler = "#0a1018"
 var lane = "#0a0f16"
-var monitor   = "#101823"
+var monitor   = "#111c28"
 var viewer    = "#05070a"
 var input     = "#0c121a"
 
 // Borders
-var border     = "#263241"
-var borderSoft = "#1d2937"
-var edge       = "#34485f"
+var border     = "#2b3a4b"
+var borderSoft = "#202e3d"
+var edge       = "#405a73"
 
 // Text
 var text       = "#d7dee8"
 var textBright = "#f0f4f9"
-var muted      = "#7f8b99"
-var faint      = "#5b6673"
+var muted      = "#91a0af"
+var faint      = "#647486"
 
 // Accent
 var accent      = "#4c8dff"
 var accentHover = "#5f9bff"
-var accentDim   = "#203a5d"
+var accentDim   = "#21456e"
 
 // Interactive
 var buttonBase     = "#131c27"
-var clipBase        = "#1a2838"
-var clipHover       = "#22354a"
-var clipSelected    = "#243e62"
+var clipBase        = "#1c3044"
+var clipHover       = "#27445d"
+var clipSelected    = "#28527d"
 var missingClip     = "#302126"
 var buttonHover    = "#182232"
 var buttonPressed  = "#1d2a38"
@@ -62,7 +62,7 @@ var radiusL = 4
 var spaceXS = 4
 var spaceS = 8
 var spaceM = 12
-var spaceL = 16
+var spaceL = 18
 var controlHeight = 28
 var controlHeightSmall = 24
 var panelPadding = 12

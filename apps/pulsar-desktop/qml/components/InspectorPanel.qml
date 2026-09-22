@@ -4,8 +4,6 @@ import "../theme/Theme.js" as Theme
 // Real inspector: typographic sections with hairline rhythm, subdued keys,
 // clear values, intelligent wrapping. No cards-in-cards.
 Panel {
-    border.width: 0
-    radius: 0
     id: inspector
 
     function metaSection(key) {
@@ -72,16 +70,16 @@ Panel {
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.top: parent.top
-        anchors.leftMargin: 12
+        anchors.leftMargin: 16
         anchors.rightMargin: 12
-        anchors.topMargin: 10
+        anchors.topMargin: 14
         spacing: 8
-        SectionLabel { anchors.verticalCenter: parent.verticalCenter; text: "INSPECTOR" }
+        SectionLabel { anchors.verticalCenter: parent.verticalCenter; text: "INSPECTOR"; color: Theme.textBright }
         StatusDot { anchors.verticalCenter: parent.verticalCenter; tone: controller.errorMessage.length > 0 ? "error" : (controller.hasMedia ? "live" : "idle") }
     }
     Flickable {
         anchors.left: parent.left; anchors.right: parent.right; anchors.top: titleRow.bottom; anchors.bottom: parent.bottom
-        anchors.leftMargin: 12; anchors.rightMargin: 12; anchors.topMargin: 4; anchors.bottomMargin: 10
+        anchors.leftMargin: 16; anchors.rightMargin: 16; anchors.topMargin: 8; anchors.bottomMargin: 12
         contentWidth: width
         contentHeight: body.height
         clip: true
@@ -89,19 +87,29 @@ Panel {
             id: body
             width: parent.width
             spacing: 12
-            Text { visible: metaGroups.length === 0; width: parent.width; text: "Abrí un medio para ver metadata real."; color: Theme.muted; font.pixelSize: Theme.fontSizeM; wrapMode: Text.WordWrap }
+            Rectangle {
+                visible: controller.selectedClipKey.length === 0 && metaGroups.length === 0
+                width: parent.width; height: 112; color: Theme.panelAlt; border.color: Theme.borderSoft; radius: Theme.radiusS
+                Column {
+                    anchors.centerIn: parent; spacing: 7
+                    Text { anchors.horizontalCenter: parent.horizontalCenter; text: "INSPECTOR VACÍO"; color: Theme.text; font.pixelSize: Theme.fontSizeS; font.bold: true; font.letterSpacing: 1.2 }
+                    Text { anchors.horizontalCenter: parent.horizontalCenter; text: "Seleccioná un clip o importá un medio"; color: Theme.muted; font.pixelSize: Theme.fontSizeS; horizontalAlignment: Text.AlignHCenter }
+                    Rectangle { anchors.horizontalCenter: parent.horizontalCenter; width: 34; height: 2; color: Theme.accent; opacity: 0.7 }
+                }
+            }
             Column {
                 visible: controller.selectedClipKey.length > 0
                 width: parent.width
                 spacing: 6
-                SectionLabel { width: parent.width; text: "AUDIO DEL CLIP" }
+                SectionLabel { width: parent.width; text: "AUDIO DEL CLIP"; color: Theme.textBright }
                 Rectangle { width: parent.width; height: 1; color: Theme.borderSoft }
                 Row {
                     width: parent.width
                     spacing: 6
-                    Text { text: "Ganancia"; color: Theme.faint; font.pixelSize: Theme.fontSizeS; anchors.verticalCenter: parent.verticalCenter }
+                    Text { text: "GAIN"; color: Theme.faint; font.pixelSize: Theme.fontSizeXS; font.bold: true; font.letterSpacing: 1; anchors.verticalCenter: parent.verticalCenter }
+                    PButton { width: 26; height: Theme.controlHeightSmall; text: "−"; onClicked: controller.setSelectedClipGainDb(controller.selectedClipGainDb - 1) }
                     Rectangle {
-                        width: 72
+                        width: 66
                         height: Theme.controlHeightSmall
                         color: Theme.input
                         border.width: 1
@@ -122,19 +130,20 @@ Panel {
                     }
                     Text { text: "dB"; color: Theme.faint; font.pixelSize: Theme.fontSizeS; anchors.verticalCenter: parent.verticalCenter }
                     PButton {
-                        width: 92; height: Theme.controlHeightSmall
-                        text: controller.selectedClipMuted ? "Activar" : "Silenciar"
+                        width: 86; height: Theme.controlHeightSmall
+                        text: controller.selectedClipMuted ? "ACTIVAR" : "SILENCIAR"
                         onClicked: controller.toggleSelectedClipMute()
                     }
+                    PButton { width: 26; height: Theme.controlHeightSmall; text: "+"; onClicked: controller.setSelectedClipGainDb(controller.selectedClipGainDb + 1) }
                 }
-                Text { width: parent.width; text: "Rango: -60 a +12 dB"; color: Theme.faint; font.pixelSize: Theme.fontSizeXS; wrapMode: Text.WordWrap }
+                Text { width: parent.width; text: "−60 a +12 dB · cambios aplicados al clip seleccionado"; color: Theme.faint; font.pixelSize: Theme.fontSizeXS; wrapMode: Text.WordWrap }
             }
             Repeater {
                 model: metaGroups
                 delegate: Column {
                     width: body.width
                     spacing: 0
-                    SectionLabel { width: parent.width; text: modelData.header }
+                    SectionLabel { width: parent.width; text: modelData.header; color: Theme.textBright }
                     Rectangle { width: parent.width; height: 1; color: Theme.borderSoft }
                     Repeater {
                         model: modelData.rows
@@ -170,7 +179,7 @@ Panel {
                     border.color: Theme.borderSoft
                     radius: Theme.radiusS
                     opacity: 0.82
-                    SectionLabel { id: diagnosticLabel; x: 8; y: 6; text: "DIAGNÓSTICO"; opacity: 0.65 }
+                    SectionLabel { id: diagnosticLabel; x: 8; y: 6; text: "TÉCNICO · DIAGNÓSTICO"; opacity: 0.65 }
                     Text { id: diagnosticText; x: 8; y: diagnosticLabel.bottom + 4; width: parent.width - 16; text: controller.debugMetrics; color: Theme.faint; font.pixelSize: Theme.fontSizeXS; wrapMode: Text.WordWrap }
                 }
             }

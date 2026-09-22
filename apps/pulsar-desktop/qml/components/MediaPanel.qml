@@ -5,8 +5,6 @@ import "../theme/Theme.js" as Theme
 // stays secondary. Reads controller directly, like the rest of the UI.
 Panel {
     signal importRequested()
-    border.width: 0
-    radius: 0
     id: mediaPanel
 
     // Presentation-only lookup into the existing metadata blob.
@@ -44,14 +42,15 @@ Panel {
         return codecInfo + resInfo
     }
 
-    Rectangle { anchors.left: parent.left; anchors.top: parent.top; width: 3; height: 16; color: Theme.accent; opacity: 0.8 }
-    SectionLabel { id: title; anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top; anchors.leftMargin: 10; anchors.rightMargin: 10; anchors.topMargin: 10; text: "MEDIOS" }
-    PButton { id: importButton; anchors.left: parent.left; anchors.right: parent.right; anchors.top: title.bottom; anchors.leftMargin: 10; anchors.rightMargin: 10; anchors.topMargin: 8; text: "+  IMPORTAR MEDIO"; primary: true; onClicked: mediaPanel.importRequested() }
+    Rectangle { anchors.left: parent.left; anchors.top: parent.top; width: 4; height: 18; color: Theme.accent; opacity: 0.9 }
+    SectionLabel { id: title; anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top; anchors.leftMargin: 14; anchors.rightMargin: 12; anchors.topMargin: 14; text: "BIBLIOTECA"; color: Theme.textBright }
+    Text { anchors.left: title.left; anchors.right: title.right; anchors.top: title.bottom; anchors.topMargin: 3; text: "Medios, fuentes y sonidos"; color: Theme.faint; font.pixelSize: Theme.fontSizeXS }
+    PButton { id: importButton; anchors.left: parent.left; anchors.right: parent.right; anchors.top: title.bottom; anchors.leftMargin: 12; anchors.rightMargin: 12; anchors.topMargin: 27; text: "+  IMPORTAR MEDIO"; primary: true; onClicked: mediaPanel.importRequested() }
 
-    SectionLabel { id: sessionLabel; anchors.left: parent.left; anchors.right: parent.right; anchors.top: importButton.bottom; anchors.leftMargin: 10; anchors.rightMargin: 10; anchors.topMargin: 14; text: "FUENTE ACTIVA" }
+    SectionLabel { id: sessionLabel; anchors.left: parent.left; anchors.right: parent.right; anchors.top: importButton.bottom; anchors.leftMargin: 12; anchors.rightMargin: 12; anchors.topMargin: 16; text: "FUENTE ACTIVA" }
     Rectangle {
         id: activeCard
-        anchors.left: parent.left; anchors.right: parent.right; anchors.top: sessionLabel.bottom; anchors.leftMargin: 10; anchors.rightMargin: 10; anchors.topMargin: 8
+        anchors.left: parent.left; anchors.right: parent.right; anchors.top: sessionLabel.bottom; anchors.leftMargin: 12; anchors.rightMargin: 12; anchors.topMargin: 8
         height: cardCol.height + 18
         color: controller.hasMedia ? Theme.input : "transparent"
         border.color: controller.hasMedia ? Theme.border : Theme.borderSoft
@@ -70,28 +69,34 @@ Panel {
         }
     }
 
-    SectionLabel { id: soundsTitle; anchors.left: parent.left; anchors.right: parent.right; anchors.top: activeCard.bottom; anchors.leftMargin: 10; anchors.rightMargin: 10; anchors.topMargin: 14; text: "SONIDOS" }
+    SectionLabel { id: soundsTitle; anchors.left: parent.left; anchors.right: parent.right; anchors.top: activeCard.bottom; anchors.leftMargin: 12; anchors.rightMargin: 12; anchors.topMargin: 16; text: "CORE SOUNDS"; color: Theme.textBright }
     ListView {
         id: soundsList
-        anchors.left: parent.left; anchors.right: parent.right; anchors.top: soundsTitle.bottom; anchors.bottom: manualTitle.top
-        anchors.leftMargin: 10; anchors.rightMargin: 10; anchors.topMargin: 6; anchors.bottomMargin: 4
-        clip: true; spacing: 4; model: controller.soundLibrary
-        delegate: Row {
-            width: soundsList.width; height: 28; spacing: 5
+        anchors.left: parent.left; anchors.right: parent.right; anchors.top: soundsTitle.bottom
+        anchors.bottom: manualTitle.visible ? manualTitle.top : parent.bottom
+        anchors.leftMargin: 12; anchors.rightMargin: 12; anchors.topMargin: 8; anchors.bottomMargin: manualTitle.visible ? 4 : 10
+        clip: true; spacing: 6; model: controller.soundLibrary
+        delegate: Rectangle {
+            width: soundsList.width; height: 46; radius: Theme.radiusS; color: Theme.panelAlt; border.color: Theme.borderSoft
+            Row {
+                anchors.fill: parent; anchors.margins: 7; spacing: 8
+                Rectangle { width: 3; height: parent.height; radius: 2; color: Theme.waveform; opacity: 0.7 }
             Column {
-                width: parent.width - insert.width - 5; height: parent.height
-                Text { text: modelData.name; color: Theme.text; font.pixelSize: Theme.fontSizeS; elide: Text.ElideRight; width: parent.width }
-                Text { text: modelData.category; color: Theme.faint; font.pixelSize: Theme.fontSizeXS; elide: Text.ElideRight; width: parent.width }
+                width: parent.width - insert.width - 15; anchors.verticalCenter: parent.verticalCenter; spacing: 2
+                Text { text: modelData.name; color: Theme.text; font.pixelSize: Theme.fontSizeM; font.bold: true; elide: Text.ElideRight; width: parent.width }
+                Text { text: modelData.category; color: Theme.faint; font.pixelSize: Theme.fontSizeXS; font.letterSpacing: 0.8; elide: Text.ElideRight; width: parent.width }
             }
-            PButton { id: insert; width: 54; height: 26; text: "Insertar"; onClicked: controller.insertBuiltinSound(modelData.id) }
+            PButton { id: insert; width: 62; height: 28; text: "INSERTAR"; anchors.verticalCenter: parent.verticalCenter; onClicked: controller.insertBuiltinSound(modelData.id) }
+            }
         }
     }
 
-    Rectangle { id: manualSep; anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: pathRow.top; anchors.leftMargin: 10; anchors.rightMargin: 10; anchors.bottomMargin: 8; height: 1; color: Theme.borderSoft }
-    SectionLabel { id: manualTitle; anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: manualSep.top; anchors.leftMargin: 10; anchors.rightMargin: 10; anchors.bottomMargin: 8; text: "AVANZADO · RUTA DEL MEDIO"; opacity: 0.72 }
+    Rectangle { id: manualSep; visible: parent.height > 400; anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: pathRow.top; anchors.leftMargin: 10; anchors.rightMargin: 10; anchors.bottomMargin: 8; height: 1; color: Theme.borderSoft }
+    SectionLabel { id: manualTitle; visible: parent.height > 400; anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: manualSep.top; anchors.leftMargin: 12; anchors.rightMargin: 12; anchors.bottomMargin: 8; text: "AVANZADO · RUTA DEL MEDIO"; opacity: 0.72 }
     Row {
         id: pathRow
-        anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; anchors.leftMargin: 10; anchors.rightMargin: 10; anchors.bottomMargin: 10; opacity: 0.82
+        visible: parent.height > 400
+        anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; anchors.leftMargin: 12; anchors.rightMargin: 12; anchors.bottomMargin: 12; opacity: 0.82
         spacing: 6
         Rectangle {
             id: pathBox

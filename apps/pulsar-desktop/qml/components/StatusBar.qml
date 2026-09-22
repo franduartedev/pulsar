@@ -6,12 +6,12 @@ Rectangle {
     color: Theme.header
     border.color: Theme.borderSoft
     radius: Theme.radiusS
-    height: 24
+    height: 28
 
-    Text { anchors.left: parent.left; anchors.leftMargin: 10; anchors.verticalCenter: parent.verticalCenter; text: "Espacio reproducir/pausar   ·   Ctrl+I importar   ·   Inicio/Fin navegar"; color: Theme.faint; font.pixelSize: Theme.fontSizeS }
+    Text { anchors.left: parent.left; anchors.leftMargin: 12; anchors.verticalCenter: parent.verticalCenter; text: "ESPACIO reproducir/pausar   ·   CTRL+I importar   ·   CTRL+S guardar   ·   INICIO/FIN navegar"; color: Theme.faint; font.pixelSize: Theme.fontSizeXS }
     Row {
         anchors.right: parent.right
-        anchors.rightMargin: 10
+        anchors.rightMargin: 12
         anchors.verticalCenter: parent.verticalCenter
         spacing: 7
         StatusDot { anchors.verticalCenter: parent.verticalCenter; tone: controller.errorMessage.length > 0 ? "error" : "idle" }

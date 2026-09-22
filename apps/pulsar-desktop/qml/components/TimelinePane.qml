@@ -5,35 +5,36 @@ Panel {
     border.width: 0
     radius: 0
     id: pane
-    property real gutterWidth: 58
-    property real trackLaneHeight: 76
+    property real gutterWidth: Math.max(96, Math.min(138, width * 0.115))
+    property real trackLaneHeight: 78
 
     Rectangle {
         id: toolbar
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.top: parent.top
-        height: 38
+        height: 46
         color: Theme.surfaceRaised
         Rectangle { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; height: 1; color: Theme.border; opacity: 0.8 }
             Row {
             anchors.left: parent.left
-            anchors.leftMargin: 14
+            anchors.leftMargin: 16
             anchors.verticalCenter: parent.verticalCenter
-            spacing: 8
-            Text { text: "EDICIÓN"; color: Theme.textBright; font.pixelSize: Theme.fontSizeS; font.bold: true; font.letterSpacing: 1.6 }
+            spacing: 7
+            Text { text: "TIMELINE"; color: Theme.textBright; font.pixelSize: Theme.fontSizeS; font.bold: true; font.letterSpacing: 1.6 }
             Rectangle { width: 1; height: 16; color: Theme.border; opacity: 0.8 }
-            PButton { text: "Cortar"; enabled: controller.canSplit; width: 62; height: Theme.controlHeightSmall; onClicked: controller.splitSelectedClip() }
-            PButton { text: "Borrar"; enabled: controller.selectedClipKey.length > 0; width: 62; height: Theme.controlHeightSmall; onClicked: controller.deleteSelectedClip() }
-            PButton { text: "Deshacer"; enabled: controller.canUndo; width: 72; height: Theme.controlHeightSmall; onClicked: controller.undoEdit() }
-            PButton { text: "Rehacer"; enabled: controller.canRedo; width: 68; height: Theme.controlHeightSmall; onClicked: controller.redoEdit() }
+            PButton { text: "CORTAR"; enabled: controller.canSplit; width: 64; height: Theme.controlHeightSmall; onClicked: controller.splitSelectedClip() }
+            PButton { text: "BORRAR"; enabled: controller.selectedClipKey.length > 0; width: 64; height: Theme.controlHeightSmall; onClicked: controller.deleteSelectedClip() }
+            Rectangle { width: 1; height: 16; color: Theme.border; opacity: 0.8 }
+            PButton { text: "DESHACER"; enabled: controller.canUndo; width: 76; height: Theme.controlHeightSmall; onClicked: controller.undoEdit() }
+            PButton { text: "REHACER"; enabled: controller.canRedo; width: 72; height: Theme.controlHeightSmall; onClicked: controller.redoEdit() }
         }
         Row {
             anchors.right: parent.right
             anchors.rightMargin: 14
             anchors.verticalCenter: parent.verticalCenter
             spacing: 8
-            Text { text: "Zoom"; color: Theme.muted; font.pixelSize: Theme.fontSizeXS; anchors.verticalCenter: parent.verticalCenter }
+            Text { text: "VISTA"; color: Theme.faint; font.pixelSize: Theme.fontSizeXS; font.bold: true; font.letterSpacing: 0.8; anchors.verticalCenter: parent.verticalCenter }
             Rectangle {
                 width: 112; height: 20; radius: Theme.radiusS; color: Theme.track; anchors.verticalCenter: parent.verticalCenter
                 Rectangle { x: (Math.log(controller.timelineZoom) / Math.LN10 / 7) * (parent.width - width); y: 5; width: 12; height: 10; radius: 5; color: Theme.accent }
@@ -43,7 +44,7 @@ Panel {
                     onPositionChanged: function(mouse) { if (pressed) controller.setTimelineZoom(Math.pow(10, 7 * Math.max(0, Math.min(1, mouse.x / width)))) }
                 }
             }
-            Text { text: "Pan"; color: controller.timelineZoom > 1.0 ? Theme.muted : Theme.disabledText; font.pixelSize: Theme.fontSizeXS; anchors.verticalCenter: parent.verticalCenter }
+            Text { text: "PAN"; color: controller.timelineZoom > 1.0 ? Theme.muted : Theme.disabledText; font.pixelSize: Theme.fontSizeXS; anchors.verticalCenter: parent.verticalCenter }
             Rectangle {
                 width: 90; height: 20; radius: Theme.radiusS; color: Theme.track; opacity: controller.timelineZoom > 1.0 ? 1.0 : 0.42; anchors.verticalCenter: parent.verticalCenter
                 Rectangle { x: controller.timelineScroll * (parent.width - width); y: 5; width: 14; height: 10; radius: 4; color: controller.timelineZoom > 1.0 ? Theme.waveform : Theme.disabledText }
@@ -54,7 +55,7 @@ Panel {
                     onPositionChanged: function(mouse) { if (pressed) controller.setTimelineScroll(Math.max(0, Math.min(1, mouse.x / width))) }
                 }
             }
-            Text { text: "Detalle %1x".arg(controller.waveformDensity.toFixed(1)); color: Theme.muted; font.pixelSize: Theme.fontSizeXS; anchors.verticalCenter: parent.verticalCenter }
+            Text { text: "FORMA %1x".arg(controller.waveformDensity.toFixed(1)); color: Theme.muted; font.pixelSize: Theme.fontSizeXS; anchors.verticalCenter: parent.verticalCenter }
             Rectangle {
                 width: 72; height: 20; radius: Theme.radiusS; color: Theme.track; anchors.verticalCenter: parent.verticalCenter
                 Rectangle { x: ((controller.waveformDensity - 0.5) / 1.5) * (parent.width - width); y: 5; width: 12; height: 10; radius: 4; color: Theme.waveform }
@@ -72,10 +73,11 @@ Panel {
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.top: toolbar.bottom
-        height: 28
+        height: 30
         clip: true
         Rectangle { anchors.fill: parent; color: Theme.ruler }
-        Rectangle { width: pane.gutterWidth; anchors.top: parent.top; anchors.bottom: parent.bottom; color: Theme.surfaceRaised; opacity: 0.75 }
+        Rectangle { width: pane.gutterWidth; anchors.top: parent.top; anchors.bottom: parent.bottom; color: Theme.surfaceRaised; opacity: 0.9 }
+        Text { x: 16; anchors.bottom: parent.bottom; anchors.bottomMargin: 7; text: "PISTAS"; color: Theme.faint; font.pixelSize: Theme.fontSizeXS; font.bold: true; font.letterSpacing: 1.1 }
         Repeater {
             model: controller.timelineRulerTicks
             delegate: Item {
@@ -121,7 +123,8 @@ Panel {
                         border.width: 1
                         Rectangle { width: pane.gutterWidth; anchors.top: parent.top; anchors.bottom: parent.bottom; color: Theme.surfaceRaised; opacity: 0.72 }
                         Rectangle { x: pane.gutterWidth; anchors.top: parent.top; anchors.bottom: parent.bottom; width: 1; color: Theme.border; opacity: 0.9 }
-                        Text { x: 15; anchors.verticalCenter: parent.verticalCenter; text: modelData.label; color: Theme.text; font.pixelSize: Theme.fontSizeS; font.bold: true; font.letterSpacing: 1.1 }
+                        Text { x: 16; y: 18; text: modelData.kind === "video" ? "VIDEO" : "AUDIO"; color: modelData.kind === "video" ? Theme.waveform : Theme.waveformPending; font.pixelSize: Theme.fontSizeXS; font.bold: true; font.letterSpacing: 1.2 }
+                        Text { x: 16; y: 35; text: modelData.label; color: Theme.text; font.pixelSize: Theme.fontSizeS; font.bold: true; elide: Text.ElideRight; width: pane.gutterWidth - 24 }
                     }
                 }
                 Repeater {

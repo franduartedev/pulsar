@@ -18,8 +18,8 @@ Window {
     color: Theme.workspace
 
     // Viewer stays dominant: side panels take bounded relative slices.
-    property real mediaWidth: Math.max(220, Math.min(272, width * 0.17))
-    property real inspectorWidth: Math.max(248, Math.min(304, width * 0.19))
+    property real mediaWidth: Math.max(238, Math.min(310, width * 0.205))
+    property real inspectorWidth: Math.max(270, Math.min(330, width * 0.22))
 
     Shortcut { sequence: "Space"; onActivated: controller.togglePlayback() }
     Shortcut { sequence: "Ctrl+I"; onActivated: fileDialog.open() }
@@ -76,16 +76,20 @@ Window {
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.top: parent.top
+        height: 58
         onOpenProjectRequested: openProjectDialog.open()
         onSaveProjectRequested: controller.activeProjectPath.length > 0 ? controller.saveProject(controller.activeProjectPath) : saveProjectDialog.open()
         onSaveProjectAsRequested: saveProjectDialog.open()
+        onImportMediaRequested: fileDialog.open()
     }
 
     MediaPanel {
         id: mediaPanel
         anchors.left: parent.left
         anchors.top: header.bottom
+        anchors.topMargin: 12
         anchors.bottom: scrubber.top
+        anchors.bottomMargin: 8
         width: root.mediaWidth
         onImportRequested: fileDialog.open()
     }
@@ -94,22 +98,26 @@ Window {
         id: inspector
         anchors.right: parent.right
         anchors.top: header.bottom
+        anchors.topMargin: 12
         anchors.bottom: scrubber.top
+        anchors.bottomMargin: 8
         width: root.inspectorWidth
     }
-
-    Rectangle { anchors.left: mediaPanel.right; anchors.top: header.bottom; anchors.bottom: scrubber.top; width: 1; color: Theme.border; opacity: 0.65; z: 3 }
-    Rectangle { anchors.right: inspector.left; anchors.top: header.bottom; anchors.bottom: scrubber.top; width: 1; color: Theme.border; opacity: 0.65; z: 3 }
 
     Rectangle {
         id: monitor
         anchors.left: mediaPanel.right
         anchors.right: inspector.left
         anchors.top: header.bottom
+        anchors.leftMargin: 10
+        anchors.rightMargin: 10
+        anchors.topMargin: 12
         anchors.bottom: scrubber.top
+        anchors.bottomMargin: 8
         color: Theme.monitor
-        border.width: 0
-        radius: 0
+        border.color: Theme.border
+        border.width: 1
+        radius: Theme.radiusM
         Column {
             anchors.fill: parent
             anchors.margins: 1
@@ -130,7 +138,7 @@ Window {
         anchors.right: parent.right
         anchors.bottom: timelinePane.top
         anchors.margins: Theme.panelPadding
-        height: 56
+        height: 50
     }
 
     TimelinePane {
@@ -141,7 +149,7 @@ Window {
         anchors.leftMargin: 12
         anchors.rightMargin: 12
         anchors.bottomMargin: 12
-        height: Math.max(196, Math.min(248, root.height * 0.29))
+        height: Math.max(210, Math.min(276, root.height * 0.32))
     }
 
     StatusBar {
