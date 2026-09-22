@@ -47,6 +47,7 @@ extern "C" {
 #include <cmath>
 #include <cstdint>
 #include <filesystem>
+#include <limits>
 #include <optional>
 #include <string>
 #include <vector>
@@ -269,6 +270,22 @@ void invalid_stream_selection() {
   expect_code(0, MediaDecodeErrorCode::SelectedStreamIsNotAudio);
 }
 
+void wide_media_time_seek_uses_exact_stream_rescale() {
+  FFmpegAudioDecodeSession session{fixture_path(), 1};
+
+  // The exact PULSAR timestamp has a denominator outside AVRational's int
+  // fields, but rounds deterministically to the first stream tick.
+  assert(session.seek_to(MediaTime{1, Rational{1, 3000000000}}));
+
+  bool rejected = false;
+  try {
+    (void)session.seek_to(MediaTime{std::numeric_limits<std::int64_t>::max(), Rational{1, 1}});
+  } catch (const MediaDecodeError& error) {
+    rejected = error.code() == MediaDecodeErrorCode::InvalidSeekTarget;
+  }
+  assert(rejected);
+}
+
 // T7: A0 identity (MediaAsset::audio stream index) opens the A1 decoder.
 void a0_identity_integration() {
   ProjectDocument document;
@@ -384,6 +401,7 @@ int main() {
   block_ownership();
   eof_flushing();
   invalid_stream_selection();
+  wide_media_time_seek_uses_exact_stream_rescale();
   a0_identity_integration();
   timestamp_contract();
   multichannel_planar_beyond_inline_planes();

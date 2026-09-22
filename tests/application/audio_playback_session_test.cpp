@@ -153,6 +153,16 @@ public:
   }
 };
 
+class ThrowingSeekSource final : public AudioPlaybackSource {
+public:
+  int sample_rate() const noexcept override { return 1000; }
+  int channel_count() const noexcept override { return 1; }
+  bool seek_to(domain::MediaTime) override {
+    throw std::runtime_error{"synthetic seek failure"};
+  }
+  std::optional<AudioBlock> decode_next() override { return std::nullopt; }
+};
+
 class TemporarilyStarvedSource final : public AudioPlaybackSource {
 public:
   int sample_rate() const noexcept override { return 1000; }
@@ -329,6 +339,17 @@ void decode_failure_is_terminal_and_not_silence() {
   assert(session.state() == AudioPlaybackState::Error);
 }
 
+void seek_failure_is_controlled_and_closes_transition() {
+  FakeOutput output;
+  AudioPlaybackSession session{
+      &output, [](const auto&, int) { return std::make_unique<ThrowingSeekSource>(); }};
+  session.configure(clip(), time(0));
+  assert(session.state() == AudioPlaybackState::Error);
+  assert(session.condition() == application::AudioPlaybackCondition::Error);
+  assert(session.error_message().has_value());
+  assert(output.state() == AudioOutputState::Closed);
+}
+
 void device_start_failure_is_degraded_not_media_eof() {
   FakeOutput output;
   output.start_ok = false;
@@ -397,6 +418,7 @@ int main() {
   underrun_recovers_through_prebuffer();
   no_device_is_explicit_fallback();
   decode_failure_is_terminal_and_not_silence();
+  seek_failure_is_controlled_and_closes_transition();
   device_start_failure_is_degraded_not_media_eof();
   decoder_starvation_recovers_without_becoming_eof();
   legitimate_audio_eof_is_not_starvation();

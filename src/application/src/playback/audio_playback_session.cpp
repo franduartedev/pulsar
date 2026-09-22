@@ -254,18 +254,28 @@ bool AudioPlaybackSession::open_source_at(domain::MediaTime timeline_position) {
     set_decode_error("audio source factory returned no source");
     return false;
   }
-  stream_origin_ = source_->stream_origin();
-  expected_source_timestamp_.reset();
-  if (!source_->seek_to(audio_target_for(timeline_position))) {
-    set_decode_error("audio source seek failed");
-    return false;
-  }
-  if (!output_->open({source_->sample_rate(), source_->channel_count()})) {
-    state_ = AudioPlaybackState::DeviceUnavailable;
-    condition_ = AudioPlaybackCondition::DeviceUnavailable;
-    if (output_->error().has_value()) {
-      error_message_ = output_->error()->message;
+  try {
+    stream_origin_ = source_->stream_origin();
+    expected_source_timestamp_.reset();
+    const auto target = audio_target_for(timeline_position);
+    if (!source_->seek_to(target)) {
+      set_decode_error("audio source seek failed");
+      return false;
     }
+    if (!output_->open({source_->sample_rate(), source_->channel_count()})) {
+      state_ = AudioPlaybackState::DeviceUnavailable;
+      condition_ = AudioPlaybackCondition::DeviceUnavailable;
+      if (output_->error().has_value()) {
+        error_message_ = output_->error()->message;
+      }
+      return false;
+    }
+  } catch (const std::exception& error) {
+    close_output();
+    source_.reset();
+    state_ = AudioPlaybackState::Error;
+    condition_ = AudioPlaybackCondition::Error;
+    error_message_ = error.what();
     return false;
   }
   configured_timeline_ = timeline_position;

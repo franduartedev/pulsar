@@ -33,6 +33,57 @@ namespace {
 using application::AudioBlock;
 using internal::ffmpeg_error_text;
 
+using WideInt = __int128_t;
+
+[[nodiscard]] WideInt abs_wide(WideInt value) noexcept {
+  return value < 0 ? -value : value;
+}
+
+[[nodiscard]] WideInt gcd_wide(WideInt lhs, WideInt rhs) noexcept {
+  lhs = abs_wide(lhs);
+  rhs = abs_wide(rhs);
+  while (rhs != 0) {
+    const WideInt remainder = lhs % rhs;
+    lhs = rhs;
+    rhs = remainder;
+  }
+  return lhs;
+}
+
+// FFmpeg accepts a timestamp in the stream time base, not an arbitrary
+// PULSAR MediaTime base. Keep the conversion exact until the final
+// deterministic AV_ROUND_NEAR_INF-equivalent rounding step. In particular,
+// never construct an AVRational from the PULSAR time base: clip arithmetic
+// may legitimately produce denominators wider than AVRational can represent.
+[[nodiscard]] std::int64_t to_stream_timestamp(const domain::MediaTime& timestamp,
+                                                AVRational stream_time_base) {
+  try {
+    const auto seconds = timestamp.seconds();
+    const WideInt numerator = static_cast<WideInt>(seconds.numerator()) * stream_time_base.den;
+    const WideInt denominator = static_cast<WideInt>(seconds.denominator()) * stream_time_base.num;
+    if (denominator <= 0) {
+      throw std::invalid_argument{"FFmpeg stream time base is invalid"};
+    }
+    const WideInt divisor = gcd_wide(numerator, denominator);
+    const WideInt reduced_numerator = numerator / divisor;
+    const WideInt reduced_denominator = denominator / divisor;
+    WideInt rounded = reduced_numerator / reduced_denominator;
+    const WideInt remainder = reduced_numerator % reduced_denominator;
+    if (abs_wide(remainder) * 2 >= reduced_denominator) {
+      rounded += reduced_numerator < 0 ? -1 : 1;
+    }
+    if (rounded < static_cast<WideInt>(std::numeric_limits<std::int64_t>::min()) ||
+        rounded > static_cast<WideInt>(std::numeric_limits<std::int64_t>::max())) {
+      throw std::overflow_error{"seek timestamp exceeds FFmpeg int64 range"};
+    }
+    return static_cast<std::int64_t>(rounded);
+  } catch (const std::exception& error) {
+    throw MediaDecodeError{MediaDecodeErrorCode::InvalidSeekTarget,
+                           std::string{"audio seek timestamp cannot be represented in FFmpeg "} +
+                               "stream time base: " + error.what()};
+  }
+}
+
 struct CodecContextDeleter {
   void operator()(AVCodecContext* context) const noexcept {
     if (context != nullptr) {
@@ -275,20 +326,7 @@ public:
   }
 
   [[nodiscard]] bool seek_to(domain::MediaTime timestamp) {
-    const auto source_base = timestamp.time_base();
-    const auto in_range = [](std::int64_t value) {
-      return value >= std::numeric_limits<int>::min() &&
-             value <= std::numeric_limits<int>::max();
-    };
-    if (!in_range(source_base.numerator()) || !in_range(source_base.denominator()) ||
-        source_base.denominator() <= 0) {
-      throw MediaDecodeError{MediaDecodeErrorCode::DecodeFailed,
-                             "audio seek timestamp is outside FFmpeg range"};
-    }
-    const AVRational source_time_base{static_cast<int>(source_base.numerator()),
-                                      static_cast<int>(source_base.denominator())};
-    const auto target = av_rescale_q(timestamp.value(), source_time_base,
-                                     stream_time_base_ffmpeg_);
+    const auto target = to_stream_timestamp(timestamp, stream_time_base_ffmpeg_);
     const int result = avformat_seek_file(context_.get(), stream_index_,
                                            std::numeric_limits<std::int64_t>::min(), target,
                                            std::numeric_limits<std::int64_t>::max(),
