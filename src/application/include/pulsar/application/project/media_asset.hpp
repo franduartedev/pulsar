@@ -45,15 +45,23 @@ public:
              std::optional<std::string> availability_reason = std::nullopt,
              std::optional<AudioAssetMetadata> audio = std::nullopt);
 
+  [[nodiscard]] static MediaAsset audio_only(domain::MediaId id,
+                                              std::filesystem::path source_locator,
+                                              domain::MediaTime playable_duration,
+                                              AudioAssetMetadata audio,
+                                              MediaAvailability availability = MediaAvailability::Available,
+                                              std::optional<std::string> availability_reason = std::nullopt);
+
   [[nodiscard]] domain::MediaId id() const noexcept { return id_; }
   [[nodiscard]] const std::filesystem::path& source_locator() const noexcept {
     return source_locator_;
   }
   [[nodiscard]] int video_stream_index() const noexcept { return video_stream_index_; }
+  [[nodiscard]] bool has_video() const noexcept { return video_stream_index_ >= 0; }
   [[nodiscard]] domain::MediaTime playable_duration() const noexcept {
     return playable_duration_;
   }
-  [[nodiscard]] const VideoAssetMetadata& metadata() const noexcept { return metadata_; }
+  [[nodiscard]] const VideoAssetMetadata& metadata() const;
   [[nodiscard]] MediaAvailability availability() const noexcept { return availability_; }
   [[nodiscard]] const std::optional<std::string>& availability_reason() const noexcept {
     return availability_reason_;
@@ -65,7 +73,7 @@ private:
   std::filesystem::path source_locator_;
   int video_stream_index_;
   domain::MediaTime playable_duration_;
-  VideoAssetMetadata metadata_;
+  std::optional<VideoAssetMetadata> metadata_;
   MediaAvailability availability_;
   std::optional<std::string> availability_reason_;
   std::optional<AudioAssetMetadata> audio_;

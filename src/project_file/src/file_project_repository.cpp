@@ -69,9 +69,14 @@ void refresh_availability(application::ProjectRestoreState& state,
       reason = error ? ("cannot inspect source: " + error.message())
                      : "source is not a readable regular file";
     }
-    asset = application::MediaAsset{asset.id(),         authored, asset.video_stream_index(),
-                                    asset.playable_duration(), asset.metadata(), availability,
-                                    reason,                    asset.audio()};
+    if (asset.has_video()) {
+      asset = application::MediaAsset{asset.id(),         authored, asset.video_stream_index(),
+                                      asset.playable_duration(), asset.metadata(), availability,
+                                      reason,              asset.audio()};
+    } else if (asset.audio().has_value()) {
+      asset = application::MediaAsset::audio_only(asset.id(), authored, asset.playable_duration(),
+                                                  *asset.audio(), availability, reason);
+    }
   }
 }
 

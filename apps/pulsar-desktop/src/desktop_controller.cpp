@@ -82,6 +82,37 @@ QString metadataText(const pulsar::application::MediaProbeResult& probe, const p
         << QStringLiteral("Preview: CPU RGBA");
   return lines.join('\n');
 }
+QString audioMetadataText(const pulsar::application::MediaProbeResult& probe,
+                          const pulsar::application::AudioStreamInfo& stream) {
+  QStringList lines;
+  lines << QStringLiteral("Nombre: %1").arg(QString::fromStdString(probe.path.filename().string()));
+  if (probe.container_name) lines << QStringLiteral("Contenedor: %1").arg(QString::fromStdString(*probe.container_name));
+  lines << QStringLiteral("Audio stream: #%1").arg(stream.stream_index)
+        << QStringLiteral("Audio codec: %1").arg(QString::fromStdString(stream.codec_name))
+        << QStringLiteral("Audio sample rate: %1 Hz").arg(stream.sample_rate)
+        << QStringLiteral("Audio channels: %1").arg(stream.channel_count)
+        << QStringLiteral("Audio time base: %1").arg(rationalText(stream.time_base));
+  return lines.join('\n');
+}
+QString assetMetadataText(const pulsar::application::MediaAsset& asset) {
+  QStringList lines;
+  lines << QStringLiteral("Nombre: %1").arg(QString::fromStdString(asset.source_locator().filename().string()));
+  if (asset.has_video()) {
+    const auto& video = asset.metadata();
+    lines << QStringLiteral("Codec: %1").arg(QString::fromStdString(video.codec_name))
+          << QStringLiteral("Resolución: %1 × %2").arg(video.width).arg(video.height)
+          << QStringLiteral("Time base: %1").arg(rationalText(video.time_base));
+  }
+  if (asset.audio().has_value()) {
+    const auto& audio = *asset.audio();
+    lines << QStringLiteral("Audio stream: #%1").arg(audio.stream_index)
+          << QStringLiteral("Audio codec: disponible")
+          << QStringLiteral("Audio sample rate: %1 Hz").arg(audio.sample_rate)
+          << QStringLiteral("Audio channels: %1").arg(audio.channel_count)
+          << QStringLiteral("Audio time base: %1").arg(rationalText(audio.time_base));
+  }
+  return lines.join('\n');
+}
 }
 
 DesktopController::DesktopController(PreviewImageProvider& image_provider,
@@ -119,12 +150,12 @@ void DesktopController::openPath(const QString& path) { const auto trimmed = pat
 void DesktopController::openUrl(const QUrl& url) { if (!url.isLocalFile()) { setError("Solo se admiten archivos locales"); return; } openPath(url.toLocalFile()); }
 void DesktopController::importRequested() { emit focusImportPathRequested(); }
 void DesktopController::togglePlayback() { playing_ ? pause() : play(); }
-void DesktopController::play() { if (!has_media_ || busy_ || !active_session_) return; active_session_->play(); playing_ = true; emit playbackChanged(); setStatus("Reproduciendo"); }
+void DesktopController::play() { if (!has_media_ || busy_ || !active_session_) return; if (!has_video_media_) { setStatus("Audio importado · sin reproducción"); return; } active_session_->play(); playing_ = true; emit playbackChanged(); setStatus("Reproduciendo"); }
 void DesktopController::pause() { if (!active_session_) return; active_session_->pause(); playing_ = false; emit playbackChanged(); setStatus("Pausado"); }
 void DesktopController::seekNormalized(double value) {
   if (!active_session_ || !std::isfinite(value) || active_session_->timeline_duration() <= MediaTime::zero()) return;
   const auto target = active_session_->time_at(std::clamp(value, 0.0, 1.0), 1.0); if (!target) return;
-  ++seek_count_; active_session_->seek(*target); clearProgram("loading"); updatePositionProperties();
+  ++seek_count_; active_session_->seek(*target); clearProgram(has_video_media_ ? "loading" : "empty"); updatePositionProperties();
 }
 void DesktopController::seekToStart() { seekNormalized(0.0); }
 void DesktopController::seekToEnd() { seekNormalized(1.0); }
@@ -151,8 +182,24 @@ void DesktopController::publishTimeline() {
   recomputeTimelineViewport();
   selected_clip_key_ = active_session_->selected_clip() ? QString::number(active_session_->selected_clip()->value()) : QString{};
   timeline_model_.refresh(*active_session_, *timeline_view_start_, *timeline_view_duration_);
+  timeline_tracks_.clear();
+  for (const auto& track : active_session_->track_views()) {
+    QVariantMap value;
+    value.insert("id", static_cast<qulonglong>(track.id.value()));
+    value.insert("index", static_cast<int>(track.index));
+    value.insert("kind", track.kind == pulsar::domain::TrackKind::Audio ? "audio" : "video");
+    value.insert("label", track.kind == pulsar::domain::TrackKind::Audio
+                              ? QStringLiteral("AUDIO %1").arg(static_cast<int>(track.index))
+                              : QStringLiteral("VIDEO 1"));
+    timeline_tracks_.push_back(value);
+  }
   const auto duration = active_session_->timeline_duration();
   has_media_ = duration > MediaTime::zero();
+  has_video_media_ = false;
+  if (const auto* video_track = active_session_->document().timeline().find_track(
+          active_session_->document().video_track_id()); video_track != nullptr) {
+    has_video_media_ = !video_track->clips().empty();
+  }
   timeline_duration_text_ = formatTime(duration);
   duration_text_ = formatTime(duration);
   timeline_ruler_ticks_.clear();
@@ -500,13 +547,63 @@ void DesktopController::refreshWaveformItem(WaveformQuickItem* item) {
   stamp.initialized = true;
 }
 void DesktopController::installTimelineAsset(const pulsar::application::MediaProbeResult& result) {
-  if (!active_session_ || result.video_streams.empty()) return;
+  if (!active_session_ || (result.video_streams.empty() && result.audio_streams.empty())) return;
   try {
-    StaticProbe probe{result}; const auto media = active_session_->processor().import_asset(result.path, probe); const auto& stream = result.video_streams.front();
-    const auto duration = stream.duration ? stream.duration : result.duration;
-    if (duration && *duration > MediaTime::zero() && active_session_->document().timeline().duration() == MediaTime::zero()) (void)active_session_->processor().add_clip(media, pulsar::domain::TimeRange{MediaTime::zero(), *duration}, MediaTime::zero());
-    active_session_->synchronize_document_state(); publishTimeline(); has_media_ = active_session_->timeline_duration() > MediaTime::zero(); media_name_ = QString::fromStdString(result.path.filename().string()); metadata_ = metadataText(result, stream); duration_text_ = formatTime(active_session_->timeline_duration()); setBusy(false); setStatus(has_media_ ? "Pausado" : "Listo"); setTechnicalStatus("Ready · Program"); emit mediaChanged();
-  } catch (const std::exception& error) { setBusy(false); setError(QString::fromUtf8(error.what())); setStatus("Error"); }
+    StaticProbe probe{result};
+    const auto media = active_session_->processor().import_asset(result.path, probe);
+    if (!result.video_streams.empty()) {
+      const auto& stream = result.video_streams.front();
+      const auto duration = stream.duration ? stream.duration : result.duration;
+      if (duration && *duration > MediaTime::zero() &&
+          active_session_->document().timeline().duration() == MediaTime::zero()) {
+        (void)active_session_->processor().add_clip(
+            media, pulsar::domain::TimeRange{MediaTime::zero(), *duration}, MediaTime::zero());
+      }
+      media_name_ = QString::fromStdString(result.path.filename().string());
+      metadata_ = metadataText(result, stream);
+      setTechnicalStatus("Ready · Program");
+    } else {
+      const auto& stream = result.audio_streams.front();
+      const auto duration = stream.duration ? stream.duration : result.duration;
+      if (!duration || *duration <= MediaTime::zero()) {
+        throw std::invalid_argument{"audio-only media has no usable duration"};
+      }
+      const auto insert_at = active_session_->timeline_duration() > MediaTime::zero()
+                                 ? active_session_->playback_position()
+                                 : MediaTime::zero();
+      const pulsar::domain::TimeRange inserted_range{insert_at, *duration};
+      std::optional<pulsar::domain::TrackId> audio_track;
+      for (const auto& track : active_session_->document().timeline().tracks()) {
+        if (track.kind() == pulsar::domain::TrackKind::Audio &&
+            std::none_of(track.clips().begin(), track.clips().end(),
+                         [&inserted_range](const auto& clip) {
+                           return inserted_range.overlaps(clip.timeline_range());
+                         })) {
+          audio_track = track.id();
+          break;
+        }
+      }
+      if (!audio_track.has_value()) {
+        audio_track = active_session_->processor().add_track(pulsar::domain::TrackKind::Audio);
+      }
+      (void)active_session_->processor().add_clip(
+          *audio_track, media, pulsar::domain::TimeRange{MediaTime::zero(), *duration}, insert_at);
+      media_name_ = QString::fromStdString(result.path.filename().string());
+      metadata_ = audioMetadataText(result, stream);
+      setTechnicalStatus("Audio listo · sin reproducción");
+    }
+    active_session_->synchronize_document_state();
+    publishTimeline();
+    has_media_ = active_session_->timeline_duration() > MediaTime::zero();
+    duration_text_ = formatTime(active_session_->timeline_duration());
+    setBusy(false);
+    setStatus(has_video_media_ ? "Pausado" : "Audio importado · sin reproducción");
+    emit mediaChanged();
+  } catch (const std::exception& error) {
+    setBusy(false);
+    setError(QString::fromUtf8(error.what()));
+    setStatus("Error");
+  }
 }
 void DesktopController::selectTimelineClip(const QString& key) { if (!active_session_) return; if (key.isEmpty()) active_session_->select_clip(std::nullopt); else { bool ok=false; auto value=key.toULongLong(&ok); if (ok && value) active_session_->select_clip(pulsar::domain::ClipId{value}); } publishTimeline(); }
 double DesktopController::selectedClipGainDb() const {
@@ -519,12 +616,12 @@ bool DesktopController::selectedClipMuted() const {
   const auto* clip = active_session_->document().timeline().find_clip(*active_session_->selected_clip());
   return clip != nullptr && clip->muted();
 }
-void DesktopController::seekTimelineAt(double pixel, double width) { if (!active_session_) return; const auto target=timelineTimeAt(pixel,width); if (!target) return; active_session_->seek(*target); clearProgram("loading"); updatePositionProperties(); }
-void DesktopController::moveTimelineClip(const QString& key,double press,double current,double width) { if (!active_session_) return; bool ok=false; auto value=key.toULongLong(&ok);if(!ok||!value)return;const auto press_time=timelineTimeAt(press,width);const auto current_time=timelineTimeAt(current,width);if(!press_time||!current_time)return;try{active_session_->move_clip(pulsar::domain::ClipId{value},*press_time,*current_time);clearError();clearProgram("loading");publishTimeline();}catch(...){setError("El movimiento no es válido.");publishTimeline();} }
-void DesktopController::trimTimelineClipStart(const QString& key,double pixel,double width) { if(!active_session_)return;bool ok=false;auto value=key.toULongLong(&ok);if(!ok||!value)return;const auto target=timelineTimeAt(pixel,width);if(!target)return;try{active_session_->trim_clip_start(pulsar::domain::ClipId{value},*target);clearError();clearProgram("loading");publishTimeline();}catch(...){setError("El recorte no es válido.");publishTimeline();} }
-void DesktopController::trimTimelineClipEnd(const QString& key,double pixel,double width) { if(!active_session_)return;bool ok=false;auto value=key.toULongLong(&ok);if(!ok||!value)return;const auto target=timelineTimeAt(pixel,width);if(!target)return;try{active_session_->trim_clip_end(pulsar::domain::ClipId{value},*target);clearError();clearProgram("loading");publishTimeline();}catch(...){setError("El recorte no es válido.");publishTimeline();} }
-void DesktopController::splitSelectedClip(){if(!active_session_)return;try{(void)active_session_->split_selected_at_playhead();clearError();clearProgram("loading");publishTimeline();}catch(...){setError("El punto de corte debe estar dentro del clip.");}}
-void DesktopController::deleteSelectedClip(){if(!active_session_)return;try{active_session_->delete_selected();clearError();clearProgram("loading");publishTimeline();}catch(...){} }
+void DesktopController::seekTimelineAt(double pixel, double width) { if (!active_session_) return; const auto target=timelineTimeAt(pixel,width); if (!target) return; active_session_->seek(*target); clearProgram(has_video_media_ ? "loading" : "empty"); updatePositionProperties(); }
+void DesktopController::moveTimelineClip(const QString& key,double press,double current,double width) { if (!active_session_) return; bool ok=false; auto value=key.toULongLong(&ok);if(!ok||!value)return;const auto press_time=timelineTimeAt(press,width);const auto current_time=timelineTimeAt(current,width);if(!press_time||!current_time)return;try{active_session_->move_clip(pulsar::domain::ClipId{value},*press_time,*current_time);clearError();clearProgram(has_video_media_ ? "loading" : "empty");publishTimeline();}catch(...){setError("El movimiento no es válido.");publishTimeline();} }
+void DesktopController::trimTimelineClipStart(const QString& key,double pixel,double width) { if(!active_session_)return;bool ok=false;auto value=key.toULongLong(&ok);if(!ok||!value)return;const auto target=timelineTimeAt(pixel,width);if(!target)return;try{active_session_->trim_clip_start(pulsar::domain::ClipId{value},*target);clearError();clearProgram(has_video_media_ ? "loading" : "empty");publishTimeline();}catch(...){setError("El recorte no es válido.");publishTimeline();} }
+void DesktopController::trimTimelineClipEnd(const QString& key,double pixel,double width) { if(!active_session_)return;bool ok=false;auto value=key.toULongLong(&ok);if(!ok||!value)return;const auto target=timelineTimeAt(pixel,width);if(!target)return;try{active_session_->trim_clip_end(pulsar::domain::ClipId{value},*target);clearError();clearProgram(has_video_media_ ? "loading" : "empty");publishTimeline();}catch(...){setError("El recorte no es válido.");publishTimeline();} }
+void DesktopController::splitSelectedClip(){if(!active_session_)return;try{(void)active_session_->split_selected_at_playhead();clearError();clearProgram(has_video_media_ ? "loading" : "empty");publishTimeline();}catch(...){setError("El punto de corte debe estar dentro del clip.");}}
+void DesktopController::deleteSelectedClip(){if(!active_session_)return;try{active_session_->delete_selected();clearError();clearProgram(has_video_media_ ? "loading" : "empty");publishTimeline();}catch(...){} }
 void DesktopController::setSelectedClipGainDb(double gain_db) {
   if (!active_session_ || !active_session_->selected_clip() || !std::isfinite(gain_db)) return;
   try {
@@ -545,8 +642,8 @@ void DesktopController::toggleSelectedClipMute() {
     setError(QString::fromUtf8(error.what()));
   }
 }
-void DesktopController::undoEdit(){if(active_session_&&active_session_->undo()){clearProgram("loading");publishTimeline();}}
-void DesktopController::redoEdit(){if(active_session_&&active_session_->redo()){clearProgram("loading");publishTimeline();}}
+void DesktopController::undoEdit(){if(active_session_&&active_session_->undo()){clearProgram(has_video_media_ ? "loading" : "empty");publishTimeline();}}
+void DesktopController::redoEdit(){if(active_session_&&active_session_->redo()){clearProgram(has_video_media_ ? "loading" : "empty");publishTimeline();}}
 void DesktopController::saveProject(const QString& path) {
   const QString trimmed = path.trimmed();
   if (trimmed.isEmpty() || !active_session_) {
@@ -610,13 +707,20 @@ void DesktopController::openProject(const QString& path) {
   }
   pause();
   has_media_ = false;
-  media_name_.clear();
-  metadata_.clear();
+  const auto assets = active_session_->document().assets();
+  if (!assets.empty()) {
+    const auto& asset = assets.front();
+    media_name_ = QString::fromStdString(asset.source_locator().filename().string());
+    metadata_ = assetMetadataText(asset);
+  } else {
+    media_name_.clear();
+    metadata_.clear();
+  }
   duration_text_ = "--:--:--.---";
   progress_ = 0.0;
   position_text_ = "00:00:00.000";
   publishTimeline();
-  clearProgram(active_session_->timeline_duration() > MediaTime::zero() ? "loading" : "empty");
+  clearProgram(has_video_media_ ? "loading" : "empty");
   setBusy(false);
   clearError();
   setStatus(QStringLiteral("Proyecto abierto"));
@@ -669,7 +773,7 @@ pulsar::application::AudioPlaybackSourceFactory DesktopController::makeAudioSour
 
 void DesktopController::postOpen(std::filesystem::path path, std::uint64_t generation) { setBusy(true); setStatus("Preparando…"); setTechnicalStatus("Probing"); clearError(); enqueue(WorkerCommand{std::move(path),generation}); }
 void DesktopController::enqueue(WorkerCommand command){{std::lock_guard lock{mutex_};pending_command_=std::move(command);}wake_.notify_one();}
-void DesktopController::workerLoop(){while(true){WorkerCommand command;{std::unique_lock lock{mutex_};wake_.wait(lock,[this]{return stop_worker_||pending_command_.has_value();});if(stop_worker_)return;command=std::move(*pending_command_);pending_command_.reset();}try{FFmpegMediaProbe probe;auto result=probe.probe(command.path);if(result.video_streams.empty())throw std::runtime_error{"media has no video stream"};QMetaObject::invokeMethod(this,[this,generation=command.generation,result=std::move(result)]()mutable{if(generation!=import_request_generation_){++stale_visual_frames_;return;}installTimelineAsset(result);},Qt::QueuedConnection);}catch(const std::exception& error){QMetaObject::invokeMethod(this,[this,generation=command.generation,message=QString::fromUtf8(error.what())]{if(generation!=import_request_generation_)return;setBusy(false);setError(message);setStatus("Error");},Qt::QueuedConnection);}}}
+void DesktopController::workerLoop(){while(true){WorkerCommand command;{std::unique_lock lock{mutex_};wake_.wait(lock,[this]{return stop_worker_||pending_command_.has_value();});if(stop_worker_)return;command=std::move(*pending_command_);pending_command_.reset();}try{FFmpegMediaProbe probe;auto result=probe.probe(command.path);if(result.video_streams.empty()&&result.audio_streams.empty())throw std::runtime_error{"media has no usable video or audio stream"};QMetaObject::invokeMethod(this,[this,generation=command.generation,result=std::move(result)]()mutable{if(generation!=import_request_generation_){++stale_visual_frames_;return;}installTimelineAsset(result);},Qt::QueuedConnection);}catch(const std::exception& error){QMetaObject::invokeMethod(this,[this,generation=command.generation,message=QString::fromUtf8(error.what())]{if(generation!=import_request_generation_)return;setBusy(false);setError(message);setStatus("Error");},Qt::QueuedConnection);}}}
 
 void DesktopController::presentTimeline(const pulsar::application::TimelinePresentation& presentation){std::visit([this](const auto& value){using T=std::decay_t<decltype(value)>;if constexpr(std::is_same_v<T,pulsar::application::TimelinePresentSample>){displayLease(value);}else if constexpr(std::is_same_v<T,pulsar::application::TimelineHoldPresentation>){pulsar::application::TimelinePresentSample present{value.clip_id,value.media_id,value.timeline_position,value.sample};displayLease(present);}else if constexpr(std::is_same_v<T,pulsar::application::TimelineGapPresentation>||std::is_same_v<T,pulsar::application::TimelineSourceGapPresentation>){clearProgram("gap");}else if constexpr(std::is_same_v<T,pulsar::application::TimelineMissingMediaPresentation>){clearProgram("missing");}else if constexpr(std::is_same_v<T,pulsar::application::TimelineStarvedPresentation>){
   const auto epoch = visual_mailbox_->active_epoch();
@@ -682,7 +786,7 @@ void DesktopController::presentTimeline(const pulsar::application::TimelinePrese
 }else if constexpr(std::is_same_v<T,pulsar::application::TimelineSourceEndedEarlyPresentation>||std::is_same_v<T,pulsar::application::TimelineSourceErrorPresentation>){clearProgram("error");}else if constexpr(std::is_same_v<T,pulsar::application::TimelineEndedPresentation>){clearProgram("ended");}},presentation);}
 void DesktopController::displayLease(const pulsar::application::TimelinePresentSample& present){const auto source_epoch=visual_mailbox_->active_epoch();const auto generation=active_session_->document().document_generation();VisualIdentity identity{editor_session_epoch_,generation,present.clip_id,present.media_id,source_epoch,present.sample.ordinal};if(displayed_identity_&&displayed_identity_.value().session_epoch==identity.session_epoch&&displayed_identity_->document_generation==identity.document_generation&&displayed_identity_->clip_id==identity.clip_id&&displayed_identity_->media_id==identity.media_id&&displayed_identity_->source_epoch==identity.source_epoch&&displayed_identity_->ordinal==identity.ordinal&&viewer_state_=="frame")return;auto lease=visual_mailbox_->take(source_epoch,present.sample.ordinal);if(!lease){++visual_misses_;clearProgram("loading");return;}try{FFmpegPreviewConverter converter;auto preview=converter.convert(*lease);image_provider_.setImage(imageFromPreview(preview));last_conversion_time_=preview.conversion_time;conversion_durations_.push(preview.conversion_time);++conversion_count_;displayed_identity_=identity;viewer_state_="frame";++displayed_frames_;++preview_revision_;preview_source_=QString("image://pulsar-preview/current?rev=%1").arg(preview_revision_);emit previewChanged();}catch(const std::exception& error){setError(QString::fromUtf8(error.what()));clearProgram("error");}}
 void DesktopController::clearProgram(QString state){const bool changed=viewer_state_!=state||!preview_source_.isEmpty();image_provider_.clear();preview_source_.clear();displayed_identity_.reset();viewer_state_=std::move(state);if(changed)emit previewChanged();}
-void DesktopController::updateTick(){if(!active_session_||!has_media_){return;}const auto presentation=active_session_->update_playback();presentTimeline(presentation);const bool now_playing=active_session_->playback_intent()==pulsar::application::PlaybackIntent::Playing;if(now_playing!=playing_){playing_=now_playing;emit playbackChanged();}updatePositionProperties();updateDiagnostics();}
+void DesktopController::updateTick(){if(!active_session_||!has_media_||!has_video_media_){return;}const auto presentation=active_session_->update_playback();presentTimeline(presentation);const bool now_playing=active_session_->playback_intent()==pulsar::application::PlaybackIntent::Playing;if(now_playing!=playing_){playing_=now_playing;emit playbackChanged();}updatePositionProperties();updateDiagnostics();}
 void DesktopController::updatePositionProperties(){if(!active_session_)return;const auto position=active_session_->playback_position();const auto duration=active_session_->timeline_duration();position_text_=formatTime(position);duration_text_=formatTime(duration);progress_=duration>MediaTime::zero()?std::clamp(secondsAsDouble(position)/secondsAsDouble(duration),0.0,1.0):0.0;timeline_playhead_progress_=timeline_view_start_&&timeline_view_duration_&&position>=*timeline_view_start_&&position<=*timeline_view_start_+*timeline_view_duration_?timelinePixelAt(position,1.0):-1.0;emit positionChanged();emit timelinePlayheadChanged();emit editActionStateChanged();}
 void DesktopController::publishProjectDirty() {
   const bool now = projectDirty();

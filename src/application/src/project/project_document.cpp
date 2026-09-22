@@ -183,16 +183,6 @@ MediaAsset ProjectDocument::build_asset(const std::filesystem::path& source_loca
   }
 
   const MediaProbeResult result = probe.probe(source_locator);
-  if (result.video_streams.empty()) {
-    throw std::invalid_argument{"media has no video stream"};
-  }
-  const VideoStreamInfo& stream = result.video_streams.front();
-  if (!stream.duration.has_value() || *stream.duration <= domain::MediaTime::zero()) {
-    throw std::invalid_argument{"selected video stream has no exact positive duration"};
-  }
-
-  VideoAssetMetadata metadata{stream.codec_name, stream.width, stream.height, stream.time_base,
-                              stream.nominal_frame_rate, result.container_name};
   // A0 selection rule: first probed audio stream wins, by its real FFmpeg
   // stream index. No language/default-track heuristics.
   std::optional<AudioAssetMetadata> audio;
@@ -202,6 +192,24 @@ MediaAsset ProjectDocument::build_asset(const std::filesystem::path& source_loca
                                audio_stream.channel_count, audio_stream.time_base,
                                audio_stream.duration};
   }
+  if (result.video_streams.empty() && !audio.has_value()) {
+    throw std::invalid_argument{"media has no usable video or audio stream"};
+  }
+  if (result.video_streams.empty()) {
+    const auto duration = audio->duration.has_value() ? audio->duration : result.duration;
+    if (!duration.has_value() || *duration <= domain::MediaTime::zero()) {
+      throw std::invalid_argument{"audio-only media has no exact positive duration"};
+    }
+    return MediaAsset::audio_only(id, source_locator, *duration, *audio,
+                                  MediaAvailability::Available, std::nullopt);
+  }
+  const VideoStreamInfo& stream = result.video_streams.front();
+  if (!stream.duration.has_value() || *stream.duration <= domain::MediaTime::zero()) {
+    throw std::invalid_argument{"selected video stream has no exact positive duration"};
+  }
+
+  VideoAssetMetadata metadata{stream.codec_name, stream.width, stream.height, stream.time_base,
+                              stream.nominal_frame_rate, result.container_name};
   return MediaAsset{id, source_locator, stream.stream_index, *stream.duration,
                     std::move(metadata), MediaAvailability::Available, std::nullopt,
                     std::move(audio)};

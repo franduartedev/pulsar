@@ -142,12 +142,15 @@ application::ProjectSaveResult EditorSession::save_project(
 
 void EditorSession::rebuild_read_model() {
   views_.clear();
+  track_views_.clear();
   const auto& timeline = document_.timeline();
-  const auto* track = timeline.find_track(document_.video_track_id());
-  if (track != nullptr) {
-    for (const auto& clip : track->clips()) {
+  for (std::size_t track_index = 0; track_index < timeline.tracks().size(); ++track_index) {
+    const auto& track = timeline.tracks()[track_index];
+    track_views_.push_back(TimelineTrackView{track.id(), track.kind(), track_index});
+    for (const auto& clip : track.clips()) {
       const auto asset = document_.find_asset(clip.media_id());
-      TimelineClipView view{clip.id(), std::to_string(clip.id().value()),
+      TimelineClipView view{clip.id(), track.id(), track.kind(), track_index,
+                            std::to_string(clip.id().value()),
                             asset.has_value() ? asset->source_locator().filename().string() : "Offline",
                             time_text(clip.timeline_range().start()),
                             time_text(clip.timeline_range().end()), time_text(clip.duration()),
@@ -195,7 +198,15 @@ void EditorSession::move_clip(domain::ClipId clip_id, domain::MediaTime press_ti
                               domain::MediaTime current_time) {
   const auto& original = require_clip(document_, clip_id);
   const auto delta = current_time - press_time;
-  processor_.move_clip(clip_id, document_.video_track_id(), original.timeline_start() + delta);
+  std::optional<domain::TrackId> source_track;
+  for (const auto& track : document_.timeline().tracks()) {
+    if (track.find_clip(clip_id) != nullptr) {
+      source_track = track.id();
+      break;
+    }
+  }
+  if (!source_track.has_value()) throw std::invalid_argument{"clip track no longer exists"};
+  processor_.move_clip(clip_id, *source_track, original.timeline_start() + delta);
   selected_clip_ = clip_id;
   synchronize_document_state();
 }

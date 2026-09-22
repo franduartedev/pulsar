@@ -213,6 +213,22 @@ std::string ProjectCodec::encode(const ProjectSnapshot& snapshot) {
     return lhs->id().value() < rhs->id().value();
   });
   for (const auto* asset : assets) {
+    if (!asset->has_video()) {
+      if (!asset->audio().has_value()) {
+        throw ProjectCodecError{"audio-only asset has no audio metadata"};
+      }
+      const auto& audio = *asset->audio();
+      output << "ASSET " << asset->id().value() << " AUDIO_ONLY ";
+      append_time(output, asset->playable_duration());
+      output << ' ' << quote(asset->source_locator().string()) << " AUDIO "
+             << audio.stream_index << ' ' << audio.sample_rate << ' '
+             << audio.channel_count << ' ' << audio.time_base.numerator() << ' '
+             << audio.time_base.denominator() << ' ';
+      if (audio.duration.has_value()) append_time(output, *audio.duration);
+      else output << '-';
+      output << "\n";
+      continue;
+    }
     output << "ASSET " << asset->id().value() << ' ' << asset->video_stream_index() << ' ';
     append_time(output, asset->playable_duration());
     output << ' ' << quote(asset->source_locator().string()) << ' '
@@ -346,7 +362,42 @@ ProjectRestoreState ProjectCodec::decode(std::string_view bytes) {
         video_track = true;
         section = Section::Assets;
       } else if (tokens[0].text == "ASSET") {
-        if (!video_track || (section != Section::Assets) || tokens.size() < 14) parse_fail(line_number, "invalid ASSET");
+        if (!video_track || (section != Section::Assets) || tokens.size() < 4) parse_fail(line_number, "invalid ASSET");
+        if (tokens.size() >= 3 && tokens[2].text == "AUDIO_ONLY") {
+          std::size_t i = 1;
+          const auto id = domain::MediaId{unsigned_number(tokens[i++], line_number, "media id")};
+          ++i; // AUDIO_ONLY
+          const auto duration = media_time(tokens, i, line_number, "duration");
+          if (i >= tokens.size() || !tokens[i].quoted) parse_fail(line_number, "audio asset locator must be quoted");
+          const std::filesystem::path locator{tokens[i++].text};
+          if (i >= tokens.size() || tokens[i].quoted || tokens[i].text != "AUDIO") {
+            parse_fail(line_number, "audio-only asset requires AUDIO metadata");
+          }
+          ++i;
+          const int audio_stream = int_number(tokens[i++], line_number, "audio stream index");
+          const int sample_rate = int_number(tokens[i++], line_number, "audio sample rate");
+          const int channel_count = int_number(tokens[i++], line_number, "audio channel count");
+          const auto audio_tb_num = signed_number(tokens[i++], line_number, "audio time base numerator");
+          const auto audio_tb_den = signed_number(tokens[i++], line_number, "audio time base denominator");
+          if (audio_stream < 0 || sample_rate <= 0 || channel_count <= 0) {
+            parse_fail(line_number, "invalid audio-only asset metadata");
+          }
+          std::optional<domain::MediaTime> audio_duration;
+          if (i < tokens.size() && !tokens[i].quoted && tokens[i].text == "-") ++i;
+          else audio_duration = media_time(tokens, i, line_number, "audio duration");
+          if (i != tokens.size()) parse_fail(line_number, "extra audio-only asset fields");
+          try {
+            state.assets.emplace_back(MediaAsset::audio_only(
+                id, locator, duration,
+                AudioAssetMetadata{audio_stream, sample_rate, channel_count,
+                                   domain::Rational{audio_tb_num, audio_tb_den}, audio_duration}));
+          } catch (const std::exception& error) {
+            parse_fail(line_number, error.what());
+          }
+          section = Section::Assets;
+          continue;
+        }
+        if (tokens.size() < 14) parse_fail(line_number, "invalid ASSET");
         std::size_t i = 1;
         const auto id = domain::MediaId{unsigned_number(tokens[i++], line_number, "media id")};
         const int stream = int_number(tokens[i++], line_number, "stream index");

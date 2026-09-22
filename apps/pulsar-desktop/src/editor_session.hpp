@@ -21,6 +21,9 @@ namespace pulsar::desktop {
 
 struct TimelineClipView {
   domain::ClipId id;
+  domain::TrackId track_id;
+  domain::TrackKind track_kind;
+  std::size_t track_index{0};
   std::string key;
   std::string name;
   std::string start;
@@ -28,6 +31,12 @@ struct TimelineClipView {
   std::string duration;
   bool missing{false};
   bool selected{false};
+};
+
+struct TimelineTrackView {
+  domain::TrackId id;
+  domain::TrackKind kind;
+  std::size_t index{0};
 };
 
 // Bounded observation of synchronize_document_state() for D3 evidence.
@@ -76,6 +85,7 @@ public:
   [[nodiscard]] const application::ProjectDocument& document() const noexcept { return document_; }
   [[nodiscard]] application::CommandProcessor& processor() noexcept { return processor_; }
   [[nodiscard]] const std::vector<TimelineClipView>& timeline_views() const noexcept { return views_; }
+  [[nodiscard]] const std::vector<TimelineTrackView>& track_views() const noexcept { return track_views_; }
   [[nodiscard]] std::optional<domain::ClipId> selected_clip() const noexcept { return selected_clip_; }
   [[nodiscard]] domain::MediaTime timeline_duration() const noexcept;
   [[nodiscard]] std::uint64_t read_model_generation() const noexcept { return read_model_generation_; }
@@ -124,6 +134,7 @@ private:
   application::TimelinePlaybackCoordinator coordinator_;
   std::optional<domain::ClipId> selected_clip_;
   std::vector<TimelineClipView> views_;
+  std::vector<TimelineTrackView> track_views_;
   std::uint64_t read_model_generation_{0};
   std::optional<std::uint64_t> synchronized_document_generation_;
   std::uint64_t sync_performed_count_{0};

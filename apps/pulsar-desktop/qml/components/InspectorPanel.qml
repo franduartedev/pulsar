@@ -9,6 +9,9 @@ Panel {
     id: inspector
 
     function metaSection(key) {
+        if (key.indexOf("Audio") === 0) {
+            return "AUDIO"
+        }
         if (key === "Nombre" || key === "Contenedor") {
             return "ARCHIVO"
         }

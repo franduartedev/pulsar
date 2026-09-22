@@ -45,12 +45,14 @@ class DesktopController final : public QObject {
   Q_PROPERTY(QString durationText READ durationText NOTIFY mediaChanged)
   Q_PROPERTY(double progress READ progress WRITE seekNormalized NOTIFY positionChanged)
   Q_PROPERTY(bool hasMedia READ hasMedia NOTIFY mediaChanged)
+  Q_PROPERTY(bool hasVideoMedia READ hasVideoMedia NOTIFY mediaChanged)
   Q_PROPERTY(bool playing READ playing NOTIFY playbackChanged)
   Q_PROPERTY(bool busy READ busy NOTIFY busyChanged)
   Q_PROPERTY(bool projectDirty READ projectDirty NOTIFY projectDirtyChanged)
   Q_PROPERTY(bool previewLate READ previewLate NOTIFY technicalStatusChanged)
   Q_PROPERTY(QString debugMetrics READ debugMetrics NOTIFY diagnosticsChanged)
   Q_PROPERTY(QAbstractItemModel* timelineClips READ timelineClips NOTIFY timelineChanged)
+  Q_PROPERTY(QVariantList timelineTracks READ timelineTracks NOTIFY timelineChanged)
   Q_PROPERTY(QString timelineDurationText READ timelineDurationText NOTIFY timelineChanged)
   Q_PROPERTY(QVariantList timelineRulerTicks READ timelineRulerTicks NOTIFY timelineChanged)
   Q_PROPERTY(double timelinePlayheadProgress READ timelinePlayheadProgress NOTIFY timelinePlayheadChanged)
@@ -81,6 +83,7 @@ public:
   [[nodiscard]] QString durationText() const { return duration_text_; }
   [[nodiscard]] double progress() const { return progress_; }
   [[nodiscard]] bool hasMedia() const { return has_media_; }
+  [[nodiscard]] bool hasVideoMedia() const { return has_video_media_; }
   [[nodiscard]] bool playing() const { return playing_; }
   [[nodiscard]] bool busy() const { return busy_; }
   [[nodiscard]] bool projectDirty() const noexcept {
@@ -93,6 +96,7 @@ public:
   // never on a hot path. Not a Q_PROPERTY, emits no signals.
   [[nodiscard]] QString performanceSnapshot() const;
   [[nodiscard]] QAbstractItemModel* timelineClips() { return &timeline_model_; }
+  [[nodiscard]] QVariantList timelineTracks() const { return timeline_tracks_; }
   [[nodiscard]] QString timelineDurationText() const { return timeline_duration_text_; }
   [[nodiscard]] QVariantList timelineRulerTicks() const { return timeline_ruler_ticks_; }
   [[nodiscard]] double timelinePlayheadProgress() const { return timeline_playhead_progress_; }
@@ -203,9 +207,9 @@ private:
   std::uint64_t editor_session_epoch_{1};
   std::uint64_t import_request_generation_{0};
   std::thread worker_; mutable std::mutex mutex_; std::condition_variable wake_; bool stop_worker_{false}; std::optional<WorkerCommand> pending_command_;
-  QString status_{"Vacío"}; QString technical_status_{"Preview CPU"}; QString media_name_; QString metadata_; QString error_message_; QString preview_source_; QString viewer_state_{"empty"}; QString position_text_{"00:00:00.000"}; QString duration_text_{"--:--:--.---"}; QString debug_metrics_; QVariantList timeline_ruler_ticks_; QString timeline_duration_text_{"00:00:00.000"}; QString selected_clip_key_;
+  QString status_{"Vacío"}; QString technical_status_{"Preview CPU"}; QString media_name_; QString metadata_; QString error_message_; QString preview_source_; QString viewer_state_{"empty"}; QString position_text_{"00:00:00.000"}; QString duration_text_{"--:--:--.---"}; QString debug_metrics_; QVariantList timeline_ruler_ticks_; QVariantList timeline_tracks_; QString timeline_duration_text_{"00:00:00.000"}; QString selected_clip_key_;
   TimelineClipListModel timeline_model_;
-  double timeline_playhead_progress_{0.0}; double progress_{0.0}; bool has_media_{false}; bool playing_{false}; bool busy_{false}; bool preview_late_{false}; bool published_project_dirty_{false};
+  double timeline_playhead_progress_{0.0}; double progress_{0.0}; bool has_media_{false}; bool has_video_media_{false}; bool playing_{false}; bool busy_{false}; bool preview_late_{false}; bool published_project_dirty_{false};
   std::optional<pulsar::domain::MediaTime> timeline_view_start_;
   std::optional<pulsar::domain::MediaTime> timeline_view_duration_;
   double timeline_zoom_{1.0};

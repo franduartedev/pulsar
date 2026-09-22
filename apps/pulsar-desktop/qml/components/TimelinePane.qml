@@ -6,6 +6,7 @@ Panel {
     radius: 0
     id: pane
     property real gutterWidth: 58
+    property real trackLaneHeight: 76
 
     Rectangle {
         id: toolbar
@@ -96,35 +97,74 @@ Panel {
         anchors.bottom: parent.bottom
         clip: true
 
-        Rectangle { anchors.fill: parent; color: Theme.lane }
-        Rectangle { width: pane.gutterWidth; anchors.top: parent.top; anchors.bottom: parent.bottom; color: Theme.surfaceRaised; opacity: 0.72 }
-        Rectangle { x: pane.gutterWidth; anchors.top: parent.top; anchors.bottom: parent.bottom; width: 1; color: Theme.border; opacity: 0.9 }
-        Text { x: 15; y: 20; text: "VIDEO 1"; color: Theme.text; font.pixelSize: Theme.fontSizeS; font.bold: true; font.letterSpacing: 1.1 }
-
-        Item {
-            id: contentArea
-            anchors.left: parent.left
-            anchors.leftMargin: pane.gutterWidth
-            anchors.right: parent.right
-            anchors.top: parent.top
-            anchors.bottom: parent.bottom
+        Flickable {
+            id: trackScroll
+            anchors.fill: parent
+            contentWidth: width
+            contentHeight: Math.max(height, controller.timelineTracks.length * pane.trackLaneHeight)
             clip: true
-            Rectangle { anchors.fill: parent; color: Theme.lane }
-            VideoTrack { anchors.fill: parent; z: 2 }
+            boundsBehavior: Flickable.StopAtBounds
+            Item {
+                id: contentArea
+                width: trackScroll.width
+                height: trackScroll.contentHeight
+                Rectangle { anchors.fill: parent; color: Theme.lane }
+                Repeater {
+                    model: controller.timelineTracks
+                    delegate: Rectangle {
+                        x: 0
+                        y: modelData.index * pane.trackLaneHeight
+                        width: contentArea.width
+                        height: pane.trackLaneHeight
+                        color: modelData.kind === "audio" ? Theme.panelAlt : Theme.lane
+                        border.color: Theme.borderSoft
+                        border.width: 1
+                        Rectangle { width: pane.gutterWidth; anchors.top: parent.top; anchors.bottom: parent.bottom; color: Theme.surfaceRaised; opacity: 0.72 }
+                        Rectangle { x: pane.gutterWidth; anchors.top: parent.top; anchors.bottom: parent.bottom; width: 1; color: Theme.border; opacity: 0.9 }
+                        Text { x: 15; anchors.verticalCenter: parent.verticalCenter; text: modelData.label; color: Theme.text; font.pixelSize: Theme.fontSizeS; font.bold: true; font.letterSpacing: 1.1 }
+                    }
+                }
+                Repeater {
+                    model: controller.timelineClips
+                    delegate: ClipBlock {
+                        z: 2
+                        visible: model.inViewport
+                        y: model.trackIndex * pane.trackLaneHeight + 9
+                        canonicalStartX: pane.gutterWidth + model.startProgress * (contentArea.width - pane.gutterWidth)
+                        canonicalWidth: Math.max(3, (model.endProgress - model.startProgress) * (contentArea.width - pane.gutterWidth))
+                        height: pane.trackLaneHeight - 14
+                        timelineWidth: contentArea.width - pane.gutterWidth
+                        clipName: model.clipName
+                        startText: model.startText
+                        endText: model.endText
+                        missing: model.missing
+                        selected: model.selected
+                        muted: model.muted
+                        gainDb: model.gainDb
+                        clipKey: model.clipKey
+                        onActivated: controller.selectTimelineClip(clipKey)
+                    }
+                }
             MouseArea {
-                anchors.fill: parent
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.top: parent.top
+                anchors.bottom: parent.bottom
                 z: 1
                 acceptedButtons: Qt.LeftButton
                 onPressed: function(mouse) {
                     controller.selectTimelineClip("")
-                    controller.seekTimelineAt(mouse.x, width)
+                    controller.seekTimelineAt(mouse.x - pane.gutterWidth, width - pane.gutterWidth)
                 }
-                onPositionChanged: function(mouse) { if (pressed) controller.seekTimelineAt(mouse.x, width) }
+                onPositionChanged: function(mouse) { if (pressed) controller.seekTimelineAt(mouse.x - pane.gutterWidth, width - pane.gutterWidth) }
             }
             Playhead {
                 z: 4
                 progress: controller.timelinePlayheadProgress
-                height: parent.height
+                timelineOffset: pane.gutterWidth
+                x: pane.gutterWidth + progress * (contentArea.width - pane.gutterWidth)
+                height: contentArea.height
+            }
             }
         }
     }

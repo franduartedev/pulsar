@@ -57,6 +57,21 @@ private:
   int video_stream_;
 };
 
+application::AudioStreamInfo audio_stream(int index, int sample_rate, int channels);
+
+class AudioOnlyProbe final : public application::MediaProbe {
+public:
+  [[nodiscard]] MediaProbeResult probe(const std::filesystem::path& path) const override {
+    MediaProbeResult result;
+    result.path = path;
+    result.container_name = "wav";
+    result.duration = time(4, Rational{1, 1});
+    result.audio_streams.push_back(audio_stream(0, 48000, 1));
+    result.audio_streams.back().duration = result.duration;
+    return result;
+  }
+};
+
 application::AudioStreamInfo audio_stream(int index, int sample_rate = 48000,
                                           int channels = 2) {
   return application::AudioStreamInfo{index, "aac", sample_rate, channels, Rational{1, 48000},
@@ -95,6 +110,31 @@ void video_only_has_no_audio() {
   const auto clip =
       processor.add_clip(media, TimeRange{time(0), time(10)}, time(0));
   assert(document.timeline().find_clip(clip) != nullptr);
+}
+
+void audio_only_ingest_has_no_video_metadata() {
+  ProjectDocument document;
+  CommandProcessor processor{document};
+  const auto media = processor.import_asset("media/tone.wav", AudioOnlyProbe{});
+  const auto asset = document.find_asset(media);
+  assert(asset.has_value() && !asset->has_video());
+  assert(asset->video_stream_index() < 0);
+  assert(asset->audio().has_value() && asset->audio()->channel_count == 1);
+  bool video_metadata_rejected = false;
+  try {
+    (void)asset->metadata();
+  } catch (const std::logic_error&) {
+    video_metadata_rejected = true;
+  }
+  assert(video_metadata_rejected);
+  const auto audio_track = processor.add_track(TrackKind::Audio);
+  const auto clip = processor.add_clip(audio_track, media, TimeRange{time(0), time(2)}, time(0));
+  const auto bytes = ProjectCodec::encode(document.snapshot());
+  assert(bytes.find("AUDIO_ONLY") != std::string::npos);
+  const auto restored = ProjectDocument::restore(ProjectCodec::decode(bytes));
+  assert(!restored.find_asset(media)->has_video());
+  assert(restored.timeline().find_clip(clip) != nullptr);
+  assert(ProjectCodec::encode(restored.snapshot()) == bytes);
 }
 
 void independent_audio_track_edits_and_round_trip() {
@@ -474,6 +514,7 @@ void invalid_clip_gain_is_rejected() {
 int main() {
   audio_selected_first_stream_deterministically();
   video_only_has_no_audio();
+  audio_only_ingest_has_no_video_metadata();
   independent_audio_track_edits_and_round_trip();
   audio_survives_codec_round_trip();
   audio_without_duration_round_trips();

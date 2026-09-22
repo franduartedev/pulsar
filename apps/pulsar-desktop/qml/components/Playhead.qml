@@ -4,6 +4,7 @@ import "../theme/Theme.js" as Theme
 Item {
     id: head
     property real progress: 0
+    property real timelineOffset: 0
     property bool dragging: false
     visible: progress >= 0
     width: 12
@@ -19,7 +20,7 @@ Item {
         onPositionChanged: if (pressed) seekAt(mouse)
         function seekAt(point) {
             var p = hit.mapToItem(head.parent, point.x, point.y)
-            controller.seekTimelineAt(p.x, head.parent.width)
+            controller.seekTimelineAt(p.x - head.timelineOffset, head.parent.width - head.timelineOffset)
         }
     }
 }

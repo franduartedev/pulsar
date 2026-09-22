@@ -27,6 +27,8 @@ QVariant TimelineClipListModel::data(const QModelIndex& index, int role) const {
   case StartProgressRole: return row.start_progress;
   case EndProgressRole: return row.end_progress;
   case InViewportRole: return row.in_viewport;
+  case TrackIndexRole: return row.track_index;
+  case AudioTrackRole: return row.audio_track;
   default: return {};
   }
 }
@@ -36,7 +38,8 @@ QHash<int, QByteArray> TimelineClipListModel::roleNames() const {
           {EndRole, "endText"}, {DurationRole, "durationText"}, {MissingRole, "missing"},
           {SelectedRole, "selected"}, {MutedRole, "muted"}, {GainDbRole, "gainDb"},
           {StartProgressRole, "startProgress"}, {EndProgressRole, "endProgress"},
-          {InViewportRole, "inViewport"}};
+          {InViewportRole, "inViewport"}, {TrackIndexRole, "trackIndex"},
+          {AudioTrackRole, "audioTrack"}};
 }
 
 void TimelineClipListModel::refresh(const pulsar::desktop::EditorSession& session,
@@ -64,6 +67,8 @@ void TimelineClipListModel::refresh(const pulsar::desktop::EditorSession& sessio
     row.end_progress = viewport.pixel_at_unclamped(clip->timeline_range().end(), 1.0);
     row.in_viewport = clip->timeline_range().end() > view_start &&
                       clip->timeline_range().start() < view_end;
+    row.track_index = static_cast<int>(view.track_index);
+    row.audio_track = view.track_kind == pulsar::domain::TrackKind::Audio;
     desired.push_back(std::move(row));
   }
 
@@ -80,6 +85,7 @@ void TimelineClipListModel::refresh(const pulsar::desktop::EditorSession& sessio
   constexpr int roles[] = {ClipKeyRole, NameRole, StartRole, EndRole, DurationRole,
                            MissingRole, SelectedRole, MutedRole, GainDbRole,
                            StartProgressRole, EndProgressRole, InViewportRole};
+  constexpr int track_roles[] = {TrackIndexRole, AudioTrackRole};
   for (std::size_t row_index = 0; row_index < rows_.size(); ++row_index) {
     auto& row = rows_[row_index];
     const Row& next = desired[row_index];
@@ -101,6 +107,11 @@ void TimelineClipListModel::refresh(const pulsar::desktop::EditorSession& sessio
       case InViewportRole: role_changed = row.in_viewport != next.in_viewport; break;
       default: break;
       }
+      changed = changed || role_changed;
+    }
+    for (const int role : track_roles) {
+      const bool role_changed = role == TrackIndexRole ? row.track_index != next.track_index
+                                                       : row.audio_track != next.audio_track;
       changed = changed || role_changed;
     }
     if (changed) {

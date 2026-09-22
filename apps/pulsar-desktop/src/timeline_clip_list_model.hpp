@@ -26,6 +26,8 @@ public:
     StartProgressRole,
     EndProgressRole,
     InViewportRole,
+    TrackIndexRole,
+    AudioTrackRole,
   };
 
   explicit TimelineClipListModel(QObject* parent = nullptr);
@@ -51,6 +53,8 @@ private:
     double start_progress{0.0};
     double end_progress{0.0};
     bool in_viewport{false};
+    int track_index{0};
+    bool audio_track{false};
   };
   std::vector<Row> rows_;
 };

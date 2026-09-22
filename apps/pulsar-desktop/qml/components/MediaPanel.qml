@@ -31,11 +31,11 @@ Panel {
         pathInput.selectAll()
     }
 
-    property string codecInfo: metaValue("Codec")
+    property string codecInfo: metaValue("Codec") || metaValue("Audio codec")
     property string resInfo: metaValue("Resolución")
     property string subInfo: {
         if (!controller.hasMedia) {
-            return "Importá o arrastrá un video a la ventana."
+            return "Importá o arrastrá un medio a la ventana."
         }
         if (codecInfo.length > 0 && resInfo.length > 0) {
             return codecInfo + " · " + resInfo
