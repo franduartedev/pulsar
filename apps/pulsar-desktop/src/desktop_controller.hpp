@@ -49,6 +49,7 @@ class DesktopController final : public QObject {
   Q_PROPERTY(bool playing READ playing NOTIFY playbackChanged)
   Q_PROPERTY(bool busy READ busy NOTIFY busyChanged)
   Q_PROPERTY(bool projectDirty READ projectDirty NOTIFY projectDirtyChanged)
+  Q_PROPERTY(QString activeProjectPath READ activeProjectPath NOTIFY activeProjectPathChanged)
   Q_PROPERTY(bool previewLate READ previewLate NOTIFY technicalStatusChanged)
   Q_PROPERTY(QString debugMetrics READ debugMetrics NOTIFY diagnosticsChanged)
   Q_PROPERTY(QAbstractItemModel* timelineClips READ timelineClips NOTIFY timelineChanged)
@@ -89,6 +90,9 @@ public:
   [[nodiscard]] bool busy() const { return busy_; }
   [[nodiscard]] bool projectDirty() const noexcept {
     return active_session_ && active_session_->is_dirty();
+  }
+  [[nodiscard]] QString activeProjectPath() const {
+    return QString::fromStdString(active_project_file_.string());
   }
   [[nodiscard]] bool previewLate() const { return preview_late_; }
   [[nodiscard]] QString debugMetrics() const { return debug_metrics_; }
@@ -143,7 +147,7 @@ public:
 signals:
   void statusChanged(); void technicalStatusChanged(); void mediaChanged(); void errorChanged();
   void previewChanged(); void positionChanged(); void playbackChanged(); void busyChanged();
-  void projectDirtyChanged();
+  void projectDirtyChanged(); void activeProjectPathChanged();
   void diagnosticsChanged(); void timelineChanged(); void timelinePlayheadChanged(); void timelineViewChanged(); void waveformPolicyChanged(); void editActionStateChanged(); void focusImportPathRequested();
   void soundLibraryChanged();
 private:

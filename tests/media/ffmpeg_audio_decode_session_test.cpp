@@ -33,6 +33,7 @@
 #include <pulsar/application/media/audio_block.hpp>
 #include <pulsar/application/project/project_document.hpp>
 #include <pulsar/media/ffmpeg/ffmpeg_audio_decode_session.hpp>
+#include <pulsar/media/ffmpeg/ffmpeg_audio_playback_source.hpp>
 #include <pulsar/media/ffmpeg/ffmpeg_media_probe.hpp>
 #include <pulsar/media/ffmpeg/media_decode_error.hpp>
 
@@ -392,6 +393,28 @@ void seek_resets_decoder_state() {
   assert((*block->presentation_timestamp() < MediaTime{8820, Rational{1, 44100}}));
 }
 
+void builtin_sound_playback_source_is_non_silent() {
+  const auto path = std::filesystem::path{PULSAR_SOURCE_DIR} / "assets" / "sounds" /
+                    "impact_heavy.wav";
+  media::ffmpeg::FFmpegAudioPlaybackSource source{path, 0};
+  assert(source.sample_rate() == 48000);
+  assert(source.channel_count() == 1);
+  double peak = 0.0;
+  double sum_squares = 0.0;
+  std::size_t count = 0;
+  while (auto block = source.decode_next()) {
+    for (const float sample : block->samples()) {
+      assert(std::isfinite(sample));
+      peak = std::max(peak, std::fabs(static_cast<double>(sample)));
+      sum_squares += static_cast<double>(sample) * sample;
+      ++count;
+    }
+  }
+  assert(count > 0);
+  assert(peak > 1e-3);
+  assert(std::sqrt(sum_squares / static_cast<double>(count)) > 1e-4);
+}
+
 }  // namespace
 
 int main() {
@@ -406,4 +429,5 @@ int main() {
   timestamp_contract();
   multichannel_planar_beyond_inline_planes();
   seek_resets_decoder_state();
+  builtin_sound_playback_source_is_non_silent();
 }

@@ -43,7 +43,10 @@ SOUNDS = [
 ]
 
 def envelope(i: int, n: int, attack: float = 0.01, release: float = 0.04) -> float:
-    t = i / max(1, n - 1) / (1.0 / RATE)
+    # i is a sample index; convert it to seconds exactly once.  The previous
+    # expression divided by the sample period, turning seconds into samples
+    # and making the release phase zero after the first sample.
+    t = i / RATE
     total = n / RATE
     a = min(1.0, t / attack) if attack else 1.0
     r = min(1.0, max(0.0, (total - t) / release)) if release else 1.0
@@ -83,8 +86,9 @@ def render(kind: str, seconds: float, rng: random.Random) -> list[float]:
             out[i] = .025 * rng.uniform(-1, 1) * e
         elif kind == "hum":
             out[i] = .12 * math.sin(2 * math.pi * 60.0 * t) * e
-    peak = max(1.0, max(abs(x) for x in out))
-    return [max(-0.95, min(0.95, x / peak * 0.85)) for x in out]
+    peak = max(abs(x) for x in out) if out else 0.0
+    scale = 0.85 / max(1.0, peak)
+    return [max(-0.95, min(0.95, x * scale)) for x in out]
 
 def write_wav(path: Path, samples: list[float]) -> None:
     with wave.open(str(path), "wb") as f:

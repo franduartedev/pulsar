@@ -4,6 +4,10 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
   set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -UNDEBUG")
 endif()
 
+find_package(Python3 COMPONENTS Interpreter REQUIRED)
+add_test(NAME pulsar.assets.core_sounds_content
+         COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/test_core_sounds.py)
+
 add_executable(pulsar_smoke_tests
   smoke/bootstrap_test.cpp
 )

@@ -23,6 +23,9 @@ Window {
 
     Shortcut { sequence: "Space"; onActivated: controller.togglePlayback() }
     Shortcut { sequence: "Ctrl+I"; onActivated: fileDialog.open() }
+    Shortcut { sequence: "Ctrl+O"; onActivated: openProjectDialog.open() }
+    Shortcut { sequence: "Ctrl+S"; onActivated: controller.activeProjectPath.length > 0 ? controller.saveProject(controller.activeProjectPath) : saveProjectDialog.open() }
+    Shortcut { sequence: "Ctrl+Shift+S"; onActivated: saveProjectDialog.open() }
     Shortcut { sequence: "Home"; onActivated: controller.seekToStart() }
     Shortcut { sequence: "End"; onActivated: controller.seekToEnd() }
     Shortcut { sequence: "S"; onActivated: controller.splitSelectedClip() }
@@ -41,6 +44,23 @@ Window {
         onAccepted: controller.openUrl(selectedFile)
     }
 
+    FileDialog {
+        id: openProjectDialog
+        title: "Abrir proyecto"
+        fileMode: FileDialog.OpenFile
+        nameFilters: ["Proyectos PULSAR (*.pulsar)", "Todos los archivos (*)"]
+        onAccepted: controller.openProject(decodeURIComponent(selectedFile.toString().replace(/^file:\/\//, "")))
+    }
+
+    FileDialog {
+        id: saveProjectDialog
+        title: "Guardar proyecto"
+        fileMode: FileDialog.SaveFile
+        nameFilters: ["Proyectos PULSAR (*.pulsar)", "Todos los archivos (*)"]
+        defaultSuffix: "pulsar"
+        onAccepted: controller.saveProject(decodeURIComponent(selectedFile.toString().replace(/^file:\/\//, "")))
+    }
+
     DropArea {
         anchors.fill: parent
         onDropped: function(drop) {
@@ -56,6 +76,9 @@ Window {
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.top: parent.top
+        onOpenProjectRequested: openProjectDialog.open()
+        onSaveProjectRequested: controller.activeProjectPath.length > 0 ? controller.saveProject(controller.activeProjectPath) : saveProjectDialog.open()
+        onSaveProjectAsRequested: saveProjectDialog.open()
     }
 
     MediaPanel {

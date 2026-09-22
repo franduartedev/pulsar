@@ -204,7 +204,9 @@ void DesktopController::closeMedia() {
   ++import_request_generation_;
   pause();
   active_session_ = makeEditorSession();
+  const bool had_active_project = !active_project_file_.empty();
   active_project_file_.clear();
+  if (had_active_project) emit activeProjectPathChanged();
   waveform_clip_identities_.clear();
   waveform_requests_.clear();
   waveform_item_stamps_.clear();
@@ -736,7 +738,7 @@ void DesktopController::toggleSelectedClipMute() {
 void DesktopController::undoEdit(){if(active_session_&&active_session_->undo()){clearProgram(has_video_media_ ? "loading" : "empty");publishTimeline();}}
 void DesktopController::redoEdit(){if(active_session_&&active_session_->redo()){clearProgram(has_video_media_ ? "loading" : "empty");publishTimeline();}}
 void DesktopController::saveProject(const QString& path) {
-  const QString trimmed = path.trimmed();
+  const QString trimmed = path.trimmed().isEmpty() ? activeProjectPath() : path.trimmed();
   if (trimmed.isEmpty() || !active_session_) {
     return;
   }
@@ -749,6 +751,11 @@ void DesktopController::saveProject(const QString& path) {
       setStatus(QStringLiteral("Proyecto guardado (durabilidad no confirmada)"));
     }
     clearError();
+    const auto saved_path = std::filesystem::path{trimmed.toStdString()};
+    if (active_project_file_ != saved_path) {
+      active_project_file_ = saved_path;
+      emit activeProjectPathChanged();
+    }
     publishProjectDirty();
   } catch (const pulsar::application::ProjectRepositoryError& error) {
     setError(QString::fromUtf8(error.what()));
@@ -785,7 +792,9 @@ void DesktopController::openProject(const QString& path) {
     ++import_request_generation_;
     active_session_ = std::move(candidate);
     visual_mailbox_ = std::move(candidate_mailbox);
+    const bool active_path_changed = active_project_file_ != project_path;
     active_project_file_ = project_path;
+    if (active_path_changed) emit activeProjectPathChanged();
     waveform_clip_identities_.clear();
     waveform_requests_.clear();
     waveform_item_stamps_.clear();

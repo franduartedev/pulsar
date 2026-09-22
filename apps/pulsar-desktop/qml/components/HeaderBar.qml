@@ -3,6 +3,9 @@ import "../theme/Theme.js" as Theme
 
 // Thin workspace chrome: wordmark left, small app state right.
 Rectangle {
+    signal openProjectRequested()
+    signal saveProjectRequested()
+    signal saveProjectAsRequested()
     color: Theme.header
     border.color: Theme.borderSoft
     height: 42
@@ -21,6 +24,8 @@ Rectangle {
         anchors.rightMargin: 14
         anchors.verticalCenter: parent.verticalCenter
         spacing: 8
+        PButton { text: "ABRIR"; onClicked: parent.parent.openProjectRequested() }
+        PButton { text: "GUARDAR"; onClicked: parent.parent.saveProjectRequested() }
         StatusDot { anchors.verticalCenter: parent.verticalCenter; tone: controller.errorMessage.length > 0 ? "error" : (controller.busy || controller.playing ? "live" : "idle") }
         Text { anchors.verticalCenter: parent.verticalCenter; text: controller.status; color: controller.errorMessage.length > 0 ? Theme.danger : Theme.muted; font.pixelSize: Theme.fontSizeM }
     }
