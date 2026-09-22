@@ -20,6 +20,16 @@ struct ConvertedAudioBlock {
   std::vector<std::uint8_t> frames;
 };
 
+// Device-independent output of the streaming resampler/rematrixer. The mix
+// engine consumes this form directly; AudioOutput packing remains a separate
+// boundary concern.
+struct ConvertedPcmBlock {
+  int sample_rate{0};
+  int channel_count{0};
+  std::size_t frame_count{0};
+  std::vector<float> samples;
+};
+
 class AudioConversionError : public std::invalid_argument {
 public:
   explicit AudioConversionError(const std::string& message) : std::invalid_argument{message} {}
@@ -46,10 +56,12 @@ public:
   // Converts one block of the ongoing stream, advancing the lattice and
   // the sample reservoir. Blocks must be contiguous pieces of one stream.
   [[nodiscard]] ConvertedAudioBlock convert(const AudioBlock& block);
+  [[nodiscard]] ConvertedPcmBlock convert_pcm(const AudioBlock& block);
   // Emits the pending tail (already-accepted input held back for want of a
   // successor sample) without mutating state; the caller resets afterwards.
   // Bounded to a few device frames. Used exactly once at drain.
   [[nodiscard]] ConvertedAudioBlock flush_tail() const;
+  [[nodiscard]] ConvertedPcmBlock flush_tail_pcm() const;
   // Forgets lattice/reservoir: call on logical discontinuities (open,
   // flush, stop/discard, close) so playback never interpolates against a
   // previous audio segment. Drain does not reset while samples remain

@@ -110,7 +110,7 @@ StreamingAudioConverter::StreamingAudioConverter(int source_rate, int source_cha
   }
 }
 
-ConvertedAudioBlock StreamingAudioConverter::convert(const AudioBlock& block) {
+ConvertedPcmBlock StreamingAudioConverter::convert_pcm(const AudioBlock& block) {
   if (block.sample_rate() != source_rate_ || block.channel_count() != source_channels_) {
     throw AudioConversionError{"audio block does not match converter source format"};
   }
@@ -161,16 +161,27 @@ ConvertedAudioBlock StreamingAudioConverter::convert(const AudioBlock& block) {
     reservoir_base_ = keep_from;
   }
 
-  ConvertedAudioBlock converted;
-  converted.format = device_;
+  ConvertedPcmBlock converted;
+  converted.sample_rate = device_.sample_rate;
+  converted.channel_count = device_.channel_count;
   converted.frame_count = resampled.size() / channels;
-  pack_samples(resampled, device_.sample_format, converted.frames);
+  converted.samples = std::move(resampled);
   return converted;
 }
 
-ConvertedAudioBlock StreamingAudioConverter::flush_tail() const {
-  ConvertedAudioBlock tail;
-  tail.format = device_;
+ConvertedAudioBlock StreamingAudioConverter::convert(const AudioBlock& block) {
+  auto pcm = convert_pcm(block);
+  ConvertedAudioBlock converted;
+  converted.format = device_;
+  converted.frame_count = pcm.frame_count;
+  pack_samples(pcm.samples, device_.sample_format, converted.frames);
+  return converted;
+}
+
+ConvertedPcmBlock StreamingAudioConverter::flush_tail_pcm() const {
+  ConvertedPcmBlock tail;
+  tail.sample_rate = device_.sample_rate;
+  tail.channel_count = device_.channel_count;
   if (reservoir_.empty()) {
     return tail;
   }
@@ -200,7 +211,16 @@ ConvertedAudioBlock StreamingAudioConverter::flush_tail() const {
     position += step;
   }
   tail.frame_count = resampled.size() / channels;
-  pack_samples(resampled, device_.sample_format, tail.frames);
+  tail.samples = std::move(resampled);
+  return tail;
+}
+
+ConvertedAudioBlock StreamingAudioConverter::flush_tail() const {
+  auto pcm = flush_tail_pcm();
+  ConvertedAudioBlock tail;
+  tail.format = device_;
+  tail.frame_count = pcm.frame_count;
+  pack_samples(pcm.samples, device_.sample_format, tail.frames);
   return tail;
 }
 
