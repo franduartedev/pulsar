@@ -85,6 +85,10 @@ public:
   void configure(const ResolvedClip& clip, domain::MediaTime timeline_position);
   void seek(domain::MediaTime timeline_position);
   void play();
+  // Resumes after a recoverable video hold without reopening or seeking the
+  // decoder. A user pause continues to use play(), which reanchors at the
+  // paused timeline position.
+  void resume_after_video_hold();
   void pause();
   void update(domain::MediaTime timeline_position);
   void reset();

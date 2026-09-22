@@ -66,6 +66,9 @@ struct WorkerConfig {
   bool emit_end_on_seek{false};
   bool emit_error_on_seek{false};
   bool emit_fatal_on_seek{false};
+  bool delay_next_read{false};
+  std::int64_t sample_duration{10};
+  std::int64_t read_sample_duration{1};
 };
 
 class FakeWorker final : public application::PlaybackMediaWorker {
@@ -80,10 +83,15 @@ public:
   }
 
   void request_read(PlaybackGeneration generation) override {
+    if (config_->delay_next_read) {
+      config_->delay_next_read = false;
+      delayed_generation_ = generation;
+      return;
+    }
     events_.push_back(PlaybackWorkerSample{
         generation,
         VideoSample{next_ordinal_++, application::StreamTimestamp{last_target_ + time(1, Rational{1, 1000})},
-                    time(1, Rational{1, 1000})}});
+                    time(config_->read_sample_duration, Rational{1, 1000})}});
   }
 
   void request_seek_for_presentation(PlaybackGeneration generation,
@@ -108,12 +116,20 @@ public:
     }
     events_.push_back(application::PlaybackWorkerSeekComplete{
         generation, application::VideoSeekHit{
-            VideoSample{next_ordinal_++, target, time(10, Rational{1, 1})}, std::nullopt}});
+            VideoSample{next_ordinal_++, target, time(config_->sample_duration)}, std::nullopt}});
   }
 
   void cancel_pending() override { cancelled_ = true; }
 
   std::optional<PlaybackWorkerEvent> poll_event() override {
+    if (delayed_generation_.has_value()) {
+      events_.push_back(PlaybackWorkerSample{
+      *delayed_generation_,
+          VideoSample{next_ordinal_++, application::StreamTimestamp{last_target_ + time(2)},
+                      time(config_->read_sample_duration, Rational{1, 1000})}});
+      delayed_generation_.reset();
+      return std::nullopt;
+    }
     if (events_.empty()) return std::nullopt;
     auto event = std::move(events_.front());
     events_.pop_front();
@@ -127,6 +143,7 @@ private:
   std::deque<PlaybackWorkerEvent> events_;
   MediaTime last_target_{MediaTime::zero()};
   std::uint64_t next_ordinal_{1};
+  std::optional<PlaybackGeneration> delayed_generation_;
 };
 
 struct Fixture {
@@ -716,6 +733,51 @@ void paused_starvation_recovery_does_not_resume() {
   assert(!output.running());
 }
 
+void video_hold_recovery_resumes_audio_without_user_action() {
+  Fixture fixture;
+  auto snapshot = snapshot_with_clip(fixture, fixture.media_one, TimeRange{time(0), time(10)},
+                                     time(0));
+  auto& asset = snapshot.assets.front();
+  snapshot.assets.front() = application::MediaAsset{
+      asset.id(), asset.source_locator(), asset.video_stream_index(), asset.playable_duration(),
+      asset.metadata(), asset.availability(), asset.availability_reason(),
+      application::AudioAssetMetadata{7, 44100, 1, Rational{1, 44100}, time(10)}};
+  fixture.config->sample_duration = 1;
+  fixture.config->read_sample_duration = 1000;
+  FakeClock clock;
+  SyncOutput output;
+  TimelinePlaybackCoordinator coordinator{
+      clock, fixture.factory(),
+      [](const std::filesystem::path&, int) { return std::make_unique<SyncAudioSource>(); },
+      &output};
+  coordinator.set_snapshot(snapshot);
+  assert(std::holds_alternative<TimelinePresentSample>(coordinator.update()));
+  coordinator.play();
+  assert(coordinator.intent() == application::PlaybackIntent::Playing);
+  assert(output.running());
+
+  fixture.config->delay_next_read = true;
+  clock.advance(time(2));
+  output.advance(44100 * 2);
+  auto presentation = coordinator.update();
+  assert(std::holds_alternative<TimelineStarvedPresentation>(presentation));
+  assert(coordinator.intent() == application::PlaybackIntent::Playing);
+  assert(!output.running());
+
+  // The delayed video sample arrives after one empty poll; recovery must resume
+  // audio because the user intent never changed to Paused.
+  presentation = coordinator.update();
+  assert(std::holds_alternative<TimelineStarvedPresentation>(presentation));
+  presentation = coordinator.update();
+  assert(std::holds_alternative<TimelinePresentSample>(presentation));
+  assert(coordinator.intent() == application::PlaybackIntent::Playing);
+  assert(output.running());
+
+  coordinator.pause();
+  assert(coordinator.intent() == application::PlaybackIntent::Paused);
+  assert(!output.running());
+}
+
 void no_audio_clip_is_healthy_silence_and_advances() {
   Fixture fixture;
   const auto snapshot = snapshot_with_clip(fixture, fixture.media_one, TimeRange{time(0), time(5)},
@@ -757,5 +819,6 @@ int main() {
   edit_shrinking_timeline_reanchors_stale_playhead();
   audio_device_is_the_single_running_clock();
   paused_starvation_recovery_does_not_resume();
+  video_hold_recovery_resumes_audio_without_user_action();
   no_audio_clip_is_healthy_silence_and_advances();
 }

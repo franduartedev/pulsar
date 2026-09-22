@@ -135,6 +135,27 @@ void AudioPlaybackSession::play() {
   }
 }
 
+void AudioPlaybackSession::resume_after_video_hold() {
+  if (state_ != AudioPlaybackState::Paused || output_ == nullptr ||
+      !output_->device_format().has_value()) {
+    return;
+  }
+  if (!fill_until(static_cast<std::uint64_t>(output_->device_format()->sample_rate) *
+                  kStartBufferMilliseconds / 1000)) {
+    return;
+  }
+  if (state_ != AudioPlaybackState::Paused || !output_->start()) {
+    set_device_unavailable();
+    return;
+  }
+  const auto metrics = output_->metrics();
+  processed_anchor_ = metrics.device_frames_processed;
+  audio_clock_anchor_ = configured_timeline_;
+  observed_underruns_ = metrics.underrun_count;
+  state_ = AudioPlaybackState::Running;
+  condition_ = AudioPlaybackCondition::Present;
+}
+
 void AudioPlaybackSession::pause() {
   if (state_ == AudioPlaybackState::Running && output_ != nullptr) {
     const auto position = clock_position();
