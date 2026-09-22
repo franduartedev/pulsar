@@ -572,6 +572,25 @@ void starvation_counts_underrun_episodes() {
   assert(engine.close());
 }
 
+void backend_buffer_does_not_count_as_underrun() {
+  FakeBackend backend;
+  backend.auto_process = false;
+  backend.offered = AudioDeviceFormat{44100, 2, AudioSampleFormat::Float32};
+  AudioOutputEngine engine{backend, AudioEngineLimits{4096}};
+  assert(engine.open({44100, 2}));
+  assert(engine.enqueue(make_block(44100, 2, 64)) == AudioEnqueueResult::Accepted);
+  assert(engine.start());
+  assert(engine.transfer_to_backend());
+  backend.pending = 64;
+  // The adapter queue is empty, but the simulated device still holds audio.
+  assert(engine.transfer_to_backend());
+  assert(engine.metrics().underrun_count == 0);
+  backend.consume(64);
+  assert(engine.transfer_to_backend());
+  assert(engine.metrics().underrun_count == 1);
+  assert(engine.close());
+}
+
 void completion_waits_for_backend() {
   FakeBackend backend;
   backend.auto_process = false;
@@ -1194,6 +1213,7 @@ int main() {
   drain_completes_without_underrun();
   drain_requires_true_exhaustion();
   starvation_counts_underrun_episodes();
+  backend_buffer_does_not_count_as_underrun();
   completion_waits_for_backend();
   flush_discards_and_keeps_session();
   stop_lands_reusable_opened();

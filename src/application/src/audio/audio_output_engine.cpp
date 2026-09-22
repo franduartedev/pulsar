@@ -425,8 +425,11 @@ bool AudioOutputEngine::transfer_to_backend() {
     }
     metrics_.buffered_device_frames = buffered_frames();
 
+    // An empty adapter queue is not an underrun while the backend still owns
+    // playable frames.  QAudioSink can hold a substantial device buffer after
+    // this transfer returns; only true backend exhaustion is a starvation.
     if (state_ == AudioOutputState::Running && !drain_requested_ && written == 0 &&
-        buffered_frames() == 0) {
+        buffered_frames() == 0 && exhausted) {
       if (!in_underrun_) {
         ++metrics_.underrun_count;
         in_underrun_ = true;

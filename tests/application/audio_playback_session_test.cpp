@@ -96,6 +96,11 @@ public:
 
   void report_underrun() { ++metrics_.underrun_count; }
 
+  void consume_backend_without_progress() {
+    pending_ = 0;
+    metrics_.buffered_device_frames = 0;
+  }
+
   bool open_ok{true};
   bool start_ok{true};
   bool reject_enqueue{false};
@@ -209,6 +214,18 @@ void source_origin_creates_silence_without_clock_jump() {
   session.seek(time(1));
   assert(session.generation() > generation);
   assert(created == 2);
+}
+
+void refill_does_not_wait_for_backend_processed_counter() {
+  FakeOutput output;
+  AudioPlaybackSession session{
+      &output, [](const auto&, int) { return std::make_unique<FakeSource>(std::nullopt, 8); }};
+  session.configure(clip(), time(0));
+  session.play();
+  const auto accepted_before = output.accepted_blocks.size();
+  output.consume_backend_without_progress();
+  session.update(time(0));
+  assert(output.accepted_blocks.size() > accepted_before);
 }
 
 void stream_origin_maps_presentation_relative_source() {
@@ -349,6 +366,7 @@ void long_run_clock_has_no_accumulating_float_drift() {
 int main() {
   video_only_is_intentional_silence();
   source_origin_creates_silence_without_clock_jump();
+  refill_does_not_wait_for_backend_processed_counter();
   stream_origin_maps_presentation_relative_source();
   clip_gain_reaches_output_without_changing_audio_semantics();
   underrun_is_not_intentional_silence();

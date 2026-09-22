@@ -291,7 +291,7 @@ bool AudioPlaybackSession::prepare_audio_at(domain::MediaTime timeline_position)
       source_eof_ = true;
       break;
     }
-    pending_block_ = align_block(std::move(*result.block));
+      pending_block_ = align_block(std::move(*result.block));
   }
   if (!fill_until(static_cast<std::uint64_t>(output_->device_format()->sample_rate) *
                   kStartBufferMilliseconds / 1000)) {
@@ -377,7 +377,12 @@ bool AudioPlaybackSession::fill_until(std::uint64_t target_device_frames) {
                             kMaximumBufferMilliseconds / 1000;
     target_device_frames = std::min(target_device_frames, max_buffer);
   }
-  while (buffered_device_frames() < target_device_frames && !drain_requested_) {
+  // Refill against the adapter queue, not processedUSecs().  A QAudioSink
+  // may still be consuming backend-buffered frames while its processed
+  // counter is unchanged; waiting on that counter lets the sink drain before
+  // the next PCM block is queued.
+  while (output_->metrics().buffered_device_frames < target_device_frames &&
+         !drain_requested_) {
     if (pending_silence_frames_ > 0) {
       const std::size_t chunk = std::min<std::size_t>(pending_silence_frames_, 4096);
       if (!enqueue_silence(chunk)) {
@@ -406,7 +411,7 @@ bool AudioPlaybackSession::fill_until(std::uint64_t target_device_frames) {
         source_eof_ = true;
         break;
       }
-      pending_block_ = align_block(std::move(*result.block));
+    pending_block_ = align_block(std::move(*result.block));
       if (!pending_block_.has_value()) {
         continue;
       }
