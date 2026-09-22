@@ -116,15 +116,20 @@ private:
 class FakeSource final : public AudioPlaybackSource {
 public:
   explicit FakeSource(std::optional<MediaTime> first_pts, std::size_t block_count = 1,
-                      std::optional<MediaTime> stream_origin = std::nullopt)
-      : first_pts_{first_pts}, block_count_{block_count}, stream_origin_{stream_origin} {}
+                      std::optional<MediaTime> stream_origin = std::nullopt,
+                      bool timestamp_each_block = false)
+      : first_pts_{first_pts}, block_count_{block_count}, stream_origin_{stream_origin},
+        timestamp_each_block_{timestamp_each_block} {}
   int sample_rate() const noexcept override { return 1000; }
   int channel_count() const noexcept override { return 1; }
   bool seek_to(domain::MediaTime) override { return true; }
   std::optional<MediaTime> stream_origin() const override { return stream_origin_; }
   std::optional<AudioBlock> decode_next() override {
     if (emitted_ >= block_count_) return std::nullopt;
-    const auto pts = emitted_ == 0 ? first_pts_ : std::nullopt;
+    const auto pts = timestamp_each_block_
+                         ? std::optional<MediaTime>{time(static_cast<std::int64_t>(emitted_ * 1000),
+                                                         Rational{1, 1000})}
+                         : (emitted_ == 0 ? first_pts_ : std::nullopt);
     ++emitted_;
     return AudioBlock{1000, 1, 1000, std::vector<float>(1000, 0.5F), Rational{1, 1000},
                       pts};
@@ -135,6 +140,7 @@ private:
   std::size_t emitted_{0};
   std::size_t block_count_{1};
   std::optional<MediaTime> stream_origin_;
+  bool timestamp_each_block_{false};
 };
 
 class FailingSource final : public AudioPlaybackSource {
@@ -239,6 +245,23 @@ void stream_origin_maps_presentation_relative_source() {
   assert(session.state() == AudioPlaybackState::Ready);
   assert(!output.accepted_blocks.empty());
   assert(output.accepted_blocks.front().samples()[0] == 0.5F);
+}
+
+void contiguous_timestamped_blocks_do_not_gain_repeated_silence() {
+  FakeOutput output;
+  AudioPlaybackSession session{
+      &output, [](const auto&, int) {
+        return std::make_unique<FakeSource>(time(0), 3, std::nullopt, true);
+      }};
+  session.configure(clip(), time(0));
+  assert(output.accepted_blocks.size() == 1);
+  assert(output.accepted_blocks.front().samples().front() == 0.5F);
+  session.play();
+
+  output.advance(1000);
+  session.update(time(0));
+  assert(output.accepted_blocks.size() == 2);
+  assert(output.accepted_blocks.back().samples().front() == 0.5F);
 }
 
 void clip_gain_reaches_output_without_changing_audio_semantics() {
@@ -368,6 +391,7 @@ int main() {
   source_origin_creates_silence_without_clock_jump();
   refill_does_not_wait_for_backend_processed_counter();
   stream_origin_maps_presentation_relative_source();
+  contiguous_timestamped_blocks_do_not_gain_repeated_silence();
   clip_gain_reaches_output_without_changing_audio_semantics();
   underrun_is_not_intentional_silence();
   underrun_recovers_through_prebuffer();

@@ -40,7 +40,6 @@ void TimelinePlaybackCoordinator::set_snapshot(ProjectSnapshot snapshot) {
   reanchor_transport(position);
   reset_source();
   audio_session_->reset();
-  audio_paused_for_video_hold_ = false;
   snapshot_ = std::move(snapshot);
   segment_kind_ = SegmentKind::None;
   current_presentation_.reset();
@@ -72,7 +71,6 @@ void TimelinePlaybackCoordinator::play() {
 
 void TimelinePlaybackCoordinator::pause() {
   intent_ = PlaybackIntent::Paused;
-  audio_paused_for_video_hold_ = false;
   if (audio_session_ != nullptr) {
     audio_session_->pause();
   }
@@ -90,7 +88,6 @@ void TimelinePlaybackCoordinator::seek(domain::MediaTime timeline_position_value
   const auto outcome = resolve_clip_at(*snapshot_, snapshot_->video_track_id,
                                        timeline_position_value);
   reanchor_transport(timeline_position_value);
-  audio_paused_for_video_hold_ = false;
   clock_source_ = intent_ == PlaybackIntent::Playing ? PlaybackClockSource::Software
                                                        : PlaybackClockSource::Paused;
   reconcile(outcome, timeline_position_value, true);
@@ -170,7 +167,6 @@ void TimelinePlaybackCoordinator::enter_clip(const ResolvedClip& clip, bool forc
   }
 
   set_advance_permission(TimelineAdvancePermission::Hold);
-  audio_paused_for_video_hold_ = false;
   synchronize_transport();
   source_creation_error_.reset();
   const PlaybackPosition source_position{clip.source_time};  const bool reuse_session = source_session_ != nullptr && active_clip_.has_value() &&
@@ -298,15 +294,6 @@ TimelinePresentation TimelinePlaybackCoordinator::evaluate_clip(const ResolvedCl
   const PresentationDecision decision =
       source_session_->update_at(PlaybackPosition{source_time});
 
-  const bool video_recovered = std::holds_alternative<PresentSample>(decision) ||
-                               std::holds_alternative<HoldPresentation>(decision);
-  if (video_recovered && audio_paused_for_video_hold_ &&
-      intent_ == PlaybackIntent::Playing) {
-    audio_session_->resume_after_video_hold();
-    audio_paused_for_video_hold_ =
-        audio_session_->state() != AudioPlaybackState::Running;
-  }
-
   if (std::holds_alternative<PresentSample>(decision)) {
     set_advance_permission(TimelineAdvancePermission::Advance);
     synchronize_transport();
@@ -326,10 +313,10 @@ TimelinePresentation TimelinePlaybackCoordinator::evaluate_clip(const ResolvedCl
     current_presentation_ = TimelineSourceGapPresentation{clip.clip_id, clip.media_id, position};
   } else if (std::holds_alternative<PresentationStarved>(decision)) {
     semantic_condition_ = PlaybackSemanticCondition::Starved;
-    if (intent_ == PlaybackIntent::Playing) {
-      audio_paused_for_video_hold_ = true;
-      audio_session_->pause();
-    }
+    // A video starvation is a recoverable presentation hold, not a user
+    // pause.  Keep the audio device running so a transient video read gap
+    // cannot tear down/recreate QAudioSink and inject audible gaps/clicks.
+    // Explicit user pause still goes through pause() above.
     set_advance_permission(TimelineAdvancePermission::Hold);
     synchronize_transport();
     current_presentation_ = TimelineStarvedPresentation{clip.clip_id, clip.media_id, position};

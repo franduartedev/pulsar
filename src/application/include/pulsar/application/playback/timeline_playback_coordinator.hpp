@@ -174,7 +174,6 @@ private:
   SegmentKind segment_kind_{SegmentKind::None};
   TimelineAdvancePermission advance_permission_{TimelineAdvancePermission::Hold};
   // A video starvation is a recoverable timeline hold, not a user pause.
-  bool audio_paused_for_video_hold_{false};
 };
 
 } // namespace pulsar::application

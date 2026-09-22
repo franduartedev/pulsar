@@ -88,7 +88,6 @@ public:
   // Resumes after a recoverable video hold without reopening or seeking the
   // decoder. A user pause continues to use play(), which reanchors at the
   // paused timeline position.
-  void resume_after_video_hold();
   void pause();
   void update(domain::MediaTime timeline_position);
   void reset();
@@ -122,6 +121,7 @@ private:
   std::optional<ResolvedClip> clip_;
   std::optional<AudioBlock> pending_block_;
   std::size_t pending_silence_frames_{0};
+  std::optional<domain::MediaTime> expected_source_timestamp_;
   domain::MediaTime configured_timeline_{domain::MediaTime::zero()};
   domain::MediaTime audio_clock_anchor_{domain::MediaTime::zero()};
   std::uint64_t processed_anchor_{0};

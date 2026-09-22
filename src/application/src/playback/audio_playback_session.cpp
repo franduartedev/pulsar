@@ -42,6 +42,7 @@ void AudioPlaybackSession::configure(const ResolvedClip& clip,
   drain_requested_ = false;
   pending_block_.reset();
   pending_silence_frames_ = 0;
+  expected_source_timestamp_.reset();
   observed_underruns_ = 0;
   processed_anchor_ = 0;
   audio_clock_anchor_ = timeline_position;
@@ -82,6 +83,7 @@ void AudioPlaybackSession::seek(domain::MediaTime timeline_position) {
   drain_requested_ = false;
   pending_block_.reset();
   pending_silence_frames_ = 0;
+  expected_source_timestamp_.reset();
   observed_underruns_ = 0;
   processed_anchor_ = 0;
   audio_clock_anchor_ = timeline_position;
@@ -133,27 +135,6 @@ void AudioPlaybackSession::play() {
     }
     drain_requested_ = true;
   }
-}
-
-void AudioPlaybackSession::resume_after_video_hold() {
-  if (state_ != AudioPlaybackState::Paused || output_ == nullptr ||
-      !output_->device_format().has_value()) {
-    return;
-  }
-  if (!fill_until(static_cast<std::uint64_t>(output_->device_format()->sample_rate) *
-                  kStartBufferMilliseconds / 1000)) {
-    return;
-  }
-  if (state_ != AudioPlaybackState::Paused || !output_->start()) {
-    set_device_unavailable();
-    return;
-  }
-  const auto metrics = output_->metrics();
-  processed_anchor_ = metrics.device_frames_processed;
-  audio_clock_anchor_ = configured_timeline_;
-  observed_underruns_ = metrics.underrun_count;
-  state_ = AudioPlaybackState::Running;
-  condition_ = AudioPlaybackCondition::Present;
 }
 
 void AudioPlaybackSession::pause() {
@@ -234,6 +215,7 @@ void AudioPlaybackSession::reset() {
   source_.reset();
   pending_block_.reset();
   pending_silence_frames_ = 0;
+  expected_source_timestamp_.reset();
   clip_.reset();
   stream_origin_.reset();
   state_ = AudioPlaybackState::Inactive;
@@ -273,6 +255,7 @@ bool AudioPlaybackSession::open_source_at(domain::MediaTime timeline_position) {
     return false;
   }
   stream_origin_ = source_->stream_origin();
+  expected_source_timestamp_.reset();
   if (!source_->seek_to(audio_target_for(timeline_position))) {
     set_decode_error("audio source seek failed");
     return false;
@@ -340,24 +323,40 @@ std::optional<AudioBlock> AudioPlaybackSession::align_block(AudioBlock block) {
   const auto block_duration = domain::MediaTime{
       static_cast<std::int64_t>(block.frame_count()), domain::Rational{1, block.sample_rate()}};
   const auto block_end = block_start + block_duration;
+  const auto alignment_target = expected_source_timestamp_.value_or(target);
+  if (expected_source_timestamp_.has_value()) {
+    if (block_end <= alignment_target) {
+      return std::nullopt;
+    }
+    if (block_start < alignment_target) {
+      const auto offset = std::min(block.frame_count(), source_frames_for(alignment_target - block_start));
+      const auto begin = offset * static_cast<std::size_t>(block.channel_count());
+      std::vector<float> samples(block.samples().begin() + static_cast<std::ptrdiff_t>(begin),
+                                 block.samples().end());
+      expected_source_timestamp_ = block_end;
+      return AudioBlock{block.sample_rate(), block.channel_count(),
+                        block.frame_count() - offset, std::move(samples), block.time_base(),
+                        std::nullopt};
+    }
+    if (block_start > alignment_target) {
+      pending_silence_frames_ = source_frames_for(block_start - alignment_target);
+    }
+    expected_source_timestamp_ = block_end;
+    return block;
+  }
   if (block_end <= target) {
     return std::nullopt;
   }
-  if (block_start >= target) {
-    if (block_start > target) {
-      const auto silence_duration = block_start - target;
-      const auto frames = source_frames_for(silence_duration);
-      if (frames > 0) {
-        pending_silence_frames_ = frames;
-      }
-    }
+  if (block_start > target) {
+    pending_silence_frames_ = source_frames_for(block_start - target);
+    expected_source_timestamp_ = block_end;
     return block;
   }
-  const auto offset_duration = target - block_start;
-  const auto offset = std::min(block.frame_count(), source_frames_for(offset_duration));
+  const auto offset = std::min(block.frame_count(), source_frames_for(target - block_start));
   const auto begin = offset * static_cast<std::size_t>(block.channel_count());
   std::vector<float> samples(block.samples().begin() + static_cast<std::ptrdiff_t>(begin),
                              block.samples().end());
+  expected_source_timestamp_ = block_end;
   return AudioBlock{block.sample_rate(), block.channel_count(),
                     block.frame_count() - offset, std::move(samples), block.time_base(),
                     std::nullopt};

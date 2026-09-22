@@ -762,12 +762,13 @@ void video_hold_recovery_resumes_audio_without_user_action() {
   auto presentation = coordinator.update();
   assert(std::holds_alternative<TimelineStarvedPresentation>(presentation));
   assert(coordinator.intent() == application::PlaybackIntent::Playing);
-  assert(!output.running());
+  assert(output.running());
 
-  // The delayed video sample arrives after one empty poll; recovery must resume
-  // audio because the user intent never changed to Paused.
+  // The delayed video sample arrives after one empty poll; audio remains
+  // running because the user intent never changed to Paused.
   presentation = coordinator.update();
   assert(std::holds_alternative<TimelineStarvedPresentation>(presentation));
+  assert(output.running());
   presentation = coordinator.update();
   assert(std::holds_alternative<TimelinePresentSample>(presentation));
   assert(coordinator.intent() == application::PlaybackIntent::Playing);
