@@ -1,5 +1,6 @@
 #include <pulsar/domain/timeline/timeline.hpp>
 
+#include <algorithm>
 #include <cstddef>
 #include <stdexcept>
 #include <utility>
@@ -20,6 +21,18 @@ void Timeline::add_track(Track track) {
   }
 
   tracks_.push_back(track);
+}
+
+void Timeline::remove_track(TrackId track_id) {
+  const auto iterator = std::find_if(
+      tracks_.begin(), tracks_.end(), [track_id](const Track& track) { return track.id() == track_id; });
+  if (iterator == tracks_.end()) {
+    throw std::invalid_argument{"track id does not exist in timeline"};
+  }
+  if (!iterator->clips().empty()) {
+    throw std::invalid_argument{"cannot remove a track that contains clips"};
+  }
+  tracks_.erase(iterator);
 }
 
 void Timeline::insert_clip(TrackId track_id, Clip clip) {

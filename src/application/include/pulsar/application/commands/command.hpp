@@ -4,10 +4,20 @@
 #include <pulsar/domain/ids/ids.hpp>
 #include <pulsar/domain/time/media_time.hpp>
 #include <pulsar/domain/timeline/clip.hpp>
+#include <pulsar/domain/timeline/track_kind.hpp>
 
 #include <variant>
 
 namespace pulsar::application {
+
+struct AddTrackCommand {
+  domain::TrackId track_id;
+  domain::TrackKind kind;
+};
+
+struct RemoveTrackCommand {
+  domain::TrackId track_id;
+};
 
 struct AddClipCommand {
   domain::TrackId track_id;
@@ -70,7 +80,7 @@ struct RemoveAssetCommand {
   domain::MediaId media_id;
 };
 
-using Command = std::variant<AddClipCommand, RemoveClipCommand, MoveClipCommand,
+using Command = std::variant<AddTrackCommand, RemoveTrackCommand, AddClipCommand, RemoveClipCommand, MoveClipCommand,
                              TrimClipStartCommand, TrimClipEndCommand, SplitClipCommand,
                              SetClipAudioGainCommand, SetClipMutedCommand, RestoreClipCommand,
                              RestoreSplitCommand, ImportAssetCommand, RemoveAssetCommand>;

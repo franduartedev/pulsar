@@ -28,6 +28,10 @@ public:
 
   void insert_clip(Clip clip);
 
+  // Editorial policy for A9.0: clips do not overlap within one track. Multiple
+  // audio tracks are allowed, so future mixing can combine independent tracks
+  // without changing this track-local invariant.
+
   // Returned pointers/references are observations only. Do not retain them across mutation.
   [[nodiscard]] const Clip* find_clip(ClipId id) const noexcept;
   // Returns a value copy so callers cannot retain a domain reference across mutation.

@@ -28,6 +28,12 @@ struct ClipLocation {
 CommandProcessor::CommandProcessor(ProjectDocument& document, std::size_t history_capacity)
     : document_{document}, history_capacity_{history_capacity} {}
 
+domain::TrackId CommandProcessor::add_track(domain::TrackKind kind) {
+  const domain::TrackId id = document_.next_track_id();
+  execute(AddTrackCommand{id, kind});
+  return id;
+}
+
 void CommandProcessor::execute(Command command) {
   document_.ensure_new_edit_possible();
   const HistoryStateId before = document_.history_state_id();
@@ -58,8 +64,14 @@ void CommandProcessor::execute(Command command) {
 domain::ClipId CommandProcessor::add_clip(domain::MediaId media_id,
                                            domain::TimeRange source_range,
                                            domain::MediaTime timeline_start) {
+  return add_clip(document_.video_track_id(), media_id, source_range, timeline_start);
+}
+
+domain::ClipId CommandProcessor::add_clip(domain::TrackId track_id, domain::MediaId media_id,
+                                           domain::TimeRange source_range,
+                                           domain::MediaTime timeline_start) {
   const domain::ClipId id = document_.next_clip_id();
-  execute(AddClipCommand{document_.video_track_id(),
+  execute(AddClipCommand{track_id,
                          domain::Clip{id, media_id, source_range, timeline_start}});
   return id;
 }
@@ -165,12 +177,30 @@ void CommandProcessor::apply(ProjectDocument& document, const Command& command, 
         using CommandType = std::decay_t<decltype(concrete_command)>;
         auto& timeline = document.timeline_mutable();
 
-        if constexpr (std::is_same_v<CommandType, AddClipCommand>) {
+        if constexpr (std::is_same_v<CommandType, AddTrackCommand>) {
+          if (concrete_command.kind == domain::TrackKind::Video &&
+              document.timeline().find_track(document.video_track_id()) != nullptr) {
+            throw std::invalid_argument{"project already has a video track"};
+          }
+          if (mode == ApplyMode::NewEdit) {
+            if (concrete_command.track_id != document.allocator_.next_track()) {
+              throw std::invalid_argument{"new track id is not the next document id"};
+            }
+            document.allocator_.ensure_track_consumable();
+          }
+          timeline.add_track(domain::Track{concrete_command.track_id, concrete_command.kind});
+          if (mode == ApplyMode::NewEdit) document.allocator_.consume_track();
+        } else if constexpr (std::is_same_v<CommandType, RemoveTrackCommand>) {
+          if (concrete_command.track_id == document.video_track_id()) {
+            throw std::invalid_argument{"cannot remove the video track"};
+          }
+          timeline.remove_track(concrete_command.track_id);
+        } else if constexpr (std::is_same_v<CommandType, AddClipCommand>) {
           if (mode == ApplyMode::NewEdit) {
             if (concrete_command.clip.id() != document.allocator_.next_clip()) {
               throw std::invalid_argument{"new clip id is not the next document id"};
             }
-            document.validate_new_clip(concrete_command.clip);
+            document.validate_clip_for_track(concrete_command.track_id, concrete_command.clip);
             document.allocator_.ensure_clip_consumable();
           }
           timeline.insert_clip(concrete_command.track_id, concrete_command.clip);
@@ -180,6 +210,9 @@ void CommandProcessor::apply(ProjectDocument& document, const Command& command, 
         } else if constexpr (std::is_same_v<CommandType, RemoveClipCommand>) {
           timeline.remove_clip(concrete_command.clip_id);
         } else if constexpr (std::is_same_v<CommandType, MoveClipCommand>) {
+          const auto* clip = timeline.find_clip(concrete_command.clip_id);
+          if (clip == nullptr) throw std::invalid_argument{"clip id does not exist in timeline"};
+          document.validate_clip_for_track(concrete_command.destination_track_id, *clip);
           timeline.move_clip(concrete_command.clip_id, concrete_command.destination_track_id,
                              concrete_command.timeline_start);
         } else if constexpr (std::is_same_v<CommandType, TrimClipStartCommand>) {
@@ -203,6 +236,7 @@ void CommandProcessor::apply(ProjectDocument& document, const Command& command, 
         } else if constexpr (std::is_same_v<CommandType, SetClipMutedCommand>) {
           timeline.set_clip_muted(concrete_command.clip_id, concrete_command.muted);
         } else if constexpr (std::is_same_v<CommandType, RestoreClipCommand>) {
+          document.validate_clip_for_track(concrete_command.track_id, concrete_command.clip);
           timeline.restore_clip(concrete_command.track_id, concrete_command.clip);
         } else if constexpr (std::is_same_v<CommandType, RestoreSplitCommand>) {
           timeline.restore_split(concrete_command.track_id, concrete_command.original_clip,
@@ -229,7 +263,11 @@ Command CommandProcessor::build_inverse(const ProjectDocument& document, const C
   return std::visit(
       [&document](const auto& concrete_command) -> Command {
         using CommandType = std::decay_t<decltype(concrete_command)>;
-        if constexpr (std::is_same_v<CommandType, AddClipCommand>) {
+        if constexpr (std::is_same_v<CommandType, AddTrackCommand>) {
+          return RemoveTrackCommand{concrete_command.track_id};
+        } else if constexpr (std::is_same_v<CommandType, RemoveTrackCommand>) {
+          throw std::invalid_argument{"removing a track is not a supported new edit"};
+        } else if constexpr (std::is_same_v<CommandType, AddClipCommand>) {
           return RemoveClipCommand{concrete_command.clip.id()};
         } else if constexpr (std::is_same_v<CommandType, RemoveClipCommand>) {
           const ClipLocation location = find_clip_location(document, concrete_command.clip_id);

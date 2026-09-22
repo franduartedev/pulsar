@@ -33,6 +33,12 @@ void ProjectDocument::IdAllocator::ensure_clip_consumable() const {
   }
 }
 
+void ProjectDocument::IdAllocator::ensure_track_consumable() const {
+  if (state.next_track_id == std::numeric_limits<std::uint64_t>::max()) {
+    throw std::overflow_error{"cannot allocate another track id"};
+  }
+}
+
 void ProjectDocument::IdAllocator::consume_media() {
   increment_checked(state.next_media_id, "media id");
 }
@@ -100,7 +106,17 @@ ProjectDocument ProjectDocument::restore(const ProjectRestoreState& state) {
                                       [&clip](const MediaAsset& item) {
                                         return item.id() == clip.media_id();
                                       });
-      if (asset == state.assets.end() || clip.source_range().end() > asset->playable_duration()) {
+      if (asset == state.assets.end()) {
+        throw std::invalid_argument{"clip source range exceeds stored media duration"};
+      }
+      if (restore_track.kind == domain::TrackKind::Audio && !asset->audio().has_value()) {
+        throw std::invalid_argument{"audio track clip references an asset without audio"};
+      }
+      const auto duration = restore_track.kind == domain::TrackKind::Audio &&
+                                    asset->audio().has_value() && asset->audio()->duration.has_value()
+                                ? *asset->audio()->duration
+                                : asset->playable_duration();
+      if (clip.source_range().end() > duration) {
         throw std::invalid_argument{"clip source range exceeds stored media duration"};
       }
       max_clip_id = std::max(max_clip_id, clip.id().value());
@@ -113,7 +129,7 @@ ProjectDocument ProjectDocument::restore(const ProjectRestoreState& state) {
     throw std::invalid_argument{"designated video track is absent"};
   }
   if (video_track_count != 1) {
-    throw std::invalid_argument{"M9 project must contain exactly one video track"};
+    throw std::invalid_argument{"project must contain exactly one video track"};
   }
   if (state.allocator_state.next_media_id == 0 ||
       state.allocator_state.next_media_id <= max_media_id ||
@@ -214,7 +230,12 @@ void ProjectDocument::remove_asset_value(domain::MediaId id) {
   assets_.erase(iterator);
 }
 
-void ProjectDocument::validate_new_clip(const domain::Clip& clip) const {
+void ProjectDocument::validate_clip_for_track(domain::TrackId track_id,
+                                               const domain::Clip& clip) const {
+  const auto* track = timeline_.find_track(track_id);
+  if (track == nullptr) {
+    throw std::invalid_argument{"clip destination track does not exist"};
+  }
   const auto asset = find_asset(clip.media_id());
   if (!asset.has_value()) {
     throw std::invalid_argument{"clip references an unknown media asset"};
@@ -222,7 +243,13 @@ void ProjectDocument::validate_new_clip(const domain::Clip& clip) const {
   if (asset->availability() != MediaAvailability::Available) {
     throw std::invalid_argument{"clip references unavailable media"};
   }
-  if (clip.source_range().end() > asset->playable_duration()) {
+  if (track->kind() == domain::TrackKind::Audio && !asset->audio().has_value()) {
+    throw std::invalid_argument{"audio track clip requires an asset with usable audio"};
+  }
+  const auto duration = track->kind() == domain::TrackKind::Audio && asset->audio()->duration.has_value()
+                            ? *asset->audio()->duration
+                            : asset->playable_duration();
+  if (clip.source_range().end() > duration) {
     throw std::invalid_argument{"clip source range exceeds media duration"};
   }
 }

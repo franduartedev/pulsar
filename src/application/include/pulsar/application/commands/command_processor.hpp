@@ -24,7 +24,12 @@ public:
 
   void execute(Command command);
 
+  [[nodiscard]] domain::TrackId add_track(domain::TrackKind kind);
+
   [[nodiscard]] domain::ClipId add_clip(domain::MediaId media_id,
+                                         domain::TimeRange source_range,
+                                         domain::MediaTime timeline_start);
+  [[nodiscard]] domain::ClipId add_clip(domain::TrackId track_id, domain::MediaId media_id,
                                          domain::TimeRange source_range,
                                          domain::MediaTime timeline_start);
   void remove_clip(domain::ClipId clip_id);

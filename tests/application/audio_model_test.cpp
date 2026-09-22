@@ -30,6 +30,7 @@ using application::ResolvedClip;
 using domain::MediaTime;
 using domain::Rational;
 using domain::TimeRange;
+using domain::TrackKind;
 
 MediaTime time(std::int64_t value, Rational base = Rational{1, 1}) {
   return MediaTime{value, base};
@@ -96,6 +97,58 @@ void video_only_has_no_audio() {
   assert(document.timeline().find_clip(clip) != nullptr);
 }
 
+void independent_audio_track_edits_and_round_trip() {
+  ProjectDocument document;
+  CommandProcessor processor{document};
+  const auto av = processor.import_asset("media/av.mp4", FakeProbe{{audio_stream(4)}});
+  const auto silent = processor.import_asset("media/silent.mp4", FakeProbe{{}});
+  const auto audio_track = processor.add_track(TrackKind::Audio);
+  assert(document.timeline().find_track(audio_track)->kind() == TrackKind::Audio);
+
+  const auto clip = processor.add_clip(audio_track, av, TimeRange{time(0), time(2)}, time(0));
+  processor.set_clip_audio_gain(clip, -6.0);
+  processor.set_clip_muted(clip, true);
+  processor.move_clip(clip, audio_track, time(2));
+  processor.trim_clip_start(clip, time(2, Rational{1, 1}) + time(1, Rational{1, 2}));
+  const auto right = processor.split_clip(clip, time(3, Rational{1, 1}) + time(1, Rational{1, 2}));
+  assert(document.timeline().find_clip(right)->source_range().start() ==
+         document.timeline().find_clip(clip)->source_range().end());
+  assert(document.timeline().find_clip(right)->audio_gain_db() == -6.0);
+  assert(document.timeline().find_clip(right)->muted());
+  const auto resolved = application::resolve_clip_at(document.snapshot(), audio_track,
+                                                      time(15, Rational{1, 4}));
+  assert(std::holds_alternative<ResolvedClip>(resolved));
+  assert(std::get<ResolvedClip>(resolved).source_time == time(7, Rational{1, 4}));
+
+  bool rejected = false;
+  try {
+    (void)processor.add_clip(audio_track, silent, TimeRange{time(0), time(1)}, time(5));
+  } catch (const std::invalid_argument&) {
+    rejected = true;
+  }
+  assert(rejected);
+
+  const auto bytes = ProjectCodec::encode(document.snapshot());
+  assert(bytes.find("TRACK 2 AUDIO") != std::string::npos);
+  auto restored = ProjectDocument::restore(ProjectCodec::decode(bytes));
+  assert(restored.timeline().find_track(audio_track)->kind() == TrackKind::Audio);
+  assert(restored.timeline().find_clip(right)->audio_gain_db() == -6.0);
+  assert(restored.timeline().find_clip(right)->muted());
+  assert(ProjectCodec::encode(restored.snapshot()) == bytes);
+
+  processor.remove_clip(right);
+  assert(document.timeline().find_clip(right) == nullptr);
+  assert(processor.undo());
+  assert(document.timeline().find_clip(right) != nullptr);
+  assert(processor.redo());
+  assert(document.timeline().find_clip(right) == nullptr);
+  assert(processor.undo());
+  assert(processor.undo());
+  assert(document.timeline().find_clip(right) == nullptr);
+  assert(processor.redo());
+  assert(document.timeline().find_clip(right) != nullptr);
+}
+
 // T3: audio metadata survives encode/decode/restore exactly; absence stays absent.
 void audio_survives_codec_round_trip() {
   ProjectDocument document;
@@ -151,8 +204,11 @@ void golden_and_absence_decode_as_no_audio() {
   for (const auto& asset : restored.assets()) {
     assert(!asset.audio().has_value());
   }
-  // Byte-identical re-encode: old lines decode exactly as before.
-  assert(ProjectCodec::encode(restored.snapshot()) == bytes);
+  // Legacy v1 opens losslessly; re-encoding emits the explicit v2 schema.
+  const auto canonical = ProjectCodec::encode(restored.snapshot());
+  assert(canonical.find("PULSAR_PROJECT 2\n") == 0);
+  assert(ProjectDocument::restore(ProjectCodec::decode(canonical)).assets().size() ==
+         restored.assets().size());
 }
 
 // Malformed audio suffixes are rejected; strictness for old shapes is kept.
@@ -418,6 +474,7 @@ void invalid_clip_gain_is_rejected() {
 int main() {
   audio_selected_first_stream_deterministically();
   video_only_has_no_audio();
+  independent_audio_track_edits_and_round_trip();
   audio_survives_codec_round_trip();
   audio_without_duration_round_trips();
   golden_and_absence_decode_as_no_audio();

@@ -23,6 +23,7 @@ public:
   }
 
   void add_track(Track track);
+  void remove_track(TrackId track_id);
   void insert_clip(TrackId track_id, Clip clip);
   void remove_clip(ClipId clip_id);
   void move_clip(ClipId clip_id, TrackId destination_track_id, MediaTime timeline_start);

@@ -77,13 +77,15 @@ void golden_fixture_decodes() {
   auto restored = ProjectDocument::restore(ProjectCodec::decode(bytes));
   assert(restored.assets().size() == 2);
   assert(restored.timeline().tracks().front().clips().size() == 2);
-  assert(ProjectCodec::encode(restored.snapshot()) == bytes);
+  const auto canonical = ProjectCodec::encode(restored.snapshot());
+  assert(canonical.find("PULSAR_PROJECT 2\n") == 0);
+  assert(ProjectDocument::restore(ProjectCodec::decode(canonical)).assets().size() == 2);
 }
 
 void strict_decode_rejects_malformed_input() {
   const auto good = ProjectCodec::encode(ProjectDocument{}.snapshot());
   const std::vector<std::string> malformed{
-      "PULSAR_PROJECT 2\n", "PULSAR_PROJECT 1\nTIMELINE 1\nEND\n",
+      "PULSAR_PROJECT 3\n", "PULSAR_PROJECT 1\nTIMELINE 1\nEND\n",
       good.substr(0, good.size() - 4),
       good + "JUNK\n",
   };
@@ -96,6 +98,19 @@ void strict_decode_rejects_malformed_input() {
     }
     assert(rejected);
   }
+  auto invalid_track_kind = good;
+  const auto track_line = invalid_track_kind.find("TRACK ");
+  assert(track_line != std::string::npos);
+  const auto kind = invalid_track_kind.find("VIDEO", track_line);
+  assert(kind != std::string::npos);
+  invalid_track_kind.replace(kind, 5, "MYSTERY");
+  bool track_rejected = false;
+  try {
+    (void)ProjectCodec::decode(invalid_track_kind);
+  } catch (const ProjectCodecError&) {
+    track_rejected = true;
+  }
+  assert(track_rejected);
 }
 
 void strict_m9_5_regressions() {
@@ -312,7 +327,7 @@ void repository_normalizes_codec_failures() {
 
   // Malformed bytes through the real repository surface as repository errors.
   const auto malformed = root / "malformed.pulsar";
-  { std::ofstream output{malformed}; output << "PULSAR_PROJECT 2\n"; }
+  { std::ofstream output{malformed}; output << "PULSAR_PROJECT 3\n"; }
   bool load_rejected = false;
   try {
     (void)repository.load(malformed);

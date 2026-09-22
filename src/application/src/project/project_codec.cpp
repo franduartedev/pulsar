@@ -198,7 +198,7 @@ std::string ProjectCodec::encode(const ProjectSnapshot& snapshot) {
     throw ProjectCodecError{"project exceeds record limit"};
   }
   std::ostringstream output;
-  output << "PULSAR_PROJECT 1\n";
+  output << "PULSAR_PROJECT 2\n";
   output << "TIMELINE " << snapshot.timeline.id().value() << "\n";
   const auto tracks = sorted_tracks(snapshot.timeline);
   for (const auto* track : tracks) {
@@ -319,7 +319,9 @@ ProjectRestoreState ProjectCodec::decode(std::string_view bytes) {
 
     try {
       if (tokens[0].text == "PULSAR_PROJECT") {
-        if (header || tokens.size() != 2 || tokens[1].text != "1") parse_fail(line_number, "invalid header/version");
+        if (header || tokens.size() != 2 || (tokens[1].text != "1" && tokens[1].text != "2")) {
+          parse_fail(line_number, "invalid header/version");
+        }
         header = true;
         section = Section::Timeline;
       } else if (!header) {

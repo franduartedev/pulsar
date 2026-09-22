@@ -20,6 +20,7 @@ public:
   [[nodiscard]] static ProjectDocument restore(const ProjectRestoreState& state);
 
   [[nodiscard]] domain::TrackId video_track_id() const noexcept { return video_track_id_; }
+  [[nodiscard]] domain::TrackId next_track_id() const { return allocator_.next_track(); }
   [[nodiscard]] std::vector<MediaAsset> assets() const { return assets_; }
   [[nodiscard]] std::optional<MediaAsset> find_asset(domain::MediaId id) const;
   [[nodiscard]] const domain::Timeline& timeline() const noexcept { return timeline_; }
@@ -59,6 +60,7 @@ private:
 
     void ensure_media_consumable() const;
     void ensure_clip_consumable() const;
+    void ensure_track_consumable() const;
     void consume_media();
     void consume_clip();
     void consume_timeline();
@@ -69,7 +71,7 @@ private:
                                        const MediaProbe& probe, domain::MediaId id) const;
   void add_asset_value(const MediaAsset& asset);
   void remove_asset_value(domain::MediaId id);
-  void validate_new_clip(const domain::Clip& clip) const;
+  void validate_clip_for_track(domain::TrackId track_id, const domain::Clip& clip) const;
   [[nodiscard]] domain::Timeline& timeline_mutable() noexcept { return timeline_; }
   [[nodiscard]] HistoryStateId next_history_state_id() const noexcept {
     return next_history_state_id_;
