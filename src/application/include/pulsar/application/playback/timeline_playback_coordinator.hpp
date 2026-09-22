@@ -1,6 +1,6 @@
 #pragma once
 
-#include <pulsar/application/playback/audio_playback_session.hpp>
+#include <pulsar/application/playback/audio_mix_playback_session.hpp>
 #include <pulsar/application/playback/playback_session.hpp>
 #include <pulsar/application/timeline/timeline_clip_resolver.hpp>
 
@@ -162,7 +162,7 @@ private:
   PlaybackTransport transport_;
   std::optional<ProjectSnapshot> snapshot_;
   std::unique_ptr<PlaybackSession> source_session_;
-  std::unique_ptr<AudioPlaybackSession> audio_session_;
+  std::unique_ptr<AudioMixPlaybackSession> audio_session_;
   std::optional<ResolvedClip> active_clip_;
   std::optional<MissingClipMedia> active_missing_;
   std::optional<domain::MediaTime> segment_end_;

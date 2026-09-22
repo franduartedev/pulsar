@@ -13,8 +13,8 @@ TimelinePlaybackCoordinator::TimelinePlaybackCoordinator(const MonotonicClock& c
     : clock_{clock},
       worker_factory_{std::move(worker_factory)},
       transport_{clock},
-      audio_session_{std::make_unique<AudioPlaybackSession>(audio_output,
-                                                             std::move(audio_source_factory))} {}
+      audio_session_{std::make_unique<AudioMixPlaybackSession>(audio_output,
+                                                                std::move(audio_source_factory))} {}
 
 void TimelinePlaybackCoordinator::set_advance_permission(TimelineAdvancePermission permission) {
   advance_permission_ = permission;
@@ -39,8 +39,8 @@ void TimelinePlaybackCoordinator::set_snapshot(ProjectSnapshot snapshot) {
   set_advance_permission(TimelineAdvancePermission::Hold);
   reanchor_transport(position);
   reset_source();
-  audio_session_->reset();
   snapshot_ = std::move(snapshot);
+  audio_session_->configure(*snapshot_);
   segment_kind_ = SegmentKind::None;
   current_presentation_.reset();
   source_creation_error_.reset();
@@ -196,9 +196,8 @@ void TimelinePlaybackCoordinator::enter_clip(const ResolvedClip& clip, bool forc
   active_missing_.reset();
   segment_end_ = clip.timeline_range.end();
   segment_kind_ = SegmentKind::Clip;
+  semantic_condition_ = PlaybackSemanticCondition::IntentionalSilence;
   current_presentation_ = TimelineStarvedPresentation{clip.clip_id, clip.media_id, clip.timeline_range.start()};
-  audio_session_->configure(clip, timeline_position());
-  apply_audio_condition(audio_session_->condition());
 }
 
 void TimelinePlaybackCoordinator::enter_gap(const TimelineGap& gap, bool force_transition) {
@@ -206,7 +205,6 @@ void TimelinePlaybackCoordinator::enter_gap(const TimelineGap& gap, bool force_t
     return;
   }
   reset_source();
-  audio_session_->reset();
   active_clip_.reset();
   active_missing_.reset();
   source_creation_error_.reset();
@@ -225,7 +223,6 @@ void TimelinePlaybackCoordinator::enter_missing(const MissingClipMedia& missing,
     return;
   }
   reset_source();
-  audio_session_->reset();
   active_clip_.reset();
   active_missing_ = missing;
   source_creation_error_.reset();
@@ -242,7 +239,6 @@ void TimelinePlaybackCoordinator::enter_ended(const TimelineEnded& ended, bool f
     return;
   }
   reset_source();
-  audio_session_->reset();
   active_clip_.reset();
   active_missing_.reset();
   source_creation_error_.reset();
@@ -256,24 +252,6 @@ void TimelinePlaybackCoordinator::enter_ended(const TimelineEnded& ended, bool f
 
 TimelinePresentation TimelinePlaybackCoordinator::evaluate_clip(const ResolvedClip& clip,
                                                                 domain::MediaTime position) {
-  if (audio_session_->state() == AudioPlaybackState::Starved) {
-    apply_audio_condition(AudioPlaybackCondition::Starved);
-    current_presentation_ = TimelineStarvedPresentation{clip.clip_id, clip.media_id, position};
-    return *current_presentation_;
-  }
-  if (audio_session_->state() == AudioPlaybackState::Ready && intent_ == PlaybackIntent::Playing) {
-    audio_session_->play();
-  }
-  apply_audio_condition(audio_session_->condition());
-  if (audio_session_->condition() == AudioPlaybackCondition::Error) {
-    set_advance_permission(TimelineAdvancePermission::Hold);
-    synchronize_transport();
-    segment_kind_ = SegmentKind::SourceError;
-    current_presentation_ = TimelineSourceErrorPresentation{
-        clip.clip_id, clip.media_id,
-        audio_session_->error_message().value_or("audio playback failed")};
-    return *current_presentation_;
-  }
   if (source_creation_error_.has_value()) {
     set_advance_permission(TimelineAdvancePermission::Hold);
     synchronize_transport();
@@ -328,7 +306,6 @@ TimelinePresentation TimelinePlaybackCoordinator::evaluate_clip(const ResolvedCl
                                                                   position};
   } else {
     const auto& error = std::get<PresentationTemporalError>(decision);
-    audio_session_->pause();
     set_advance_permission(TimelineAdvancePermission::Hold);
     synchronize_transport();
     segment_kind_ = SegmentKind::SourceError;
@@ -374,23 +351,19 @@ void TimelinePlaybackCoordinator::synchronize_audio_clock() {
   if (audio_session_ == nullptr || intent_ != PlaybackIntent::Playing || !snapshot_.has_value()) {
     return;
   }
-  if (segment_kind_ != SegmentKind::Clip) {
-    clock_source_ = PlaybackClockSource::Software;
-    return;
-  }
   audio_session_->update(timeline_position());
-  if (audio_session_->state() == AudioPlaybackState::Ready) {
+  if (audio_session_->state() == AudioPlaybackState::Ready ||
+      audio_session_->state() == AudioPlaybackState::Recovering) {
     audio_session_->play();
   }
-  if (audio_session_->state() == AudioPlaybackState::Running) {
+  if (audio_session_->state() == AudioPlaybackState::Running &&
+      audio_session_->has_device_clock()) {
     apply_audio_condition(AudioPlaybackCondition::Present);
     clock_source_ = PlaybackClockSource::AudioDevice;
     if (const auto position = audio_session_->clock_position(); position.has_value()) {
       reanchor_transport(*position);
+      synchronize_transport();
     }
-  } else if (audio_session_->condition() == AudioPlaybackCondition::Starved ||
-             audio_session_->condition() == AudioPlaybackCondition::Recovering) {
-    apply_audio_condition(audio_session_->condition());
   } else if (intent_ == PlaybackIntent::Playing) {
     apply_audio_condition(audio_session_->condition());
     clock_source_ = PlaybackClockSource::Software;
@@ -400,39 +373,54 @@ void TimelinePlaybackCoordinator::synchronize_audio_clock() {
 void TimelinePlaybackCoordinator::apply_audio_condition(AudioPlaybackCondition condition) {
   switch (condition) {
   case AudioPlaybackCondition::Present:
-    semantic_condition_ = PlaybackSemanticCondition::Present;
+    if (segment_kind_ == SegmentKind::Clip) {
+      semantic_condition_ = PlaybackSemanticCondition::Present;
+    }
     break;
   case AudioPlaybackCondition::IntentionalSilence:
-    semantic_condition_ = PlaybackSemanticCondition::IntentionalSilence;
+    if (segment_kind_ == SegmentKind::Clip) {
+      semantic_condition_ = PlaybackSemanticCondition::IntentionalSilence;
+    }
     set_advance_permission(TimelineAdvancePermission::Advance);
     break;
   case AudioPlaybackCondition::SourceEndedEarly:
-    semantic_condition_ = PlaybackSemanticCondition::SourceEndedEarly;
+    if (segment_kind_ == SegmentKind::Clip) {
+      semantic_condition_ = PlaybackSemanticCondition::SourceEndedEarly;
+    }
     set_advance_permission(TimelineAdvancePermission::Advance);
     clock_source_ = PlaybackClockSource::Software;
     break;
   case AudioPlaybackCondition::Starved:
-    semantic_condition_ = PlaybackSemanticCondition::Starved;
-    set_advance_permission(TimelineAdvancePermission::Hold);
-    clock_source_ = PlaybackClockSource::Paused;
+    if (segment_kind_ == SegmentKind::Clip) {
+      semantic_condition_ = PlaybackSemanticCondition::Starved;
+    }
+    // An unavailable contributor is local to audio. Video and healthy audio
+    // contributors continue on the software clock.
+    clock_source_ = PlaybackClockSource::Software;
     break;
   case AudioPlaybackCondition::Recovering:
-    semantic_condition_ = PlaybackSemanticCondition::Recovering;
-    set_advance_permission(TimelineAdvancePermission::Hold);
-    clock_source_ = PlaybackClockSource::Paused;
+    if (segment_kind_ == SegmentKind::Clip) {
+      semantic_condition_ = PlaybackSemanticCondition::Recovering;
+    }
+    clock_source_ = PlaybackClockSource::Software;
     break;
   case AudioPlaybackCondition::DeviceUnavailable:
-    semantic_condition_ = PlaybackSemanticCondition::DeviceUnavailable;
+    if (segment_kind_ == SegmentKind::Clip) {
+      semantic_condition_ = PlaybackSemanticCondition::DeviceUnavailable;
+    }
     set_advance_permission(TimelineAdvancePermission::Advance);
     clock_source_ = PlaybackClockSource::Software;
     break;
   case AudioPlaybackCondition::Error:
-    semantic_condition_ = PlaybackSemanticCondition::Error;
-    set_advance_permission(TimelineAdvancePermission::Hold);
+    if (segment_kind_ == SegmentKind::Clip) {
+      semantic_condition_ = PlaybackSemanticCondition::Error;
+    }
     clock_source_ = PlaybackClockSource::Software;
     break;
   case AudioPlaybackCondition::Inactive:
-    semantic_condition_ = PlaybackSemanticCondition::Inactive;
+    if (segment_kind_ == SegmentKind::None) {
+      semantic_condition_ = PlaybackSemanticCondition::Inactive;
+    }
     break;
   }
   synchronize_transport();
