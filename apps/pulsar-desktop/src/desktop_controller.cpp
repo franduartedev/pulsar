@@ -554,8 +554,12 @@ void DesktopController::installTimelineAsset(const pulsar::application::MediaPro
     if (!result.video_streams.empty()) {
       const auto& stream = result.video_streams.front();
       const auto duration = stream.duration ? stream.duration : result.duration;
-      if (duration && *duration > MediaTime::zero() &&
-          active_session_->document().timeline().duration() == MediaTime::zero()) {
+      const auto* video_track = active_session_->document().timeline().find_track(
+          active_session_->document().video_track_id());
+      const bool video_track_empty = video_track == nullptr || video_track->clips().empty();
+      // Audio tracks may keep the global timeline non-empty while VIDEO 1 is
+      // empty. Auto-place imported video only according to VIDEO 1 occupancy.
+      if (duration && *duration > MediaTime::zero() && video_track_empty) {
         (void)active_session_->processor().add_clip(
             media, pulsar::domain::TimeRange{MediaTime::zero(), *duration}, MediaTime::zero());
       }

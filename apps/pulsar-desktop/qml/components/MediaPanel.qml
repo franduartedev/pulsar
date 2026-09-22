@@ -4,6 +4,7 @@ import "../theme/Theme.js" as Theme
 // Quiet support panel: the loaded session object leads, manual path entry
 // stays secondary. Reads controller directly, like the rest of the UI.
 Panel {
+    signal importRequested()
     border.width: 0
     radius: 0
     id: mediaPanel
@@ -45,7 +46,7 @@ Panel {
 
     Rectangle { anchors.left: parent.left; anchors.top: parent.top; width: 3; height: 16; color: Theme.accent; opacity: 0.8 }
     SectionLabel { id: title; anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top; anchors.leftMargin: 10; anchors.rightMargin: 10; anchors.topMargin: 10; text: "MEDIOS" }
-    PButton { id: importButton; anchors.left: parent.left; anchors.right: parent.right; anchors.top: title.bottom; anchors.leftMargin: 10; anchors.rightMargin: 10; anchors.topMargin: 8; text: "+  IMPORTAR MEDIO"; primary: true; onClicked: controller.importRequested() }
+    PButton { id: importButton; anchors.left: parent.left; anchors.right: parent.right; anchors.top: title.bottom; anchors.leftMargin: 10; anchors.rightMargin: 10; anchors.topMargin: 8; text: "+  IMPORTAR MEDIO"; primary: true; onClicked: mediaPanel.importRequested() }
 
     SectionLabel { id: sessionLabel; anchors.left: parent.left; anchors.right: parent.right; anchors.top: importButton.bottom; anchors.leftMargin: 10; anchors.rightMargin: 10; anchors.topMargin: 14; text: "FUENTE ACTIVA" }
     Rectangle {

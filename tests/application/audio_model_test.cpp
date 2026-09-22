@@ -509,6 +509,41 @@ void invalid_clip_gain_is_rejected() {
   }
 }
 
+void video_reimport_uses_video_track_occupancy_not_global_duration() {
+  ProjectDocument document;
+  CommandProcessor processor{document};
+  FakeProbe video_probe{{audio_stream(4)}};
+
+  const auto first_video = processor.import_asset("video-one.mp4", video_probe);
+  const auto first_clip = processor.add_clip(first_video, TimeRange{time(0), time(5)}, time(0));
+  const auto audio_track = processor.add_track(TrackKind::Audio);
+  const auto audio = processor.import_asset("audio.wav", AudioOnlyProbe{});
+  const auto audio_clip = processor.add_clip(audio_track, audio, TimeRange{time(0), time(4)},
+                                             time(0));
+  processor.remove_clip(first_clip);
+
+  // The global timeline remains occupied by audio, but VIDEO 1 is empty.
+  assert(document.timeline().duration() == time(4));
+  assert(document.timeline().find_track(document.video_track_id())->clips().empty());
+
+  const auto second_video = processor.import_asset("video-two.mp4", video_probe);
+  const auto* video_track = document.timeline().find_track(document.video_track_id());
+  assert(video_track->clips().empty());
+  const auto second_clip = processor.add_clip(second_video, TimeRange{time(0), time(6)}, time(0));
+  assert(document.timeline().find_clip(second_clip)->media_id() == second_video);
+  assert(document.timeline().find_clip(audio_clip)->media_id() == audio);
+  assert(document.timeline().duration() == time(6));
+  assert(document.find_asset(second_video).has_value());
+  assert(application::resolve_clip_at(document.snapshot(), document.video_track_id(), time(0))
+             .index() == 0);
+
+  // Once VIDEO 1 is occupied, a subsequent asset import remains an asset
+  // import and does not silently create a second overlapping video clip.
+  const auto third_video = processor.import_asset("video-three.mp4", video_probe);
+  assert(document.find_asset(third_video).has_value());
+  assert(document.timeline().find_track(document.video_track_id())->clips().size() == 1);
+}
+
 }  // namespace
 
 int main() {
@@ -525,4 +560,5 @@ int main() {
   clip_gain_dsp_preserves_shape_and_timing();
   clip_properties_follow_edits_history_and_persistence();
   invalid_clip_gain_is_rejected();
+  video_reimport_uses_video_track_occupancy_not_global_duration();
 }

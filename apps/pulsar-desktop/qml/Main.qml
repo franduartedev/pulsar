@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Window
+import QtQuick.Dialogs
 import "theme/Theme.js" as Theme
 import "components"
 
@@ -21,7 +22,7 @@ Window {
     property real inspectorWidth: Math.max(248, Math.min(304, width * 0.19))
 
     Shortcut { sequence: "Space"; onActivated: controller.togglePlayback() }
-    Shortcut { sequence: "Ctrl+I"; onActivated: controller.importRequested() }
+    Shortcut { sequence: "Ctrl+I"; onActivated: fileDialog.open() }
     Shortcut { sequence: "Home"; onActivated: controller.seekToStart() }
     Shortcut { sequence: "End"; onActivated: controller.seekToEnd() }
     Shortcut { sequence: "S"; onActivated: controller.splitSelectedClip() }
@@ -29,11 +30,15 @@ Window {
     Shortcut { sequence: "Ctrl+Z"; onActivated: controller.undoEdit() }
     Shortcut { sequence: "Ctrl+Shift+Z"; onActivated: controller.redoEdit() }
 
-    Connections {
-        target: controller
-        function onFocusImportPathRequested() {
-            mediaPanel.focusPath()
-        }
+    FileDialog {
+        id: fileDialog
+        title: "Importar medio"
+        fileMode: FileDialog.OpenFile
+        nameFilters: [
+            "Medios (*.mp4 *.mov *.mkv *.avi *.webm *.wav *.mp3 *.m4a *.aac *.flac)",
+            "Todos los archivos (*)"
+        ]
+        onAccepted: controller.openUrl(selectedFile)
     }
 
     DropArea {
@@ -59,6 +64,7 @@ Window {
         anchors.top: header.bottom
         anchors.bottom: scrubber.top
         width: root.mediaWidth
+        onImportRequested: fileDialog.open()
     }
 
     InspectorPanel {
