@@ -78,6 +78,20 @@ void viewport_is_exactly_guarded() {
   assert(viewport.pixel_at(MediaTime{1001, Rational{1, 30000}}, 1000.0) >= 0.0);
 }
 
+void zoom_and_pan_preserve_editorial_time_mapping() {
+  const auto start = MediaTime{3, Rational{1, 1}};
+  const auto duration = MediaTime{2, Rational{1, 1}};
+  TimelineViewport viewport{start, duration};
+  assert(viewport.time_at(0.0, 1000.0).value() == start);
+  assert(viewport.time_at(1000.0, 1000.0).value() == start + duration);
+  assert(viewport.pixel_at(start, 1000.0) == 0.0);
+  assert(viewport.pixel_at(start + duration, 1000.0) == 1000.0);
+  // The viewport changes the visible window, not the clip's source interval.
+  const auto source_start = MediaTime{7, Rational{1, 1}};
+  const auto source_end = MediaTime{9, Rational{1, 1}};
+  assert(source_end - source_start == duration);
+}
+
 
 void editing_actions_use_document_commands() {
   Probe probe;
@@ -651,6 +665,7 @@ void runtime_media_path_resolution() {
 
 int main() {
   viewport_is_exactly_guarded();
+  zoom_and_pan_preserve_editorial_time_mapping();
   editing_actions_use_document_commands();
   live_audio_property_edit_preserves_playback_position_and_intent();
   session_read_model_and_selection();

@@ -17,6 +17,13 @@ option(PULSAR_ENABLE_UBSAN "Enable UndefinedBehaviorSanitizer for supported comp
 option(PULSAR_ENABLE_CLANG_TIDY "Run clang-tidy during builds" OFF)
 option(PULSAR_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" OFF)
 
+# A desktop media build must exercise the real playback path.  Keeping the
+# audio adapter optional for non-UI consumers is useful, but a desktop build
+# without it is not a valid M10 smoke target.
+if(PULSAR_BUILD_DESKTOP)
+  set(PULSAR_BUILD_QT_AUDIO ON CACHE BOOL "Build Qt Multimedia for desktop playback" FORCE)
+endif()
+
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
 include(StaticAnalysis)

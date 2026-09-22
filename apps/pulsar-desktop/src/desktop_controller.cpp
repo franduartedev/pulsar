@@ -104,11 +104,16 @@ DesktopController::DesktopController(PreviewImageProvider& image_provider,
   worker_ = std::thread{&DesktopController::workerLoop, this};
 }
 DesktopController::~DesktopController() {
+  tick_timer_.stop();
   waveform_timer_.stop();
   waveform_items_.clear();
   waveform_item_stamps_.clear();
   { std::lock_guard lock{mutex_}; stop_worker_ = true; pending_command_.reset(); }
   wake_.notify_one(); if (worker_.joinable()) worker_.join();
+  // QAudioSink can deliver a final queued callback while it is being
+  // destroyed.  Keep the controller's QML-facing properties alive until the
+  // audio session has completed teardown.
+  active_session_.reset();
 }
 void DesktopController::openPath(const QString& path) { const auto trimmed = path.trimmed(); if (!trimmed.isEmpty()) postOpen(std::filesystem::path{trimmed.toStdString()}, ++import_request_generation_); }
 void DesktopController::openUrl(const QUrl& url) { if (!url.isLocalFile()) { setError("Solo se admiten archivos locales"); return; } openPath(url.toLocalFile()); }

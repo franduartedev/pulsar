@@ -45,15 +45,16 @@ Panel {
             }
             Text { text: "PAN"; color: Theme.faint; font.pixelSize: Theme.fontSizeXS; anchors.verticalCenter: parent.verticalCenter }
             Rectangle {
-                width: 90; height: 18; radius: 3; color: Theme.lane; anchors.verticalCenter: parent.verticalCenter
+                width: 90; height: 18; radius: 3; color: Theme.lane; opacity: controller.timelineZoom > 1.0 ? 1.0 : 0.45; anchors.verticalCenter: parent.verticalCenter
                 Rectangle { x: controller.timelineScroll * (parent.width - width); y: 5; width: 14; height: 8; radius: 3; color: Theme.waveform }
                 MouseArea {
                     anchors.fill: parent
+                    enabled: controller.timelineZoom > 1.0
                     onPressed: function(mouse) { controller.setTimelineScroll(Math.max(0, Math.min(1, mouse.x / width))) }
                     onPositionChanged: function(mouse) { if (pressed) controller.setTimelineScroll(Math.max(0, Math.min(1, mouse.x / width))) }
                 }
             }
-            Text { text: "DETAIL"; color: Theme.faint; font.pixelSize: Theme.fontSizeXS; anchors.verticalCenter: parent.verticalCenter }
+            Text { text: "DETAIL %1x".arg(controller.waveformDensity.toFixed(1)); color: Theme.faint; font.pixelSize: Theme.fontSizeXS; anchors.verticalCenter: parent.verticalCenter }
             Rectangle {
                 width: 72; height: 18; radius: 3; color: Theme.lane; anchors.verticalCenter: parent.verticalCenter
                 Rectangle { x: ((controller.waveformDensity - 0.5) / 1.5) * (parent.width - width); y: 5; width: 12; height: 8; radius: 3; color: Theme.waveform }
