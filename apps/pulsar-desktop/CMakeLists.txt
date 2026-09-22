@@ -7,6 +7,7 @@ qt_add_executable(pulsar_desktop
   src/main.cpp
   src/desktop_controller.cpp
   src/desktop_controller.hpp
+  src/builtin_sound_catalog.hpp
   src/timeline_clip_list_model.cpp
   src/timeline_clip_list_model.hpp
   src/waveform_quick_item.cpp
@@ -73,6 +74,7 @@ target_link_libraries(pulsar_desktop
     pulsar::domain
     pulsar::project_file
 )
+target_compile_definitions(pulsar_desktop PRIVATE PULSAR_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 
 if(PULSAR_BUILD_QT_AUDIO)
   target_compile_definitions(pulsar_desktop PRIVATE PULSAR_HAS_QT_AUDIO=1)

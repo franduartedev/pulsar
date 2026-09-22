@@ -50,6 +50,7 @@ Panel {
 
     SectionLabel { id: sessionLabel; anchors.left: parent.left; anchors.right: parent.right; anchors.top: importButton.bottom; anchors.leftMargin: 10; anchors.rightMargin: 10; anchors.topMargin: 14; text: "FUENTE ACTIVA" }
     Rectangle {
+        id: activeCard
         anchors.left: parent.left; anchors.right: parent.right; anchors.top: sessionLabel.bottom; anchors.leftMargin: 10; anchors.rightMargin: 10; anchors.topMargin: 8
         height: cardCol.height + 18
         color: controller.hasMedia ? Theme.input : "transparent"
@@ -66,6 +67,23 @@ Panel {
                 PText { width: parent.width - 14; anchors.verticalCenter: parent.verticalCenter; text: controller.hasMedia ? controller.mediaName : "Sin medios cargados"; color: controller.hasMedia ? Theme.textBright : Theme.muted }
             }
             PMuted { width: parent.width; text: mediaPanel.subInfo; wrapMode: Text.WordWrap }
+        }
+    }
+
+    SectionLabel { id: soundsTitle; anchors.left: parent.left; anchors.right: parent.right; anchors.top: activeCard.bottom; anchors.leftMargin: 10; anchors.rightMargin: 10; anchors.topMargin: 14; text: "SONIDOS" }
+    ListView {
+        id: soundsList
+        anchors.left: parent.left; anchors.right: parent.right; anchors.top: soundsTitle.bottom; anchors.bottom: manualTitle.top
+        anchors.leftMargin: 10; anchors.rightMargin: 10; anchors.topMargin: 6; anchors.bottomMargin: 4
+        clip: true; spacing: 4; model: controller.soundLibrary
+        delegate: Row {
+            width: soundsList.width; height: 28; spacing: 5
+            Column {
+                width: parent.width - insert.width - 5; height: parent.height
+                Text { text: modelData.name; color: Theme.text; font.pixelSize: Theme.fontSizeS; elide: Text.ElideRight; width: parent.width }
+                Text { text: modelData.category; color: Theme.faint; font.pixelSize: Theme.fontSizeXS; elide: Text.ElideRight; width: parent.width }
+            }
+            PButton { id: insert; width: 54; height: 26; text: "Insertar"; onClicked: controller.insertBuiltinSound(modelData.id) }
         }
     }
 

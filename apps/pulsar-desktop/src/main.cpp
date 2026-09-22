@@ -1,4 +1,5 @@
 #include "desktop_controller.hpp"
+#include "builtin_sound_catalog.hpp"
 #include "preview_image_provider.hpp"
 #include "waveform_quick_item.hpp"
 
@@ -31,7 +32,10 @@ int main(int argc, char** argv) {
   DesktopController controller{
       *image_provider,
       [](const std::filesystem::path& path, int stream_index) {
-        return std::make_unique<pulsar::media::ffmpeg::FFmpegWaveformSource>(path,
+        const auto runtime = pulsar::desktop::is_builtin_sound_locator(path)
+                                  ? pulsar::desktop::builtin_sound_runtime_path(path)
+                                  : path;
+        return std::make_unique<pulsar::media::ffmpeg::FFmpegWaveformSource>(runtime,
                                                                             stream_index);
       }};
 

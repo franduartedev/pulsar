@@ -42,6 +42,16 @@ public:
   }
 };
 
+class BuiltinSoundProbe final : public MediaProbe {
+public:
+  MediaProbeResult probe(const std::filesystem::path& path) const override {
+    const auto duration = MediaTime{4800, Rational{1, 4800}};
+    return {path, std::string{"WAV"}, duration, {},
+            {{0, "pcm_s16le", 48000, 1, Rational{1, 48000},
+              MediaTime{48000, Rational{1, 48000}}}}};
+  }
+};
+
 MediaTime t(std::int64_t value, Rational base = Rational{1, 1}) { return MediaTime{value, base}; }
 
 ProjectDocument make_document() {
@@ -67,6 +77,25 @@ void codec_roundtrip_and_canonical_output() {
   assert(restored.document_generation() == 0);
   assert(bytes.find("VIDEO_TRACK") != std::string::npos);
   assert(bytes.find("CLIP ") != std::string::npos);
+}
+
+void builtin_locator_roundtrip() {
+  ProjectDocument document;
+  CommandProcessor processor{document};
+  const auto media = processor.import_asset("pulsar-sound:click_soft", BuiltinSoundProbe{});
+  const auto track = processor.add_track(domain::TrackKind::Audio);
+  const auto clip = processor.add_clip(track, media,
+                                       TimeRange{t(0, Rational{1, 48000}),
+                                                 t(4800, Rational{1, 48000})}, t(2));
+  processor.set_clip_audio_gain(clip, -6.0);
+  processor.set_clip_muted(clip, true);
+  const auto bytes = ProjectCodec::encode(document.snapshot());
+  const auto restored = ProjectDocument::restore(ProjectCodec::decode(bytes));
+  assert(restored.find_asset(media)->source_locator() ==
+         std::filesystem::path{"pulsar-sound:click_soft"});
+  assert(restored.timeline().find_clip(clip)->timeline_start() == t(2));
+  assert(restored.timeline().find_clip(clip)->audio_gain_db() == -6.0);
+  assert(restored.timeline().find_clip(clip)->muted());
 }
 
 void golden_fixture_decodes() {
@@ -367,6 +396,7 @@ void repository_normalizes_codec_failures() {
 
 int main() {
   codec_roundtrip_and_canonical_output();
+  builtin_locator_roundtrip();
   golden_fixture_decodes();
   strict_decode_rejects_malformed_input();
   strict_m9_5_regressions();

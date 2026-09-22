@@ -58,10 +58,34 @@ void refresh_availability(application::ProjectRestoreState& state,
                                                           : project_path.parent_path();
   for (auto& asset : state.assets) {
     const auto authored = asset.source_locator();
+    const auto logical = authored.generic_string();
+    const bool builtin_sound = logical.starts_with("pulsar-sound:");
     const auto check_path = authored.is_relative() ? parent / authored : authored;
     std::error_code error;
-    const bool regular = std::filesystem::is_regular_file(check_path, error);
-    const bool readable = !error && regular && ::access(check_path.c_str(), R_OK) == 0;
+    bool readable = false;
+    if (builtin_sound) {
+      const auto filename = logical.substr(std::string{"pulsar-sound:"}.size()) + ".wav";
+      const auto relative = std::filesystem::path{"assets"} / "sounds" / filename;
+      auto candidate = std::filesystem::current_path(error) / relative;
+      readable = !error && std::filesystem::is_regular_file(candidate, error) &&
+                 ::access(candidate.c_str(), R_OK) == 0;
+      auto executable = std::filesystem::read_symlink("/proc/self/exe", error);
+      if (!readable && !error) {
+        for (auto directory = executable.parent_path(); !directory.empty();
+             directory = directory.parent_path()) {
+          candidate = directory / relative;
+          if (std::filesystem::is_regular_file(candidate, error) &&
+              ::access(candidate.c_str(), R_OK) == 0) {
+            readable = true;
+            break;
+          }
+          if (directory == directory.parent_path()) break;
+        }
+      }
+    } else {
+      const bool regular = std::filesystem::is_regular_file(check_path, error);
+      readable = !error && regular && ::access(check_path.c_str(), R_OK) == 0;
+    }
     const auto availability = readable ? application::MediaAvailability::Available
                                        : application::MediaAvailability::Unavailable;
     std::optional<std::string> reason;

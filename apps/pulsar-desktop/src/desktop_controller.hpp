@@ -65,6 +65,7 @@ class DesktopController final : public QObject {
   Q_PROPERTY(bool canSplit READ canSplit NOTIFY editActionStateChanged)
   Q_PROPERTY(bool canUndo READ canUndo NOTIFY timelineChanged)
   Q_PROPERTY(bool canRedo READ canRedo NOTIFY timelineChanged)
+  Q_PROPERTY(QVariantList soundLibrary READ soundLibrary NOTIFY soundLibraryChanged)
 public:
   using WaveformSourceCreator = std::function<std::unique_ptr<pulsar::application::WaveformSource>(
       const std::filesystem::path&, int)>;
@@ -109,6 +110,7 @@ public:
   [[nodiscard]] bool canSplit() const { return active_session_ && active_session_->can_split(); }
   [[nodiscard]] bool canUndo() const { return active_session_ && active_session_->can_undo(); }
   [[nodiscard]] bool canRedo() const { return active_session_ && active_session_->can_redo(); }
+  [[nodiscard]] QVariantList soundLibrary() const { return sound_library_; }
   Q_INVOKABLE void openPath(const QString& path);
   Q_INVOKABLE void openUrl(const QUrl& url);
   Q_INVOKABLE void importRequested();
@@ -133,6 +135,7 @@ public:
   Q_INVOKABLE void toggleSelectedClipMute();
   Q_INVOKABLE void undoEdit();
   Q_INVOKABLE void redoEdit();
+  Q_INVOKABLE void insertBuiltinSound(const QString& sound_id);
   Q_INVOKABLE void saveProject(const QString& path);
   Q_INVOKABLE void openProject(const QString& path);
   Q_INVOKABLE void attachWaveformItem(const QString& clip_key, QObject* item);
@@ -142,6 +145,7 @@ signals:
   void previewChanged(); void positionChanged(); void playbackChanged(); void busyChanged();
   void projectDirtyChanged();
   void diagnosticsChanged(); void timelineChanged(); void timelinePlayheadChanged(); void timelineViewChanged(); void waveformPolicyChanged(); void editActionStateChanged(); void focusImportPathRequested();
+  void soundLibraryChanged();
 private:
   struct WorkerCommand { std::filesystem::path path; std::uint64_t generation; };
   struct WaveformItemStamp {
@@ -181,6 +185,7 @@ private:
   [[nodiscard]] double timelinePixelAt(pulsar::domain::MediaTime time, double width) const;
   void publishProjectDirty();
   void refreshWaveformItems();
+  void loadSoundLibrary();
   void refreshWaveformItem(WaveformQuickItem* item);
   void installTimelineAsset(const pulsar::application::MediaProbeResult&);
   void presentTimeline(const pulsar::application::TimelinePresentation&);
@@ -199,6 +204,9 @@ private:
   WaveformSourceCreator waveform_source_creator_;
   std::unordered_map<std::string, std::shared_ptr<pulsar::application::WaveformCacheRequest>> waveform_requests_;
   std::vector<QPointer<QObject>> waveform_items_;
+  QVariantList sound_library_;
+  struct BuiltinSound { std::string id; std::string name; std::string category; std::int64_t duration_frames; };
+  std::unordered_map<std::string, BuiltinSound> builtin_sounds_;
   std::unordered_map<std::string, std::string> waveform_clip_identities_;
   std::unordered_map<WaveformQuickItem*, WaveformItemStamp> waveform_item_stamps_;
   std::filesystem::path waveform_cache_directory_;

@@ -1,4 +1,5 @@
 #include "desktop_controller.hpp"
+#include "builtin_sound_catalog.hpp"
 
 #include "project_path_resolution.hpp"
 #include "waveform_quick_item.hpp"
@@ -13,6 +14,10 @@
 #include <pulsar/project_file/file_project_repository.hpp>
 
 #include <QMetaObject>
+#include <QFile>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonParseError>
 #include <QStandardPaths>
 #include <QStringList>
 #include <QVariantMap>
@@ -70,6 +75,18 @@ public:
   pulsar::application::MediaProbeResult probe(const std::filesystem::path&) const override { return result_; }
 private: pulsar::application::MediaProbeResult result_;
 };
+class BuiltinSoundProbe final : public pulsar::application::MediaProbe {
+public:
+  explicit BuiltinSoundProbe(std::int64_t duration_frames) : duration_frames_{duration_frames} {}
+  pulsar::application::MediaProbeResult probe(const std::filesystem::path& path) const override {
+    const auto duration = pulsar::domain::MediaTime{duration_frames_,
+                                                     pulsar::domain::Rational{1, 48'000}};
+    return {path, std::string{"WAV"}, duration, {},
+            {{0, "pcm_s16le", 48'000, 1, pulsar::domain::Rational{1, 48'000}, duration}}};
+  }
+private:
+  std::int64_t duration_frames_;
+};
 QString metadataText(const pulsar::application::MediaProbeResult& probe, const pulsar::application::VideoStreamInfo& stream) {
   QStringList lines;
   lines << QStringLiteral("Nombre: %1").arg(QString::fromStdString(probe.path.filename().string()));
@@ -121,6 +138,7 @@ DesktopController::DesktopController(PreviewImageProvider& image_provider,
     : QObject{parent}, image_provider_{image_provider},
       visual_mailbox_{std::make_shared<pulsar::media::ffmpeg::FFmpegPlaybackVisualMailbox>(8)},
       waveform_source_creator_{std::move(waveform_source_creator)} {
+  loadSoundLibrary();
   waveform_cache_directory_ =
       std::filesystem::path{QStandardPaths::writableLocation(QStandardPaths::CacheLocation)
                                 .toStdString()} /
@@ -133,6 +151,29 @@ DesktopController::DesktopController(PreviewImageProvider& image_provider,
   connect(&waveform_timer_, &QTimer::timeout, this, &DesktopController::refreshWaveformItems);
   waveform_timer_.start();
   worker_ = std::thread{&DesktopController::workerLoop, this};
+}
+void DesktopController::loadSoundLibrary() {
+  const auto manifest = std::filesystem::path{PULSAR_SOURCE_DIR} / "assets" / "sounds" / "index.json";
+  QFile file(QString::fromStdString(manifest.string()));
+  if (!file.open(QIODevice::ReadOnly)) return;
+  QJsonParseError error;
+  const auto document = QJsonDocument::fromJson(file.readAll(), &error);
+  if (error.error != QJsonParseError::NoError || !document.isObject()) return;
+  for (const auto& value : document.object().value("sounds").toArray()) {
+    const auto object = value.toObject();
+    const auto id = object.value("id").toString().toStdString();
+    const auto duration = object.value("duration_frames").toInteger();
+    if (id.empty() || duration <= 0 || builtin_sounds_.contains(id)) continue;
+    BuiltinSound sound{id, object.value("name").toString().toStdString(),
+                       object.value("category").toString().toStdString(), duration};
+    builtin_sounds_.emplace(id, sound);
+    QVariantMap row;
+    row.insert("id", QString::fromStdString(sound.id));
+    row.insert("name", QString::fromStdString(sound.name));
+    row.insert("category", QString::fromStdString(sound.category));
+    sound_library_.push_back(row);
+  }
+  emit soundLibraryChanged();
 }
 DesktopController::~DesktopController() {
   tick_timer_.stop();
@@ -626,6 +667,52 @@ void DesktopController::trimTimelineClipStart(const QString& key,double pixel,do
 void DesktopController::trimTimelineClipEnd(const QString& key,double pixel,double width) { if(!active_session_)return;bool ok=false;auto value=key.toULongLong(&ok);if(!ok||!value)return;const auto target=timelineTimeAt(pixel,width);if(!target)return;try{active_session_->trim_clip_end(pulsar::domain::ClipId{value},*target);clearError();clearProgram(has_video_media_ ? "loading" : "empty");publishTimeline();}catch(...){setError("El recorte no es válido.");publishTimeline();} }
 void DesktopController::splitSelectedClip(){if(!active_session_)return;try{(void)active_session_->split_selected_at_playhead();clearError();clearProgram(has_video_media_ ? "loading" : "empty");publishTimeline();}catch(...){setError("El punto de corte debe estar dentro del clip.");}}
 void DesktopController::deleteSelectedClip(){if(!active_session_)return;try{active_session_->delete_selected();clearError();clearProgram(has_video_media_ ? "loading" : "empty");publishTimeline();}catch(...){} }
+void DesktopController::insertBuiltinSound(const QString& sound_id) {
+  if (!active_session_) return;
+  const auto found = builtin_sounds_.find(sound_id.toStdString());
+  if (found == builtin_sounds_.end()) {
+    setError(QStringLiteral("Sonido no disponible en el catálogo."));
+    return;
+  }
+  try {
+    const std::filesystem::path locator{"pulsar-sound:" + found->second.id};
+    const auto runtime = pulsar::desktop::builtin_sound_runtime_path(locator);
+    std::error_code error;
+    if (!std::filesystem::is_regular_file(runtime, error)) {
+      throw std::runtime_error{"Core Sounds Pack no disponible"};
+    }
+    const auto media = active_session_->processor().import_asset(
+        locator, BuiltinSoundProbe{found->second.duration_frames});
+    const auto start = active_session_->playback_position();
+    const auto duration = MediaTime{found->second.duration_frames, Rational{1, 48'000}};
+    const pulsar::domain::TimeRange range{start, start + duration};
+    std::optional<pulsar::domain::TrackId> track_id;
+    for (const auto& track : active_session_->document().timeline().tracks()) {
+      if (track.kind() != pulsar::domain::TrackKind::Audio) continue;
+      const bool free = std::none_of(track.clips().begin(), track.clips().end(),
+                                     [&range](const auto& clip) {
+                                       return range.overlaps(clip.timeline_range());
+                                     });
+      if (free) { track_id = track.id(); break; }
+    }
+    if (!track_id.has_value()) {
+      track_id = active_session_->processor().add_track(pulsar::domain::TrackKind::Audio);
+    }
+    const auto clip = active_session_->processor().add_clip(
+        *track_id, media, pulsar::domain::TimeRange{MediaTime::zero(), duration}, start);
+    active_session_->select_clip(clip);
+    active_session_->synchronize_document_state();
+    has_media_ = true;
+    duration_text_ = formatTime(active_session_->timeline_duration());
+    clearError();
+    setStatus(QStringLiteral("Sonido insertado"));
+    publishTimeline();
+    emit mediaChanged();
+  } catch (const std::exception& error) {
+    setError(QString::fromUtf8(error.what()));
+    setStatus(QStringLiteral("Error"));
+  }
+}
 void DesktopController::setSelectedClipGainDb(double gain_db) {
   if (!active_session_ || !active_session_->selected_clip() || !std::isfinite(gain_db)) return;
   try {
@@ -753,7 +840,9 @@ pulsar::application::PlaybackWorkerFactory DesktopController::makeWorkerFactory(
   return [this, mailbox, project_file = std::move(project_file)](
              const std::filesystem::path& path, int stream) {
     const auto runtime_path =
-        pulsar::desktop::resolve_runtime_media_path(project_file, path);
+        pulsar::desktop::is_builtin_sound_locator(path)
+            ? pulsar::desktop::builtin_sound_runtime_path(path)
+            : pulsar::desktop::resolve_runtime_media_path(project_file, path);
     const auto start = std::chrono::steady_clock::now();
     auto worker = std::make_unique<FFmpegPlaybackWorker>(runtime_path, stream,
                                                          FFmpegPlaybackWorker::Limits{8}, mailbox);
@@ -769,7 +858,9 @@ pulsar::application::AudioPlaybackSourceFactory DesktopController::makeAudioSour
   return [this, project_file = std::move(project_file)](const std::filesystem::path& path,
                                                         int stream) {
     const auto runtime_path =
-        pulsar::desktop::resolve_runtime_media_path(project_file, path);
+        pulsar::desktop::is_builtin_sound_locator(path)
+            ? pulsar::desktop::builtin_sound_runtime_path(path)
+            : pulsar::desktop::resolve_runtime_media_path(project_file, path);
     return std::make_unique<pulsar::media::ffmpeg::FFmpegAudioPlaybackSource>(runtime_path,
                                                                                 stream);
   };
