@@ -7,7 +7,7 @@ Rectangle {
     property bool primary: false
     signal clicked()
 
-    implicitHeight: 28
+    implicitHeight: Theme.controlHeight
     radius: Theme.radiusS
     color: {
         if (!enabled) {
@@ -28,7 +28,7 @@ Rectangle {
         if (!enabled) {
             return Theme.borderSoft
         }
-        return primary ? Theme.accent : Theme.border
+        return primary ? Theme.accent : (mouse.containsMouse ? Theme.edge : Theme.border)
     }
 
     Text {
@@ -41,6 +41,7 @@ Rectangle {
             return button.primary ? Theme.textBright : Theme.text
         }
         font.pixelSize: Theme.fontSizeM
+        font.bold: button.primary
     }
 
     MouseArea {

@@ -8,7 +8,7 @@ Rectangle {
     radius: Theme.radiusS
     height: 24
 
-    Text { anchors.left: parent.left; anchors.leftMargin: 10; anchors.verticalCenter: parent.verticalCenter; text: "Espacio · Play/Pausa      Ctrl+I · Importar      Inicio/Fin · Buscar"; color: Theme.faint; font.pixelSize: Theme.fontSizeS }
+    Text { anchors.left: parent.left; anchors.leftMargin: 10; anchors.verticalCenter: parent.verticalCenter; text: "Espacio reproducir/pausar   ·   Ctrl+I importar   ·   Inicio/Fin navegar"; color: Theme.faint; font.pixelSize: Theme.fontSizeS }
     Row {
         anchors.right: parent.right
         anchors.rightMargin: 10

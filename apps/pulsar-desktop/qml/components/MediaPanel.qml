@@ -44,10 +44,10 @@ Panel {
     }
 
     Rectangle { anchors.left: parent.left; anchors.top: parent.top; width: 3; height: 16; color: Theme.accent; opacity: 0.8 }
-    SectionLabel { id: title; anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top; anchors.leftMargin: 10; anchors.rightMargin: 10; anchors.topMargin: 10; text: "MEDIA BIN" }
-    PButton { id: importButton; anchors.left: parent.left; anchors.right: parent.right; anchors.top: title.bottom; anchors.leftMargin: 10; anchors.rightMargin: 10; anchors.topMargin: 8; text: "+  IMPORTAR"; primary: true; onClicked: controller.importRequested() }
+    SectionLabel { id: title; anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top; anchors.leftMargin: 10; anchors.rightMargin: 10; anchors.topMargin: 10; text: "MEDIOS" }
+    PButton { id: importButton; anchors.left: parent.left; anchors.right: parent.right; anchors.top: title.bottom; anchors.leftMargin: 10; anchors.rightMargin: 10; anchors.topMargin: 8; text: "+  IMPORTAR MEDIO"; primary: true; onClicked: controller.importRequested() }
 
-    SectionLabel { id: sessionLabel; anchors.left: parent.left; anchors.right: parent.right; anchors.top: importButton.bottom; anchors.leftMargin: 10; anchors.rightMargin: 10; anchors.topMargin: 14; text: "ACTIVE SOURCE" }
+    SectionLabel { id: sessionLabel; anchors.left: parent.left; anchors.right: parent.right; anchors.top: importButton.bottom; anchors.leftMargin: 10; anchors.rightMargin: 10; anchors.topMargin: 14; text: "FUENTE ACTIVA" }
     Rectangle {
         anchors.left: parent.left; anchors.right: parent.right; anchors.top: sessionLabel.bottom; anchors.leftMargin: 10; anchors.rightMargin: 10; anchors.topMargin: 8
         height: cardCol.height + 18
@@ -62,17 +62,17 @@ Panel {
                 width: parent.width
                 spacing: 7
                 StatusDot { anchors.verticalCenter: parent.verticalCenter; tone: controller.hasMedia ? "live" : "idle" }
-                PText { width: parent.width - 14; anchors.verticalCenter: parent.verticalCenter; text: controller.hasMedia ? controller.mediaName : "Sin medios"; color: controller.hasMedia ? Theme.textBright : Theme.muted }
+                PText { width: parent.width - 14; anchors.verticalCenter: parent.verticalCenter; text: controller.hasMedia ? controller.mediaName : "Sin medios cargados"; color: controller.hasMedia ? Theme.textBright : Theme.muted }
             }
             PMuted { width: parent.width; text: mediaPanel.subInfo; wrapMode: Text.WordWrap }
         }
     }
 
     Rectangle { id: manualSep; anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: pathRow.top; anchors.leftMargin: 10; anchors.rightMargin: 10; anchors.bottomMargin: 8; height: 1; color: Theme.borderSoft }
-    SectionLabel { id: manualTitle; anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: manualSep.top; anchors.leftMargin: 10; anchors.rightMargin: 10; anchors.bottomMargin: 8; text: "SOURCE PATH" }
+    SectionLabel { id: manualTitle; anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: manualSep.top; anchors.leftMargin: 10; anchors.rightMargin: 10; anchors.bottomMargin: 8; text: "AVANZADO · RUTA DEL MEDIO"; opacity: 0.72 }
     Row {
         id: pathRow
-        anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; anchors.leftMargin: 10; anchors.rightMargin: 10; anchors.bottomMargin: 10
+        anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; anchors.leftMargin: 10; anchors.rightMargin: 10; anchors.bottomMargin: 10; opacity: 0.82
         spacing: 6
         Rectangle {
             id: pathBox

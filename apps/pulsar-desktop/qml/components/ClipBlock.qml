@@ -28,10 +28,10 @@ Rectangle {
 
     x: canonicalStartX + previewOffset
     width: Math.max(3, canonicalWidth + trimWidthDelta)
-    color: missing ? "#302126" : (selected ? Theme.clipSelected : (body.containsMouse ? Theme.clipHover : Theme.clipBase))
+    color: missing ? Theme.missingClip : (selected ? Theme.clipSelected : (body.containsMouse ? Theme.clipHover : Theme.clipBase))
     border.color: missing ? Theme.danger : (selected ? Theme.accent : (body.containsMouse ? Theme.edge : Theme.border))
     border.width: selected ? 2 : 1
-    radius: Theme.radiusS
+    radius: Theme.radiusM
     clip: true
 
     Rectangle { anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top; height: 2; color: missing ? Theme.danger : (selected ? Theme.accent : Theme.edge); opacity: selected || missing ? 0.9 : 0.5 }

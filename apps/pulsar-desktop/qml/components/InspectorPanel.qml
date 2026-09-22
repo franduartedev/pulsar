@@ -87,6 +87,45 @@ Panel {
             width: parent.width
             spacing: 12
             Text { visible: metaGroups.length === 0; width: parent.width; text: "Abrí un medio para ver metadata real."; color: Theme.muted; font.pixelSize: Theme.fontSizeM; wrapMode: Text.WordWrap }
+            Column {
+                visible: controller.selectedClipKey.length > 0
+                width: parent.width
+                spacing: 6
+                SectionLabel { width: parent.width; text: "AUDIO DEL CLIP" }
+                Rectangle { width: parent.width; height: 1; color: Theme.borderSoft }
+                Row {
+                    width: parent.width
+                    spacing: 6
+                    Text { text: "Ganancia"; color: Theme.faint; font.pixelSize: Theme.fontSizeS; anchors.verticalCenter: parent.verticalCenter }
+                    Rectangle {
+                        width: 72
+                        height: Theme.controlHeightSmall
+                        color: Theme.input
+                        border.width: 1
+                        border.color: gainInput.activeFocus ? Theme.focus : Theme.border
+                        radius: Theme.radiusS
+                        TextInput {
+                            id: gainInput
+                            anchors.fill: parent
+                            anchors.leftMargin: 6
+                            anchors.rightMargin: 6
+                            color: Theme.text
+                            font.pixelSize: Theme.fontSizeM
+                            inputMethodHints: Qt.ImhFormattedNumbersOnly
+                            text: Number(controller.selectedClipGainDb).toFixed(1)
+                            selectByMouse: true
+                            onEditingFinished: controller.setSelectedClipGainDb(Number(text))
+                        }
+                    }
+                    Text { text: "dB"; color: Theme.faint; font.pixelSize: Theme.fontSizeS; anchors.verticalCenter: parent.verticalCenter }
+                    PButton {
+                        width: 92; height: Theme.controlHeightSmall
+                        text: controller.selectedClipMuted ? "Activar" : "Silenciar"
+                        onClicked: controller.toggleSelectedClipMute()
+                    }
+                }
+                Text { width: parent.width; text: "Rango: -60 a +12 dB"; color: Theme.faint; font.pixelSize: Theme.fontSizeXS; wrapMode: Text.WordWrap }
+            }
             Repeater {
                 model: metaGroups
                 delegate: Column {
@@ -118,39 +157,19 @@ Panel {
                 Text { id: errorText; width: parent.width - 10; text: controller.errorMessage; color: Theme.danger; font.pixelSize: Theme.fontSizeM; wrapMode: Text.WordWrap }
             }
             Column {
-                visible: controller.selectedClipKey.length > 0
                 width: parent.width
                 spacing: 6
-                SectionLabel { width: parent.width; text: "AUDIO CLIP" }
-                Rectangle { width: parent.width; height: 1; color: Theme.borderSoft }
-                Row {
+                Rectangle {
                     width: parent.width
-                    spacing: 6
-                    Text { text: "Gain"; color: Theme.faint; font.pixelSize: Theme.fontSizeS; anchors.verticalCenter: parent.verticalCenter }
-                    TextInput {
-                        id: gainInput
-                        width: 72
-                        color: Theme.text
-                        font.pixelSize: Theme.fontSizeM
-                        inputMethodHints: Qt.ImhFormattedNumbersOnly
-                        text: Number(controller.selectedClipGainDb).toFixed(1)
-                        selectByMouse: true
-                        onEditingFinished: controller.setSelectedClipGainDb(Number(text))
-                    }
-                    Text { text: "dB"; color: Theme.faint; font.pixelSize: Theme.fontSizeS; anchors.verticalCenter: parent.verticalCenter }
-                    PButton {
-                        width: 76; height: 24
-                        text: controller.selectedClipMuted ? "Unmute" : "Mute"
-                        onClicked: controller.toggleSelectedClipMute()
-                    }
+                    height: diagnosticLabel.height + diagnosticText.height + 16
+                    color: Theme.panelAlt
+                    border.width: 1
+                    border.color: Theme.borderSoft
+                    radius: Theme.radiusS
+                    opacity: 0.82
+                    SectionLabel { id: diagnosticLabel; x: 8; y: 6; text: "DIAGNÓSTICO"; opacity: 0.65 }
+                    Text { id: diagnosticText; x: 8; y: diagnosticLabel.bottom + 4; width: parent.width - 16; text: controller.debugMetrics; color: Theme.faint; font.pixelSize: Theme.fontSizeXS; wrapMode: Text.WordWrap }
                 }
-                Text { width: parent.width; text: "-60 to +12 dB; mute preserves gain"; color: Theme.faint; font.pixelSize: Theme.fontSizeXS; wrapMode: Text.WordWrap }
-            }
-            Column {
-                width: parent.width
-                spacing: 4
-                SectionLabel { width: parent.width; text: "DIAGNÓSTICO"; opacity: 0.65 }
-                Text { width: parent.width; text: controller.debugMetrics; opacity: 0.7; color: Theme.faint; font.pixelSize: Theme.fontSizeXS; wrapMode: Text.WordWrap }
             }
         }
     }

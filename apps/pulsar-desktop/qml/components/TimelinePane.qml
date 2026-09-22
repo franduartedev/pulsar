@@ -12,7 +12,7 @@ Panel {
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.top: parent.top
-        height: 36
+        height: 38
         color: Theme.surfaceRaised
         Rectangle { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; height: 1; color: Theme.border; opacity: 0.8 }
             Row {
@@ -20,33 +20,32 @@ Panel {
             anchors.leftMargin: 14
             anchors.verticalCenter: parent.verticalCenter
             spacing: 8
-            Text { text: "EDIT"; color: Theme.textBright; font.pixelSize: Theme.fontSizeS; font.bold: true; font.letterSpacing: 1.8 }
-            Text { text: controller.timelineDurationText; color: Theme.faint; font.family: "monospace"; font.pixelSize: Theme.fontSizeS }
+            Text { text: "EDICIÓN"; color: Theme.textBright; font.pixelSize: Theme.fontSizeS; font.bold: true; font.letterSpacing: 1.6 }
             Rectangle { width: 1; height: 16; color: Theme.border; opacity: 0.8 }
-            PButton { text: "Split"; enabled: controller.canSplit; width: 58; height: 24; onClicked: controller.splitSelectedClip() }
-            PButton { text: "Delete"; enabled: controller.selectedClipKey.length > 0; width: 62; height: 24; onClicked: controller.deleteSelectedClip() }
-            PButton { text: "Undo"; enabled: controller.canUndo; width: 56; height: 24; onClicked: controller.undoEdit() }
-            PButton { text: "Redo"; enabled: controller.canRedo; width: 56; height: 24; onClicked: controller.redoEdit() }
+            PButton { text: "Cortar"; enabled: controller.canSplit; width: 62; height: Theme.controlHeightSmall; onClicked: controller.splitSelectedClip() }
+            PButton { text: "Borrar"; enabled: controller.selectedClipKey.length > 0; width: 62; height: Theme.controlHeightSmall; onClicked: controller.deleteSelectedClip() }
+            PButton { text: "Deshacer"; enabled: controller.canUndo; width: 72; height: Theme.controlHeightSmall; onClicked: controller.undoEdit() }
+            PButton { text: "Rehacer"; enabled: controller.canRedo; width: 68; height: Theme.controlHeightSmall; onClicked: controller.redoEdit() }
         }
         Row {
             anchors.right: parent.right
             anchors.rightMargin: 14
             anchors.verticalCenter: parent.verticalCenter
             spacing: 8
-            Text { text: "ZOOM"; color: Theme.faint; font.pixelSize: Theme.fontSizeXS; anchors.verticalCenter: parent.verticalCenter }
+            Text { text: "Zoom"; color: Theme.muted; font.pixelSize: Theme.fontSizeXS; anchors.verticalCenter: parent.verticalCenter }
             Rectangle {
-                width: 112; height: 18; radius: 3; color: Theme.lane; anchors.verticalCenter: parent.verticalCenter
-                Rectangle { x: (Math.log(controller.timelineZoom) / Math.LN10 / 7) * (parent.width - width); y: 6; width: 10; height: 6; radius: 3; color: Theme.accent }
+                width: 112; height: 20; radius: Theme.radiusS; color: Theme.track; anchors.verticalCenter: parent.verticalCenter
+                Rectangle { x: (Math.log(controller.timelineZoom) / Math.LN10 / 7) * (parent.width - width); y: 5; width: 12; height: 10; radius: 5; color: Theme.accent }
                 MouseArea {
                     anchors.fill: parent
                     onPressed: function(mouse) { controller.setTimelineZoom(Math.pow(10, 7 * Math.max(0, Math.min(1, mouse.x / width)))) }
                     onPositionChanged: function(mouse) { if (pressed) controller.setTimelineZoom(Math.pow(10, 7 * Math.max(0, Math.min(1, mouse.x / width)))) }
                 }
             }
-            Text { text: "PAN"; color: Theme.faint; font.pixelSize: Theme.fontSizeXS; anchors.verticalCenter: parent.verticalCenter }
+            Text { text: "Pan"; color: controller.timelineZoom > 1.0 ? Theme.muted : Theme.disabledText; font.pixelSize: Theme.fontSizeXS; anchors.verticalCenter: parent.verticalCenter }
             Rectangle {
-                width: 90; height: 18; radius: 3; color: Theme.lane; opacity: controller.timelineZoom > 1.0 ? 1.0 : 0.45; anchors.verticalCenter: parent.verticalCenter
-                Rectangle { x: controller.timelineScroll * (parent.width - width); y: 5; width: 14; height: 8; radius: 3; color: Theme.waveform }
+                width: 90; height: 20; radius: Theme.radiusS; color: Theme.track; opacity: controller.timelineZoom > 1.0 ? 1.0 : 0.42; anchors.verticalCenter: parent.verticalCenter
+                Rectangle { x: controller.timelineScroll * (parent.width - width); y: 5; width: 14; height: 10; radius: 4; color: controller.timelineZoom > 1.0 ? Theme.waveform : Theme.disabledText }
                 MouseArea {
                     anchors.fill: parent
                     enabled: controller.timelineZoom > 1.0
@@ -54,17 +53,16 @@ Panel {
                     onPositionChanged: function(mouse) { if (pressed) controller.setTimelineScroll(Math.max(0, Math.min(1, mouse.x / width))) }
                 }
             }
-            Text { text: "DETAIL %1x".arg(controller.waveformDensity.toFixed(1)); color: Theme.faint; font.pixelSize: Theme.fontSizeXS; anchors.verticalCenter: parent.verticalCenter }
+            Text { text: "Detalle %1x".arg(controller.waveformDensity.toFixed(1)); color: Theme.muted; font.pixelSize: Theme.fontSizeXS; anchors.verticalCenter: parent.verticalCenter }
             Rectangle {
-                width: 72; height: 18; radius: 3; color: Theme.lane; anchors.verticalCenter: parent.verticalCenter
-                Rectangle { x: ((controller.waveformDensity - 0.5) / 1.5) * (parent.width - width); y: 5; width: 12; height: 8; radius: 3; color: Theme.waveform }
+                width: 72; height: 20; radius: Theme.radiusS; color: Theme.track; anchors.verticalCenter: parent.verticalCenter
+                Rectangle { x: ((controller.waveformDensity - 0.5) / 1.5) * (parent.width - width); y: 5; width: 12; height: 10; radius: 4; color: Theme.waveform }
                 MouseArea {
                     anchors.fill: parent
                     onPressed: function(mouse) { controller.setWaveformDensity(0.5 + 1.5 * Math.max(0, Math.min(1, mouse.x / width))) }
                     onPositionChanged: function(mouse) { if (pressed) controller.setWaveformDensity(0.5 + 1.5 * Math.max(0, Math.min(1, mouse.x / width))) }
                 }
             }
-            Text { text: "V1 · VIDEO"; color: Theme.faint; font.pixelSize: Theme.fontSizeXS; font.letterSpacing: 1.2; anchors.verticalCenter: parent.verticalCenter }
         }
     }
 
@@ -101,8 +99,7 @@ Panel {
         Rectangle { anchors.fill: parent; color: Theme.lane }
         Rectangle { width: pane.gutterWidth; anchors.top: parent.top; anchors.bottom: parent.bottom; color: Theme.surfaceRaised; opacity: 0.72 }
         Rectangle { x: pane.gutterWidth; anchors.top: parent.top; anchors.bottom: parent.bottom; width: 1; color: Theme.border; opacity: 0.9 }
-        Text { x: 15; y: 14; text: "V1"; color: Theme.text; font.pixelSize: Theme.fontSizeM; font.bold: true; font.letterSpacing: 1.2 }
-        Text { x: 15; y: 33; text: "VIDEO"; color: Theme.faint; font.pixelSize: Theme.fontSizeXS; font.letterSpacing: 1.1 }
+        Text { x: 15; y: 20; text: "VIDEO 1"; color: Theme.text; font.pixelSize: Theme.fontSizeS; font.bold: true; font.letterSpacing: 1.1 }
 
         Item {
             id: contentArea

@@ -34,6 +34,7 @@ var buttonBase     = "#131c27"
 var clipBase        = "#1a2838"
 var clipHover       = "#22354a"
 var clipSelected    = "#243e62"
+var missingClip     = "#302126"
 var buttonHover    = "#182232"
 var buttonPressed  = "#1d2a38"
 var buttonDisabled = "#10151c"
@@ -55,6 +56,18 @@ var badge = "#aa101820"
 // Geometry
 var radiusS = 2
 var radiusM = 3
+var radiusL = 4
+
+// Workspace rhythm
+var spaceXS = 4
+var spaceS = 8
+var spaceM = 12
+var spaceL = 16
+var controlHeight = 28
+var controlHeightSmall = 24
+var panelPadding = 12
+var focus = "#8db8ff"
+var disabledText = "#566170"
 
 // Font sizes
 var fontSizeXS = 10

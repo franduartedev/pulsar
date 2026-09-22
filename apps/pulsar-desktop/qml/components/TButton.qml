@@ -10,8 +10,8 @@ Rectangle {
     signal clicked()
 
     width: dominant ? 58 : 44
-    height: 38
-    radius: Theme.radiusS
+    height: 40
+    radius: Theme.radiusM
     color: {
         if (!enabled) {
             return Theme.buttonDisabled

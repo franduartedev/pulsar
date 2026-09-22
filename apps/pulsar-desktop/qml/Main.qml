@@ -17,8 +17,8 @@ Window {
     color: Theme.workspace
 
     // Viewer stays dominant: side panels take bounded relative slices.
-    property real mediaWidth: Math.max(220, Math.min(250, width * 0.16))
-    property real inspectorWidth: Math.max(260, Math.min(300, width * 0.19))
+    property real mediaWidth: Math.max(220, Math.min(272, width * 0.17))
+    property real inspectorWidth: Math.max(248, Math.min(304, width * 0.19))
 
     Shortcut { sequence: "Space"; onActivated: controller.togglePlayback() }
     Shortcut { sequence: "Ctrl+I"; onActivated: controller.importRequested() }
@@ -85,7 +85,7 @@ Window {
             anchors.fill: parent
             anchors.margins: 1
             spacing: 0
-            ViewerPane { width: parent.width; height: parent.height - transportBar.height - 1 }
+            ViewerPane { width: parent.width; height: Math.max(150, parent.height - transportBar.height - 1) }
             Rectangle { width: parent.width; height: 1; color: Theme.edge; opacity: 0.55 }
             TransportBar { id: transportBar; width: parent.width; height: 64 }
         }
@@ -96,8 +96,8 @@ Window {
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.bottom: timelinePane.top
-        anchors.margins: 12
-        height: 62
+        anchors.margins: Theme.panelPadding
+        height: 56
     }
 
     TimelinePane {
@@ -108,7 +108,7 @@ Window {
         anchors.leftMargin: 12
         anchors.rightMargin: 12
         anchors.bottomMargin: 12
-        height: 220
+        height: Math.max(196, Math.min(248, root.height * 0.29))
     }
 
     StatusBar {
