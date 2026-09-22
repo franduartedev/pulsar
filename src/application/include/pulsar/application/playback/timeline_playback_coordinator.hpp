@@ -118,6 +118,9 @@ public:
   [[nodiscard]] PlaybackSemanticCondition semantic_condition() const noexcept {
     return semantic_condition_;
   }
+  [[nodiscard]] const AudioMixPlaybackMetrics& audio_metrics() const noexcept {
+    return audio_session_->metrics();
+  }
 
 private:
   enum class SegmentKind {

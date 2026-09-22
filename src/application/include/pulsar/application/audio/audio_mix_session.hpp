@@ -63,6 +63,11 @@ struct AudioMixMetrics {
   std::size_t peak_queued_frames{0};
   std::uint64_t source_opens{0};
   std::uint64_t decoded_blocks{0};
+  std::uint64_t timestamp_observations{0};
+  std::uint64_t timestamp_positive_deltas{0};
+  std::uint64_t timestamp_negative_deltas{0};
+  std::uint64_t timestamp_inserted_silence_frames{0};
+  std::uint64_t timestamp_trimmed_frames{0};
 };
 
 // Application-owned preview mixer. It emits one canonical Float32 interleaved
@@ -116,6 +121,7 @@ private:
   std::vector<std::unique_ptr<SourceState>> sources_;
   std::optional<domain::MediaTime> next_timeline_position_;
   std::uint64_t generation_{0};
+  std::uint64_t timestamp_trace_count_{0};
   AudioMixMetrics metrics_;
 };
 

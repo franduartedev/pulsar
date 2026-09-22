@@ -6,6 +6,7 @@ import "../theme/Theme.js" as Theme
 // Lives inside the monitor module frame composed by Main.qml.
 Item {
     id: pane
+    signal importRequested()
 
     Text { id: originLabel; anchors.left: parent.left; anchors.leftMargin: 12; anchors.verticalCenter: chromeCenter.verticalCenter; text: "VISOR"; color: Theme.faint; font.pixelSize: Theme.fontSizeS; font.letterSpacing: 1.5 }
     Text {
@@ -54,7 +55,7 @@ Item {
             Text { anchors.horizontalCenter: parent.horizontalCenter; text: controller.viewerState === "gap" ? "ESPACIO VACÍO" : (controller.viewerState === "missing" ? "MEDIO NO DISPONIBLE" : (controller.viewerState === "ended" ? "FIN DEL PROGRAMA" : "SIN SEÑAL")); color: Theme.muted; font.pixelSize: Theme.fontSizeS; font.letterSpacing: 2 }
             Rectangle { anchors.horizontalCenter: parent.horizontalCenter; width: 56; height: 2; color: Theme.accent; opacity: 0.55 }
             Text { anchors.horizontalCenter: parent.horizontalCenter; text: controller.viewerState === "loading" ? "Preparando presentación…" : (controller.viewerState === "error" ? "No se pudo presentar este segmento" : (controller.busy ? "Preparando medio…" : "Importá o arrastrá un medio")); color: Theme.muted; font.pixelSize: Theme.fontSizeL }
-            PButton { anchors.horizontalCenter: parent.horizontalCenter; width: 170; text: "IMPORTAR MEDIO"; primary: true; onClicked: controller.importRequested() }
+            PButton { anchors.horizontalCenter: parent.horizontalCenter; width: 170; text: "IMPORTAR MEDIO"; primary: true; onClicked: pane.importRequested() }
             PMuted { anchors.horizontalCenter: parent.horizontalCenter; text: "Espacio · reproducir / pausar"; color: Theme.faint }
         }
         Text {

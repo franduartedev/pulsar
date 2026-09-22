@@ -222,6 +222,10 @@ void mix_alignment_gain_mute_and_clipping() {
   application::AudioMixSession mixer{bank.factory()};
   mixer.configure(std::move(project));
   const auto result = mixer.render(frames(0), 1024);
+  const auto& metrics = mixer.metrics();
+  assert(metrics.timestamp_observations > 0);
+  assert(metrics.timestamp_inserted_silence_frames == 0);
+  assert(metrics.timestamp_trimmed_frames == 0);
   assert(result.mixed_contributors == 2);
   assert(result.usable_contributors == 3);
   assert_near(left(result.block, 100), 0.25F);

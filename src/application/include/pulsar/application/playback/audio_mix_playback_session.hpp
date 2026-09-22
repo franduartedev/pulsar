@@ -48,8 +48,11 @@ public:
   [[nodiscard]] const AudioMixPlaybackMetrics& metrics() const noexcept { return metrics_; }
 
 private:
-  static constexpr std::uint64_t start_buffer_frames = 4'800;
-  static constexpr std::uint64_t refill_buffer_frames = 1'920;
+  static constexpr std::uint64_t start_buffer_frames = 9'600;
+  // The desktop update cadence and video presentation can consume more than
+  // a 40/100 ms reserve. Keep refill below the bounded 250 ms cap while
+  // leaving enough margin for a compressed-source decode burst.
+  static constexpr std::uint64_t refill_buffer_frames = 9'600;
   static constexpr std::uint64_t maximum_buffer_frames = 12'000;
 
   [[nodiscard]] std::uint64_t buffered_device_frames() const;

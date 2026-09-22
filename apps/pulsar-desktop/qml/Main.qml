@@ -91,7 +91,11 @@ Window {
             anchors.fill: parent
             anchors.margins: 1
             spacing: 0
-            ViewerPane { width: parent.width; height: Math.max(150, parent.height - transportBar.height - 1) }
+            ViewerPane {
+                width: parent.width
+                height: Math.max(150, parent.height - transportBar.height - 1)
+                onImportRequested: fileDialog.open()
+            }
             Rectangle { width: parent.width; height: 1; color: Theme.edge; opacity: 0.55 }
             TransportBar { id: transportBar; width: parent.width; height: 64 }
         }

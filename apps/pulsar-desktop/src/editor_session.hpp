@@ -94,6 +94,9 @@ public:
   void pause();
   [[nodiscard]] application::TimelinePresentation update_playback();
   [[nodiscard]] application::PlaybackIntent playback_intent() const noexcept;
+  [[nodiscard]] const application::AudioMixPlaybackMetrics& audio_metrics() const noexcept {
+    return coordinator_.audio_metrics();
+  }
   void seek(domain::MediaTime position);
   [[nodiscard]] domain::MediaTime playback_position() const;
   void move_clip(domain::ClipId clip, double press_pixel, double current_pixel, double width);

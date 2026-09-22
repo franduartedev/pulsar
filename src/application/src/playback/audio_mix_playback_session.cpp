@@ -135,7 +135,28 @@ void AudioMixPlaybackSession::pause() {
 
 void AudioMixPlaybackSession::update(domain::MediaTime timeline_position) {
   if (!snapshot_.has_value() || !requested_playing_) return;
-  if (!audio_ahead_ && output_ != nullptr &&
+  bool recovered_from_underrun = false;
+  if (output_ != nullptr) {
+    const auto output_metrics = output_->metrics();
+    if (output_metrics.underrun_count > observed_underruns_) {
+      observed_underruns_ = output_metrics.underrun_count;
+      output_->stop();
+      // stop() owns the output queue flush. Keep the mixer cursor: its source
+      // PCM is already sequentially aligned with render_position_, whereas
+      // reopening a compressed source here would force an expensive codec
+      // seek/preroll on every underrun. A global seek/edit still resets the
+      // mixer through seek()/configure() and remains the discontinuity boundary.
+      output_buffer_start_ = render_position_.value_or(timeline_position);
+      audio_ahead_ = false;
+      last_usable_contributors_ = 0;
+      // AudioOutputEngine resets session counters as part of stop().
+      observed_underruns_ = 0;
+      ++metrics_.clock_transitions;
+      set_condition(AudioPlaybackCondition::Recovering);
+      recovered_from_underrun = true;
+    }
+  }
+  if (!recovered_from_underrun && !audio_ahead_ && output_ != nullptr &&
       output_->state() != AudioOutputState::Running) {
     render_position_ = timeline_position;
   }

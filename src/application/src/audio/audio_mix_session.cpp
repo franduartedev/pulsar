@@ -5,6 +5,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
+#include <iostream>
 #include <limits>
 #include <stdexcept>
 #include <utility>
@@ -114,6 +116,32 @@ namespace {
   return lhs.clip_id.value() < rhs.clip_id.value();
 }
 
+void trace_timestamp(const AudioContributor& contributor, domain::MediaTime block_start,
+                     domain::MediaTime expected, std::size_t block_frames, int sample_rate,
+                     std::size_t inserted_silence, std::size_t trimmed,
+                     std::optional<domain::MediaTime> stream_origin,
+                     domain::MediaTime initial_seek_target, std::uint64_t& trace_count) {
+  const auto* enabled = std::getenv("PULSAR_AUDIO_TIMESTAMP_TRACE");
+  if (enabled == nullptr || *enabled == '\0' || trace_count >= 32) return;
+  ++trace_count;
+  const auto delta = block_start - expected;
+  const auto print_time = [](domain::MediaTime time) {
+    const auto seconds = time.seconds();
+    return std::to_string(seconds.numerator()) + "/" +
+           std::to_string(seconds.denominator());
+  };
+  std::clog << "audio_timestamp contributor=" << contributor.clip_id.value()
+            << " block_start=" << print_time(block_start)
+            << " expected=" << print_time(expected)
+            << " delta=" << print_time(delta) << " block_frames=" << block_frames
+            << " sample_rate=" << sample_rate
+            << " inserted_silence_frames=" << inserted_silence
+            << " trimmed_frames=" << trimmed
+            << " stream_origin="
+            << (stream_origin.has_value() ? print_time(*stream_origin) : "none")
+            << " initial_seek_target=" << print_time(initial_seek_target) << '\n';
+}
+
 } // namespace
 
 class AudioMixSession::SourceState final {
@@ -121,10 +149,12 @@ public:
   SourceState(AudioContributor identity, std::unique_ptr<AudioPlaybackSource> opened_source,
               std::unique_ptr<StreamingAudioConverter> opened_converter,
               domain::MediaTime timeline_position,
-              domain::MediaTime source_target)
+              domain::MediaTime source_target,
+              std::optional<domain::MediaTime> origin)
       : contributor{std::move(identity)}, source{std::move(opened_source)},
         converter{std::move(opened_converter)}, next_timeline{timeline_position},
-        expected_source_timestamp{source_target} {}
+        expected_source_timestamp{source_target}, stream_origin{origin},
+        initial_seek_target{source_target} {}
 
   [[nodiscard]] std::size_t queued_frames(int channels) const noexcept {
     return (pcm.size() - pcm_offset) / static_cast<std::size_t>(channels);
@@ -146,6 +176,8 @@ public:
   std::unique_ptr<StreamingAudioConverter> converter;
   domain::MediaTime next_timeline;
   std::optional<domain::MediaTime> expected_source_timestamp;
+  std::optional<domain::MediaTime> stream_origin;
+  domain::MediaTime initial_seek_target;
   std::vector<float> pcm;
   std::size_t pcm_offset{0};
   bool eof{false};
@@ -287,7 +319,8 @@ AudioMixSession::SourceState* AudioMixSession::open_source(
     return nullptr;
   }
   auto state = std::make_unique<SourceState>(contributor, std::move(source),
-                                             std::move(converter), timeline_position, target);
+                                             std::move(converter), timeline_position, target,
+                                             origin);
   auto* result = state.get();
   sources_.push_back(std::move(state));
   ++metrics_.source_opens;
@@ -478,11 +511,25 @@ AudioMixRenderResult AudioMixSession::render(domain::MediaTime timeline_position
                                                  static_cast<std::int64_t>(block.frame_count()),
                                                  domain::Rational{1, block.sample_rate()}};
         const auto target = *state->expected_source_timestamp;
+        ++metrics_.timestamp_observations;
+        const auto delta = block_start - target;
+        if (delta > domain::MediaTime::zero()) {
+          ++metrics_.timestamp_positive_deltas;
+        } else if (delta < domain::MediaTime::zero()) {
+          ++metrics_.timestamp_negative_deltas;
+        }
         if (block_end <= target) {
+          trace_timestamp(contributor, block_start, target, block.frame_count(),
+                          block.sample_rate(), 0, block.frame_count(), state->stream_origin,
+                          state->initial_seek_target, timestamp_trace_count_);
           continue;
         }
+        std::size_t inserted_silence = 0;
+        std::size_t trimmed_frames = 0;
         if (block_start > target) {
           const auto silence_frames = frames_floor(block_start - target, block.sample_rate());
+          inserted_silence = silence_frames;
+          metrics_.timestamp_inserted_silence_frames += silence_frames;
           if (silence_frames > 0) {
             AudioBlock silence{block.sample_rate(), block.channel_count(), silence_frames,
                                std::vector<float>(checked_sample_count(
@@ -501,14 +548,19 @@ AudioMixRenderResult AudioMixSession::render(domain::MediaTime timeline_position
         } else if (block_start < target) {
           const auto trim = std::min(block.frame_count(),
                                      frames_floor(target - block_start, block.sample_rate()));
+          trimmed_frames = trim;
+          metrics_.timestamp_trimmed_frames += trim;
           const auto first = trim * static_cast<std::size_t>(block.channel_count());
           block = AudioBlock{block.sample_rate(), block.channel_count(),
                              block.frame_count() - trim,
                              std::vector<float>(block.samples().begin() +
                                                     static_cast<std::ptrdiff_t>(first),
                                                 block.samples().end()),
-                             block.time_base(), std::nullopt};
+                                                  block.time_base(), std::nullopt};
         }
+        trace_timestamp(contributor, block_start, target, block.frame_count(),
+                        block.sample_rate(), inserted_silence, trimmed_frames,
+                        state->stream_origin, state->initial_seek_target, timestamp_trace_count_);
         state->expected_source_timestamp = block_end;
       }
       if (block.frame_count() != 0) {

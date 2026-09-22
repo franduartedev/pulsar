@@ -800,7 +800,24 @@ void DesktopController::publishProjectDirty() {
   published_project_dirty_ = now;
   emit projectDirtyChanged();
 }
-void DesktopController::updateDiagnostics(){debug_metrics_=QString("program_frames=%1 visual_misses=%2 conversion_ms=%3 waveform_queries=%4 waveform_segments=%5").arg(displayed_frames_).arg(visual_misses_).arg(std::chrono::duration_cast<std::chrono::milliseconds>(last_conversion_time_).count()).arg(waveform_query_count_).arg(waveform_segment_count_);emit diagnosticsChanged();}
+void DesktopController::updateDiagnostics(){
+  const auto audio = active_session_ != nullptr ? active_session_->audio_metrics()
+                                                 : pulsar::application::AudioMixPlaybackMetrics{};
+  const auto submitted = audio.output.device_frames_submitted;
+  const auto processed = audio.output.device_frames_processed;
+  const auto in_flight = submitted >= processed ? submitted - processed : 0;
+  debug_metrics_=QString("program_frames=%1 visual_misses=%2 conversion_ms=%3 waveform_queries=%4 waveform_segments=%5 audio_underruns=%6 audio_buffered=%7 audio_in_flight=%8 audio_render_p50_us=%9 audio_render_p95_us=%10 audio_render_max_us=%11 audio_source_opens=%12 audio_live_sources=%13 audio_clock_transitions=%14 audio_ts_obs=%15 audio_ts_silence=%16 audio_ts_trim=%17")
+      .arg(displayed_frames_).arg(visual_misses_)
+      .arg(std::chrono::duration_cast<std::chrono::milliseconds>(last_conversion_time_).count())
+      .arg(waveform_query_count_).arg(waveform_segment_count_)
+      .arg(audio.output.underrun_count).arg(audio.output.buffered_device_frames)
+      .arg(in_flight).arg(audio.render_p50_us).arg(audio.render_p95_us).arg(audio.render_max_us)
+      .arg(audio.mixer.source_opens).arg(audio.mixer.live_sources).arg(audio.clock_transitions)
+      .arg(audio.mixer.timestamp_observations)
+      .arg(audio.mixer.timestamp_inserted_silence_frames)
+      .arg(audio.mixer.timestamp_trimmed_frames);
+  emit diagnosticsChanged();
+}
 QString DesktopController::performanceSnapshot() const {
   auto summarize = [](const DurationSampleRing& ring) {
     auto sorted = ring.snapshot();
@@ -859,6 +876,26 @@ QString DesktopController::performanceSnapshot() const {
   lines << QStringLiteral("desktop.mailbox_evicted=%1").arg(mailbox.evicted);
   lines << QStringLiteral("desktop.mailbox_high_water=%1").arg(mailbox.high_water_mark);
   lines << QStringLiteral("desktop.mailbox_current_size=%1").arg(mailbox.current_size);
+  if (active_session_ != nullptr) {
+    const auto& audio = active_session_->audio_metrics();
+    const auto submitted = audio.output.device_frames_submitted;
+    const auto processed = audio.output.device_frames_processed;
+    const auto in_flight = submitted >= processed ? submitted - processed : 0;
+    lines << QStringLiteral("audio.underruns=%1").arg(audio.output.underrun_count);
+    lines << QStringLiteral("audio.buffered_device_frames=%1").arg(audio.output.buffered_device_frames);
+    lines << QStringLiteral("audio.in_flight_frames=%1").arg(in_flight);
+    lines << QStringLiteral("audio.render_p50_us=%1").arg(audio.render_p50_us);
+    lines << QStringLiteral("audio.render_p95_us=%1").arg(audio.render_p95_us);
+    lines << QStringLiteral("audio.render_max_us=%1").arg(audio.render_max_us);
+    lines << QStringLiteral("audio.source_opens=%1").arg(audio.mixer.source_opens);
+    lines << QStringLiteral("audio.live_sources=%1").arg(audio.mixer.live_sources);
+    lines << QStringLiteral("audio.clock_transitions=%1").arg(audio.clock_transitions);
+    lines << QStringLiteral("audio.timestamp_observations=%1").arg(audio.mixer.timestamp_observations);
+    lines << QStringLiteral("audio.timestamp_positive_deltas=%1").arg(audio.mixer.timestamp_positive_deltas);
+    lines << QStringLiteral("audio.timestamp_negative_deltas=%1").arg(audio.mixer.timestamp_negative_deltas);
+    lines << QStringLiteral("audio.timestamp_inserted_silence_frames=%1").arg(audio.mixer.timestamp_inserted_silence_frames);
+    lines << QStringLiteral("audio.timestamp_trimmed_frames=%1").arg(audio.mixer.timestamp_trimmed_frames);
+  }
   return lines.join(QLatin1Char('\n'));
 }
 void DesktopController::setBusy(bool value){if(busy_==value)return;busy_=value;emit busyChanged();}void DesktopController::setStatus(QString value){if(status_==value)return;status_=std::move(value);emit statusChanged();}void DesktopController::setTechnicalStatus(QString value){if(technical_status_==value)return;technical_status_=std::move(value);emit technicalStatusChanged();}void DesktopController::setPreviewLate(bool value){if(preview_late_==value)return;preview_late_=value;emit technicalStatusChanged();}void DesktopController::setError(QString value){error_message_=std::move(value);emit errorChanged();}void DesktopController::clearError(){if(error_message_.isEmpty())return;error_message_.clear();emit errorChanged();}
