@@ -1,3 +1,9 @@
+# Test cases use the standard assert-based contract throughout the suite.
+# Keep those checks active even when the product is built in Release mode.
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+  set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -UNDEBUG")
+endif()
+
 add_executable(pulsar_smoke_tests
   smoke/bootstrap_test.cpp
 )

@@ -8,7 +8,7 @@
 
 #include <memory>
 
-class WaveformQuickItem final : public QQuickItem {
+class WaveformQuickItem : public QQuickItem {
   Q_OBJECT
   Q_PROPERTY(QString clipKey READ clipKey WRITE setClipKey NOTIFY clipKeyChanged)
   Q_PROPERTY(bool selected READ selected WRITE setSelected NOTIFY styleChanged)

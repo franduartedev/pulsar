@@ -3,6 +3,7 @@
 #include <QAbstractListModel>
 
 #include <pulsar/domain/ids/ids.hpp>
+#include <pulsar/domain/time/media_time.hpp>
 
 #include <optional>
 #include <vector>
