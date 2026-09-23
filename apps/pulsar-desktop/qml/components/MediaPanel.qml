@@ -41,15 +41,25 @@ Panel {
         }
         return codecInfo + resInfo
     }
+    property bool soundsTab: false
 
     Rectangle { anchors.left: parent.left; anchors.top: parent.top; width: 4; height: 18; color: Theme.accent; opacity: 0.9 }
     SectionLabel { id: title; anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top; anchors.leftMargin: 14; anchors.rightMargin: 12; anchors.topMargin: 14; text: "BIBLIOTECA"; color: Theme.textBright }
     Text { anchors.left: title.left; anchors.right: title.right; anchors.top: title.bottom; anchors.topMargin: 3; text: "Medios, fuentes y sonidos"; color: Theme.faint; font.pixelSize: Theme.fontSizeXS }
     PButton { id: importButton; anchors.left: parent.left; anchors.right: parent.right; anchors.top: title.bottom; anchors.leftMargin: 12; anchors.rightMargin: 12; anchors.topMargin: 27; text: "+  IMPORTAR MEDIO"; primary: true; onClicked: mediaPanel.importRequested() }
 
-    SectionLabel { id: sessionLabel; anchors.left: parent.left; anchors.right: parent.right; anchors.top: importButton.bottom; anchors.leftMargin: 12; anchors.rightMargin: 12; anchors.topMargin: 16; text: "FUENTE ACTIVA" }
+    Row {
+        id: tabs
+        anchors.left: parent.left; anchors.right: parent.right; anchors.top: importButton.bottom
+        anchors.leftMargin: 12; anchors.rightMargin: 12; anchors.topMargin: 10; spacing: 6
+        PButton { width: (tabs.width - 6) / 2; height: 26; text: "MEDIOS"; primary: !mediaPanel.soundsTab; onClicked: mediaPanel.soundsTab = false }
+        PButton { width: (tabs.width - 6) / 2; height: 26; text: "SONIDOS"; primary: mediaPanel.soundsTab; onClicked: mediaPanel.soundsTab = true }
+    }
+
+    SectionLabel { id: sessionLabel; visible: !mediaPanel.soundsTab; anchors.left: parent.left; anchors.right: parent.right; anchors.top: tabs.bottom; anchors.leftMargin: 12; anchors.rightMargin: 12; anchors.topMargin: 12; text: "FUENTE ACTIVA" }
     Rectangle {
         id: activeCard
+        visible: !mediaPanel.soundsTab
         anchors.left: parent.left; anchors.right: parent.right; anchors.top: sessionLabel.bottom; anchors.leftMargin: 12; anchors.rightMargin: 12; anchors.topMargin: 8
         height: cardCol.height + 18
         color: controller.hasMedia ? Theme.input : "transparent"
@@ -69,12 +79,12 @@ Panel {
         }
     }
 
-    SectionLabel { id: soundsTitle; anchors.left: parent.left; anchors.right: parent.right; anchors.top: activeCard.bottom; anchors.leftMargin: 12; anchors.rightMargin: 12; anchors.topMargin: 16; text: "CORE SOUNDS"; color: Theme.textBright }
+    SectionLabel { id: soundsTitle; anchors.left: parent.left; anchors.right: parent.right; anchors.top: mediaPanel.soundsTab ? tabs.bottom : activeCard.bottom; anchors.leftMargin: 12; anchors.rightMargin: 12; anchors.topMargin: mediaPanel.soundsTab ? 14 : 16; text: "CORE SOUNDS"; color: Theme.textBright; visible: mediaPanel.soundsTab }
     ListView {
         id: soundsList
         anchors.left: parent.left; anchors.right: parent.right; anchors.top: soundsTitle.bottom
-        anchors.bottom: manualTitle.visible ? manualTitle.top : parent.bottom
-        anchors.leftMargin: 12; anchors.rightMargin: 12; anchors.topMargin: 8; anchors.bottomMargin: manualTitle.visible ? 4 : 10
+        anchors.bottom: (!mediaPanel.soundsTab && manualTitle.visible) ? manualTitle.top : parent.bottom
+        anchors.leftMargin: 12; anchors.rightMargin: 12; anchors.topMargin: 8; anchors.bottomMargin: (!mediaPanel.soundsTab && manualTitle.visible) ? 4 : 10
         clip: true; spacing: 6; model: controller.soundLibrary
         delegate: Rectangle {
             width: soundsList.width; height: 46; radius: Theme.radiusS; color: Theme.panelAlt; border.color: Theme.borderSoft
@@ -91,11 +101,11 @@ Panel {
         }
     }
 
-    Rectangle { id: manualSep; visible: parent.height > 400; anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: pathRow.top; anchors.leftMargin: 10; anchors.rightMargin: 10; anchors.bottomMargin: 8; height: 1; color: Theme.borderSoft }
-    SectionLabel { id: manualTitle; visible: parent.height > 400; anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: manualSep.top; anchors.leftMargin: 12; anchors.rightMargin: 12; anchors.bottomMargin: 8; text: "AVANZADO · RUTA DEL MEDIO"; opacity: 0.72 }
+    Rectangle { id: manualSep; visible: !mediaPanel.soundsTab && parent.height > 400; anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: pathRow.top; anchors.leftMargin: 10; anchors.rightMargin: 10; anchors.bottomMargin: 8; height: 1; color: Theme.borderSoft }
+    SectionLabel { id: manualTitle; visible: !mediaPanel.soundsTab && parent.height > 400; anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: manualSep.top; anchors.leftMargin: 12; anchors.rightMargin: 12; anchors.bottomMargin: 8; text: "AVANZADO · RUTA DEL MEDIO"; opacity: 0.72 }
     Row {
         id: pathRow
-        visible: parent.height > 400
+        visible: !mediaPanel.soundsTab && parent.height > 400
         anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; anchors.leftMargin: 12; anchors.rightMargin: 12; anchors.bottomMargin: 12; opacity: 0.82
         spacing: 6
         Rectangle {

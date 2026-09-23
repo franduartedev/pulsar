@@ -20,6 +20,7 @@ Window {
     // Viewer stays dominant: side panels take bounded relative slices.
     property real mediaWidth: Math.max(238, Math.min(310, width * 0.205))
     property real inspectorWidth: Math.max(270, Math.min(330, width * 0.22))
+    property bool compactWorkspace: height <= 650
 
     Shortcut { sequence: "Space"; onActivated: controller.togglePlayback() }
     Shortcut { sequence: "Ctrl+I"; onActivated: fileDialog.open() }
@@ -87,9 +88,9 @@ Window {
         id: mediaPanel
         anchors.left: parent.left
         anchors.top: header.bottom
-        anchors.topMargin: 12
+        anchors.topMargin: compactWorkspace ? 8 : 12
         anchors.bottom: scrubber.top
-        anchors.bottomMargin: 8
+        anchors.bottomMargin: compactWorkspace ? 6 : 8
         width: root.mediaWidth
         onImportRequested: fileDialog.open()
     }
@@ -98,9 +99,9 @@ Window {
         id: inspector
         anchors.right: parent.right
         anchors.top: header.bottom
-        anchors.topMargin: 12
+        anchors.topMargin: compactWorkspace ? 8 : 12
         anchors.bottom: scrubber.top
-        anchors.bottomMargin: 8
+        anchors.bottomMargin: compactWorkspace ? 6 : 8
         width: root.inspectorWidth
     }
 
@@ -109,11 +110,11 @@ Window {
         anchors.left: mediaPanel.right
         anchors.right: inspector.left
         anchors.top: header.bottom
-        anchors.leftMargin: 10
-        anchors.rightMargin: 10
-        anchors.topMargin: 12
+        anchors.leftMargin: compactWorkspace ? 8 : 10
+        anchors.rightMargin: compactWorkspace ? 8 : 10
+        anchors.topMargin: compactWorkspace ? 8 : 12
         anchors.bottom: scrubber.top
-        anchors.bottomMargin: 8
+        anchors.bottomMargin: compactWorkspace ? 6 : 8
         color: Theme.monitor
         border.color: Theme.border
         border.width: 1
@@ -128,7 +129,7 @@ Window {
                 onImportRequested: fileDialog.open()
             }
             Rectangle { width: parent.width; height: 1; color: Theme.edge; opacity: 0.55 }
-            TransportBar { id: transportBar; width: parent.width; height: 64 }
+            TransportBar { id: transportBar; width: parent.width; height: compactWorkspace ? 58 : 64 }
         }
     }
 
@@ -137,8 +138,9 @@ Window {
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.bottom: timelinePane.top
-        anchors.margins: Theme.panelPadding
-        height: 50
+        anchors.leftMargin: compactWorkspace ? 8 : 12
+        anchors.rightMargin: compactWorkspace ? 8 : 12
+        height: compactWorkspace ? 38 : 42
     }
 
     TimelinePane {
@@ -149,7 +151,7 @@ Window {
         anchors.leftMargin: 12
         anchors.rightMargin: 12
         anchors.bottomMargin: 12
-        height: Math.max(210, Math.min(276, root.height * 0.32))
+        height: compactWorkspace ? 188 : Math.max(210, Math.min(276, root.height * 0.32))
     }
 
     StatusBar {

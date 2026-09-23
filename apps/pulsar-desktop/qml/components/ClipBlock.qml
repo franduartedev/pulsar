@@ -28,13 +28,15 @@ Rectangle {
 
     x: canonicalStartX + previewOffset
     width: Math.max(3, canonicalWidth + trimWidthDelta)
-    color: missing ? Theme.missingClip : (selected ? Theme.clipSelected : (body.containsMouse ? Theme.clipHover : Theme.clipBase))
-    border.color: missing ? Theme.danger : (selected ? Theme.accent : (body.containsMouse ? Theme.edge : Theme.border))
+    color: missing ? Theme.missingClip : (muted ? Theme.panelAlt : (selected ? Theme.clipSelected : (body.containsMouse ? Theme.clipHover : Theme.clipBase)))
+    border.color: missing ? Theme.danger : (selected ? Theme.focus : (body.containsMouse ? Theme.edge : Theme.border))
     border.width: selected ? 2 : 1
     radius: Theme.radiusM
     clip: true
 
     Rectangle { anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top; height: 2; color: missing ? Theme.danger : (selected ? Theme.accent : Theme.edge); opacity: selected || missing ? 0.9 : 0.5 }
+    Rectangle { visible: block.muted; anchors.fill: parent; color: Theme.muted; opacity: 0.06 }
+    Rectangle { visible: block.muted; anchors.left: parent.left; anchors.top: parent.top; anchors.bottom: parent.bottom; width: 4; color: Theme.waveformPending; opacity: 0.9 }
     WaveformItem {
         id: waveform
         x: 4
@@ -55,7 +57,8 @@ Rectangle {
         Component.onDestruction: controller.detachWaveformItem(waveform)
     }
     Text { anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top; anchors.margins: 7; text: block.clipName; color: Theme.textBright; font.pixelSize: Theme.fontSizeS; font.bold: block.selected; elide: Text.ElideRight }
-    Text { anchors.left: parent.left; anchors.bottom: parent.bottom; anchors.leftMargin: 7; anchors.bottomMargin: 6; text: block.missing ? "OFFLINE" : (block.muted ? "MUTED" : (Math.abs(block.gainDb) >= 0.05 ? block.gainDb.toFixed(0) + " dB" : "")); color: block.missing ? Theme.danger : (block.muted ? Theme.waveformPending : Theme.muted); font.pixelSize: Theme.fontSizeXS; font.bold: block.muted; font.family: "monospace"; visible: width > 24 }
+    Rectangle { visible: block.muted; anchors.left: parent.left; anchors.bottom: parent.bottom; anchors.leftMargin: 6; anchors.bottomMargin: 4; width: 42; height: 16; radius: 2; color: Theme.waveformPending; opacity: 0.18 }
+    Text { anchors.left: parent.left; anchors.bottom: parent.bottom; anchors.leftMargin: 10; anchors.bottomMargin: 6; text: block.missing ? "OFFLINE" : (block.muted ? "MUTED" : (Math.abs(block.gainDb) >= 0.05 ? block.gainDb.toFixed(0) + " dB" : "")); color: block.missing ? Theme.danger : (block.muted ? Theme.waveformPending : Theme.muted); font.pixelSize: Theme.fontSizeXS; font.bold: block.muted; font.family: "monospace"; visible: width > 24 }
     Text { anchors.right: parent.right; anchors.bottom: parent.bottom; anchors.rightMargin: 7; anchors.bottomMargin: 6; text: block.startText + "  →  " + block.endText; color: block.missing ? Theme.danger : Theme.muted; font.pixelSize: Theme.fontSizeXS; font.family: "monospace"; elide: Text.ElideRight; width: Math.max(0, parent.width - 18); horizontalAlignment: Text.AlignRight }
     Text {
         anchors.centerIn: waveform

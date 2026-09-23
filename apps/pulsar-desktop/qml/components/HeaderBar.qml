@@ -37,6 +37,7 @@ Rectangle {
                 Text { text: projectName(); color: Theme.text; font.pixelSize: Theme.fontSizeS; elide: Text.ElideMiddle; width: 220 }
                 Rectangle { visible: controller.projectDirty; width: 8; height: 8; radius: 4; color: Theme.waveformPending; anchors.verticalCenter: parent.verticalCenter }
                 Text { visible: controller.projectDirty; text: "CAMBIOS SIN GUARDAR"; color: Theme.waveformPending; font.pixelSize: Theme.fontSizeXS; font.bold: true; font.letterSpacing: 0.7 }
+                Text { visible: !controller.projectDirty && controller.status.indexOf("Proyecto guardado") === 0; text: "GUARDADO"; color: Theme.accent; font.pixelSize: Theme.fontSizeXS; font.bold: true; font.letterSpacing: 0.8 }
             }
         }
     }

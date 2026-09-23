@@ -12,10 +12,8 @@ Panel {
         anchors.leftMargin: 16
         anchors.topMargin: 9
         spacing: 10
-        Text { anchors.verticalCenter: parent.verticalCenter; text: "NAVEGACIÓN"; color: Theme.textBright; font.pixelSize: Theme.fontSizeS; font.bold: true; font.letterSpacing: 1.3 }
-        Text { anchors.verticalCenter: parent.verticalCenter; text: controller.positionText; color: controller.hasMedia ? Theme.text : Theme.faint; font.family: "monospace"; font.pixelSize: Theme.fontSizeM }
+        Text { anchors.verticalCenter: parent.verticalCenter; text: "SEEK"; color: Theme.textBright; font.pixelSize: Theme.fontSizeXS; font.bold: true; font.letterSpacing: 1.3 }
     }
-    Text { anchors.right: parent.right; anchors.top: parent.top; anchors.rightMargin: 16; anchors.topMargin: 9; text: "/ " + controller.durationText; color: Theme.faint; font.family: "monospace"; font.pixelSize: Theme.fontSizeM }
 
     Item {
         id: track

@@ -6,6 +6,9 @@ Rectangle {
     property alias text: label.text
     property bool primary: false
     signal clicked()
+    activeFocusOnTab: true
+    Keys.onReturnPressed: button.clicked()
+    Keys.onEnterPressed: button.clicked()
 
     implicitHeight: Theme.controlHeight
     radius: Theme.radiusS
@@ -28,7 +31,7 @@ Rectangle {
         if (!enabled) {
             return Theme.borderSoft
         }
-        return primary ? Theme.accent : (mouse.containsMouse ? Theme.edge : Theme.border)
+        return button.activeFocus ? Theme.focus : (primary ? Theme.accent : (mouse.containsMouse ? Theme.edge : Theme.border))
     }
 
     Text {
@@ -48,6 +51,6 @@ Rectangle {
         id: mouse
         anchors.fill: parent
         hoverEnabled: true
-        onClicked: button.clicked()
+        onClicked: { button.forceActiveFocus(); button.clicked() }
     }
 }

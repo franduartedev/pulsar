@@ -55,6 +55,7 @@ Panel {
         return out
     }
     property var metaGroups: parseMeta(controller.metadata)
+    property bool technicalExpanded: false
 
     Connections {
         target: controller
@@ -173,14 +174,27 @@ Panel {
                 spacing: 6
                 Rectangle {
                     width: parent.width
-                    height: diagnosticLabel.height + diagnosticText.height + 16
+                    height: technicalHeader.height + (inspector.technicalExpanded ? diagnosticText.height + 8 : 0)
                     color: Theme.panelAlt
                     border.width: 1
                     border.color: Theme.borderSoft
                     radius: Theme.radiusS
                     opacity: 0.82
-                    SectionLabel { id: diagnosticLabel; x: 8; y: 6; text: "TÉCNICO · DIAGNÓSTICO"; opacity: 0.65 }
-                    Text { id: diagnosticText; x: 8; y: diagnosticLabel.bottom + 4; width: parent.width - 16; text: controller.debugMetrics; color: Theme.faint; font.pixelSize: Theme.fontSizeXS; wrapMode: Text.WordWrap }
+                    Item {
+                        id: technicalHeader
+                        anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top
+                        height: 28; anchors.leftMargin: 8; anchors.rightMargin: 8
+                        activeFocusOnTab: true
+                        Keys.onReturnPressed: inspector.technicalExpanded = !inspector.technicalExpanded
+                        Keys.onEnterPressed: inspector.technicalExpanded = !inspector.technicalExpanded
+                        Row {
+                            anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter; spacing: 8
+                            Text { text: inspector.technicalExpanded ? "⌄" : ">"; color: Theme.muted; font.pixelSize: Theme.fontSizeM }
+                            SectionLabel { text: "DETALLES TÉCNICOS"; opacity: 0.72 }
+                        }
+                        MouseArea { anchors.fill: parent; onClicked: inspector.technicalExpanded = !inspector.technicalExpanded }
+                    }
+                    Text { id: diagnosticText; visible: inspector.technicalExpanded; x: 8; y: technicalHeader.bottom + 2; width: parent.width - 16; text: controller.debugMetrics; color: Theme.faint; font.pixelSize: Theme.fontSizeXS; wrapMode: Text.WordWrap }
                 }
             }
         }

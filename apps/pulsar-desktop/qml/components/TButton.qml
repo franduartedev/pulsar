@@ -8,6 +8,9 @@ Rectangle {
     property string glyph: "play"
     property bool dominant: false
     signal clicked()
+    activeFocusOnTab: true
+    Keys.onReturnPressed: btn.clicked()
+    Keys.onEnterPressed: btn.clicked()
 
     width: dominant ? 58 : 44
     height: 40
@@ -28,7 +31,7 @@ Rectangle {
         if (!enabled) {
             return Theme.borderSoft
         }
-        return dominant ? Theme.accent : Theme.border
+        return btn.activeFocus ? Theme.focus : (dominant ? Theme.accent : Theme.border)
     }
 
     TGlyph {
@@ -46,6 +49,6 @@ Rectangle {
         id: mouse
         anchors.fill: parent
         hoverEnabled: true
-        onClicked: btn.clicked()
+        onClicked: { btn.forceActiveFocus(); btn.clicked() }
     }
 }
