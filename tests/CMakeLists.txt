@@ -369,6 +369,23 @@ pulsar_apply_compiler_warnings(pulsar_ffmpeg_offline_audio_renderer_tests)
 add_test(NAME pulsar.media.ffmpeg_offline_audio_renderer
          COMMAND pulsar_ffmpeg_offline_audio_renderer_tests)
 
+add_executable(pulsar_ffmpeg_export_media_writer_tests
+  media/ffmpeg_export_media_writer_test.cpp
+)
+
+target_link_libraries(pulsar_ffmpeg_export_media_writer_tests
+  PRIVATE
+    pulsar::media_ffmpeg
+    pulsar::application
+    pulsar::domain
+)
+
+pulsar_apply_project_options(pulsar_ffmpeg_export_media_writer_tests)
+pulsar_apply_compiler_warnings(pulsar_ffmpeg_export_media_writer_tests)
+
+add_test(NAME pulsar.media.ffmpeg_export_media_writer
+         COMMAND pulsar_ffmpeg_export_media_writer_tests)
+
 add_executable(pulsar_ffmpeg_probe_tests
   media/ffmpeg_probe_test.cpp
 )
