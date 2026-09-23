@@ -24,6 +24,8 @@ struct FFmpegVideoImageDescriptor {
 };
 
 class FFmpegPreviewConverter;
+class FFmpegOfflineVideoSource;
+class FFmpegOfflineVideoFrameConverter;
 
 class FFmpegVideoFrameLease {
 public:
@@ -46,6 +48,8 @@ private:
 
   friend class FFmpegVideoDecodeSession;
   friend class FFmpegPreviewConverter;
+  friend class FFmpegOfflineVideoSource;
+  friend class FFmpegOfflineVideoFrameConverter;
 };
 
 struct DecodedVisualVideoFrame {

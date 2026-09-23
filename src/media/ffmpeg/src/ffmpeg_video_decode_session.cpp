@@ -1,6 +1,7 @@
 #include <pulsar/media/ffmpeg/ffmpeg_video_decode_session.hpp>
 
 #include <pulsar/media/ffmpeg/decoded_visual_video_frame.hpp>
+#include <pulsar/media/ffmpeg/ffmpeg_offline_video_converter.hpp>
 #include <pulsar/media/ffmpeg/ffmpeg_preview_converter.hpp>
 
 #include <pulsar/media/ffmpeg/media_decode_error.hpp>
@@ -316,6 +317,63 @@ FFmpegVideoFrameLease::FFmpegVideoFrameLease(std::shared_ptr<const Impl> impl) n
 
 bool FFmpegVideoFrameLease::valid() const noexcept {
   return impl_ != nullptr && impl_->valid();
+}
+
+class FFmpegOfflineVideoFrameConverter::Impl {
+public:
+  mutable SwsContextPtr sws;
+};
+
+FFmpegOfflineVideoFrameConverter::FFmpegOfflineVideoFrameConverter()
+    : impl_{std::make_unique<Impl>()} {}
+
+FFmpegOfflineVideoFrameConverter::~FFmpegOfflineVideoFrameConverter() = default;
+
+application::exporting::OfflineVideoSourceFrame
+FFmpegOfflineVideoFrameConverter::convert(const DecodedVisualVideoFrame& frame) const {
+  if (!frame.frame.valid() || frame.frame.impl_ == nullptr) {
+    throw application::exporting::OfflineVideoRenderError{
+        application::exporting::OfflineVideoRenderErrorCode::UnsupportedFrame,
+        "FFmpeg returned an invalid visual frame lease"};
+  }
+
+  const AVFrame& source = frame.frame.impl_->frame();
+  if (source.width <= 0 || source.height <= 0 || source.format < 0 ||
+      source.width > std::numeric_limits<int>::max() / 4) {
+    throw application::exporting::OfflineVideoRenderError{
+        application::exporting::OfflineVideoRenderErrorCode::UnsupportedFrame,
+        "FFmpeg returned unsupported video frame metadata"};
+  }
+
+  impl_->sws.reset(sws_getCachedContext(
+      impl_->sws.release(), source.width, source.height,
+      static_cast<AVPixelFormat>(source.format), source.width, source.height,
+      AV_PIX_FMT_RGBA, SWS_BILINEAR, nullptr, nullptr, nullptr));
+  if (!impl_->sws) {
+    throw application::exporting::OfflineVideoRenderError{
+        application::exporting::OfflineVideoRenderErrorCode::ConversionFailed,
+        "libswscale could not create the cached RGBA conversion context"};
+  }
+
+  const int stride = source.width * 4;
+  const auto size = static_cast<std::size_t>(stride) * static_cast<std::size_t>(source.height);
+  auto pixels = std::make_shared<application::exporting::OfflineVideoPixelBuffer>();
+  pixels->width = source.width;
+  pixels->height = source.height;
+  pixels->stride_bytes = stride;
+  pixels->pixels.resize(size);
+  std::uint8_t* destination_data[4] = {pixels->pixels.data(), nullptr, nullptr, nullptr};
+  int destination_linesize[4] = {stride, 0, 0, 0};
+  const int converted_height = sws_scale(impl_->sws.get(), source.data, source.linesize, 0,
+                                         source.height, destination_data, destination_linesize);
+  if (converted_height != source.height) {
+    throw application::exporting::OfflineVideoRenderError{
+        application::exporting::OfflineVideoRenderErrorCode::ConversionFailed,
+        "libswscale did not convert the complete video frame"};
+  }
+
+  return application::exporting::OfflineVideoSourceFrame{
+      frame.presentation_timestamp, std::nullopt, std::move(pixels)};
 }
 
 FFmpegPreviewFrame FFmpegPreviewConverter::convert(const DecodedVisualVideoFrame& frame) const {

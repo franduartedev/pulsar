@@ -111,6 +111,21 @@ pulsar_apply_compiler_warnings(pulsar_export_plan_tests)
 
 add_test(NAME pulsar.application.export_plan COMMAND pulsar_export_plan_tests)
 
+add_executable(pulsar_offline_video_renderer_tests
+  application/offline_video_renderer_test.cpp
+)
+
+target_link_libraries(pulsar_offline_video_renderer_tests
+  PRIVATE
+    pulsar::application
+    pulsar::domain
+)
+
+pulsar_apply_project_options(pulsar_offline_video_renderer_tests)
+pulsar_apply_compiler_warnings(pulsar_offline_video_renderer_tests)
+
+add_test(NAME pulsar.application.offline_video_renderer COMMAND pulsar_offline_video_renderer_tests)
+
 add_executable(pulsar_timeline_playback_coordinator_tests
   application/timeline_playback_coordinator_test.cpp
 )
@@ -293,6 +308,29 @@ if(NOT PULSAR_BUILD_FFMPEG)
 endif()
 
 find_program(PULSAR_TEST_FFMPEG_CLI ffmpeg REQUIRED)
+
+add_executable(pulsar_ffmpeg_offline_video_renderer_tests
+  media/ffmpeg_offline_video_renderer_test.cpp
+)
+
+target_compile_definitions(pulsar_ffmpeg_offline_video_renderer_tests
+  PRIVATE
+    PULSAR_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+    PULSAR_TEST_FFMPEG_CLI="${PULSAR_TEST_FFMPEG_CLI}"
+)
+
+target_link_libraries(pulsar_ffmpeg_offline_video_renderer_tests
+  PRIVATE
+    pulsar::media_ffmpeg
+    pulsar::application
+    pulsar::domain
+)
+
+pulsar_apply_project_options(pulsar_ffmpeg_offline_video_renderer_tests)
+pulsar_apply_compiler_warnings(pulsar_ffmpeg_offline_video_renderer_tests)
+
+add_test(NAME pulsar.media.ffmpeg_offline_video_renderer
+         COMMAND pulsar_ffmpeg_offline_video_renderer_tests)
 
 add_executable(pulsar_ffmpeg_probe_tests
   media/ffmpeg_probe_test.cpp
