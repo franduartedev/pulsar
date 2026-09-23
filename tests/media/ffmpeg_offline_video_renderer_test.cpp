@@ -27,15 +27,20 @@ std::string shell_quote(const std::filesystem::path& path) {
 
 class OriginProbe final : public pulsar::application::MediaProbe {
 public:
+  explicit OriginProbe(pulsar::domain::MediaTime duration) : duration_{duration} {}
+
   [[nodiscard]] pulsar::application::MediaProbeResult probe(
       const std::filesystem::path& path) const override {
     pulsar::application::MediaProbeResult result;
     result.path = path;
     result.video_streams.push_back(pulsar::application::VideoStreamInfo{
         0, "h264", 320, 180, pulsar::domain::Rational{1, 1000},
-        pulsar::domain::MediaTime{1, {1, 1}}, pulsar::domain::FrameRate{25, 1}});
+        duration_, pulsar::domain::FrameRate{25, 1}});
     return result;
   }
+
+private:
+  pulsar::domain::MediaTime duration_;
 };
 
 void renders_real_fixture_sequentially() {
@@ -90,7 +95,7 @@ void normalizes_non_zero_stream_origin() {
   try {
     pulsar::application::ProjectDocument document;
     pulsar::application::CommandProcessor processor{document};
-    OriginProbe probe;
+    OriginProbe probe{pulsar::domain::MediaTime{1, {1, 1}}};
     const auto media = processor.import_asset(path, probe);
     const auto asset = document.find_asset(media);
     assert(asset.has_value());
@@ -111,9 +116,53 @@ void normalizes_non_zero_stream_origin() {
   std::filesystem::remove(path);
 }
 
+void renders_long_fixtures_with_bounded_state() {
+  for (const auto seconds : {10, 30}) {
+    const auto path = std::filesystem::temp_directory_path() /
+                      ("pulsar-e2-offline-long-" + std::to_string(seconds) + "-" +
+                       std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) +
+                       ".mkv");
+    const auto command = shell_quote(PULSAR_TEST_FFMPEG_CLI) +
+                         " -y -hide_banner -loglevel error -f lavfi "
+                         "-i testsrc2=size=64x36:rate=25:duration=" + std::to_string(seconds) +
+                         " -c:v mpeg4 -pix_fmt yuv420p -an -f matroska " + shell_quote(path);
+    if (std::system(command.c_str()) != 0) {
+      throw std::runtime_error{"could not create long offline-render fixture"};
+    }
+
+    try {
+      pulsar::application::ProjectDocument document;
+      pulsar::application::CommandProcessor processor{document};
+      OriginProbe probe{pulsar::domain::MediaTime{seconds, {1, 1}}};
+      const auto media = processor.import_asset(path, probe);
+      (void)processor.add_clip(media,
+                               pulsar::domain::TimeRange{
+                                   pulsar::domain::MediaTime::zero(),
+                                   pulsar::domain::MediaTime{seconds, {1, 1}}},
+                               pulsar::domain::MediaTime::zero());
+      const auto plan = pulsar::application::exporting::ExportPlan::build(document.snapshot());
+      pulsar::media::ffmpeg::FFmpegOfflineVideoSourceFactory factory;
+      pulsar::application::exporting::OfflineVideoRenderer renderer{plan, factory};
+      for (std::int64_t index = 0; index < plan.frame_count(); ++index) {
+        (void)renderer.render_frame(pulsar::domain::FrameNumber{index});
+      }
+      assert(plan.frame_count() == seconds * 25);
+      assert(renderer.metrics().output_frames == static_cast<std::uint64_t>(seconds * 25));
+      assert(renderer.metrics().decoder_opens == 1);
+      assert(renderer.metrics().seeks == 1);
+      assert(renderer.metrics().peak_live_source_frames <= 2);
+    } catch (...) {
+      std::filesystem::remove(path);
+      throw;
+    }
+    std::filesystem::remove(path);
+  }
+}
+
 } // namespace
 
 int main() {
   renders_real_fixture_sequentially();
   normalizes_non_zero_stream_origin();
+  renders_long_fixtures_with_bounded_state();
 }
