@@ -96,6 +96,21 @@ pulsar_apply_compiler_warnings(pulsar_timeline_clip_resolver_tests)
 
 add_test(NAME pulsar.application.timeline_clip_resolver COMMAND pulsar_timeline_clip_resolver_tests)
 
+add_executable(pulsar_export_plan_tests
+  application/export_plan_test.cpp
+)
+
+target_link_libraries(pulsar_export_plan_tests
+  PRIVATE
+    pulsar::application
+    pulsar::domain
+)
+
+pulsar_apply_project_options(pulsar_export_plan_tests)
+pulsar_apply_compiler_warnings(pulsar_export_plan_tests)
+
+add_test(NAME pulsar.application.export_plan COMMAND pulsar_export_plan_tests)
+
 add_executable(pulsar_timeline_playback_coordinator_tests
   application/timeline_playback_coordinator_test.cpp
 )
