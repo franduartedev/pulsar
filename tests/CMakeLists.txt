@@ -424,6 +424,29 @@ pulsar_apply_compiler_warnings(pulsar_ffmpeg_export_job_smoke_tests)
 add_test(NAME pulsar.media.ffmpeg_export_job_smoke
          COMMAND pulsar_ffmpeg_export_job_smoke_tests)
 
+add_executable(pulsar_ffmpeg_export_e2e_tests
+  media/ffmpeg_export_e2e_test.cpp
+)
+
+target_compile_definitions(pulsar_ffmpeg_export_e2e_tests
+  PRIVATE
+    PULSAR_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+
+target_link_libraries(pulsar_ffmpeg_export_e2e_tests
+  PRIVATE
+    pulsar::media_ffmpeg
+    pulsar::project_file
+    pulsar::application
+    pulsar::domain
+)
+
+pulsar_apply_project_options(pulsar_ffmpeg_export_e2e_tests)
+pulsar_apply_compiler_warnings(pulsar_ffmpeg_export_e2e_tests)
+
+add_test(NAME pulsar.media.ffmpeg_export_e2e
+         COMMAND pulsar_ffmpeg_export_e2e_tests)
+
 add_executable(pulsar_ffmpeg_probe_tests
   media/ffmpeg_probe_test.cpp
 )
