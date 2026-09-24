@@ -21,6 +21,7 @@ extern "C" {
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <memory>
@@ -166,6 +167,27 @@ double audio_rms(const std::filesystem::path& path, double start, double end) {
   return std::sqrt(energy / static_cast<double>(count));
 }
 
+media::ffmpeg::FFmpegOfflineAudioSourceFactory::LocatorResolver sound_resolver() {
+  return [](const std::filesystem::path& logical) {
+    const auto value = logical.generic_string();
+    if (value.rfind("pulsar-sound:", 0) == 0) {
+      return std::filesystem::path{PULSAR_SOURCE_DIR} / "assets/sounds" /
+             (value.substr(std::string{"pulsar-sound:"}.size()) + ".wav");
+    }
+    return logical;
+  };
+}
+
+void export_snapshot(const application::ProjectSnapshot& snapshot,
+                     const std::filesystem::path& destination) {
+  media::ffmpeg::FFmpegOfflineVideoSourceFactory video_sources;
+  media::ffmpeg::FFmpegOfflineAudioSourceFactory audio_sources{sound_resolver()};
+  WriterFactory writers;
+  project_file::FilesystemExportOutputPublisher publisher;
+  exporting::ExportJob job{video_sources, audio_sources, writers, publisher};
+  (void)job.run({snapshot, destination, exporting::ExportProfile::beta_v01()});
+}
+
 int codec_profile(const std::filesystem::path& path, AVMediaType type) {
   AVFormatContext* format = nullptr;
   assert(avformat_open_input(&format, path.c_str(), nullptr, nullptr) == 0);
@@ -207,9 +229,144 @@ BuiltProject make_reference_project(const std::filesystem::path& a,
                                         {seconds(1), seconds(2)}, seconds(1));
   processor.set_clip_muted(muted, true);
   const domain::MediaTime sound_duration{3, domain::Rational{1, 25}};
-  (void)processor.add_clip(audio_track, sound, {domain::MediaTime::zero(), sound_duration},
-                           domain::MediaTime{5, domain::Rational{1, 2}});
+  const auto sfx_track = processor.add_track(domain::TrackKind::Audio);
+  (void)processor.add_clip(sfx_track, sound, {domain::MediaTime::zero(), sound_duration},
+                           seconds(1));
   return BuiltProject{std::move(document), right};
+}
+
+application::ProjectSnapshot make_gain_project(const std::filesystem::path& source) {
+  media::ffmpeg::FFmpegMediaProbe probe;
+  application::ProjectDocument document;
+  application::CommandProcessor processor{document};
+  const auto asset = processor.import_asset(source, probe);
+  const auto video = processor.add_clip(asset, {seconds(0), seconds(3)}, seconds(0));
+  processor.set_clip_muted(video, true);
+  const auto audio = processor.add_track(domain::TrackKind::Audio);
+  const auto zero = processor.add_clip(audio, asset, {seconds(0), seconds(1)}, seconds(0));
+  const auto minus = processor.add_clip(audio, asset, {seconds(0), seconds(1)}, seconds(1));
+  const auto plus = processor.add_clip(audio, asset, {seconds(0), seconds(1)}, seconds(2));
+  processor.set_clip_audio_gain(minus, -6.0);
+  processor.set_clip_audio_gain(plus, 6.0);
+  (void)zero;
+  return document.snapshot();
+}
+
+application::ProjectSnapshot make_overlap_project(const std::filesystem::path& a,
+                                                  const std::filesystem::path& b) {
+  media::ffmpeg::FFmpegMediaProbe probe;
+  application::ProjectDocument document;
+  application::CommandProcessor processor{document};
+  const auto asset_a = processor.import_asset(a, probe);
+  const auto asset_b = processor.import_asset(b, probe);
+  const auto video = processor.add_clip(asset_a, {seconds(0), seconds(2)}, seconds(0));
+  processor.set_clip_muted(video, true);
+  const auto first = processor.add_track(domain::TrackKind::Audio);
+  const auto second = processor.add_track(domain::TrackKind::Audio);
+  (void)processor.add_clip(first, asset_a, {seconds(0), seconds(2)}, seconds(0));
+  (void)processor.add_clip(second, asset_b, {seconds(0), seconds(2)}, seconds(1));
+  return document.snapshot();
+}
+
+application::ProjectSnapshot make_isolated_sound_project(const std::filesystem::path& source) {
+  media::ffmpeg::FFmpegMediaProbe probe;
+  application::ProjectDocument document;
+  application::CommandProcessor processor{document};
+  const auto video_asset = processor.import_asset(source, probe);
+  const auto sound = processor.import_asset("pulsar-sound:click_soft", BuiltinSoundProbe{});
+  const auto video = processor.add_clip(video_asset, {seconds(0), seconds(3)}, seconds(0));
+  processor.set_clip_muted(video, true);
+  const auto track = processor.add_track(domain::TrackKind::Audio);
+  const domain::MediaTime sound_duration{3, domain::Rational{1, 25}};
+  (void)processor.add_clip(track, sound, {domain::MediaTime::zero(), sound_duration}, seconds(1));
+  return document.snapshot();
+}
+
+void gain_evidence(const std::filesystem::path& source, const std::filesystem::path& root) {
+  const auto destination = root / "gain.mp4";
+  export_snapshot(make_gain_project(source), destination);
+  const double rms_zero = audio_rms(destination, 0.20, 0.80);
+  const double rms_minus = audio_rms(destination, 1.20, 1.80);
+  const double rms_plus = audio_rms(destination, 2.20, 2.80);
+  const double minus_ratio = rms_minus / rms_zero;
+  const double plus_ratio = rms_plus / rms_zero;
+  std::fprintf(stderr, "E6 gain ratios: -6/0=%.3f +6/0=%.3f\n", minus_ratio, plus_ratio);
+  assert(std::abs(minus_ratio - 0.501) < 0.10);
+  assert(std::abs(plus_ratio - 1.995) < 0.20);
+  std::filesystem::remove(destination);
+}
+
+void overlap_evidence(const std::filesystem::path& a, const std::filesystem::path& b,
+                      const std::filesystem::path& root) {
+  const auto destination = root / "overlap.mp4";
+  export_snapshot(make_overlap_project(a, b), destination);
+  const double solo = audio_rms(destination, 0.20, 0.80);
+  const double overlap = audio_rms(destination, 1.20, 1.80);
+  const double ratio = overlap / solo;
+  std::fprintf(stderr, "E6 overlap RMS: solo=%.4f overlap=%.4f ratio=%.3f\n", solo, overlap,
+               ratio);
+  assert(overlap > solo * 1.20);
+  assert(overlap < solo * 2.50);
+  std::filesystem::remove(destination);
+}
+
+void sound_and_sync_evidence(const std::filesystem::path& source,
+                             const std::filesystem::path& root) {
+  const auto destination = root / "isolated-sound.mp4";
+  export_snapshot(make_isolated_sound_project(source), destination);
+  const double before = audio_rms(destination, 0.70, 0.90);
+  const double during = audio_rms(destination, 1.01, 1.11);
+  const double after = audio_rms(destination, 1.22, 1.45);
+  std::fprintf(stderr, "E6 Core Sound RMS: before=%.4f during=%.4f after=%.4f\n", before,
+               during, after);
+  assert(before < 0.02);
+  assert(during > before * 3.0);
+  assert(after < 0.02);
+
+  const auto frames = decode_video_samples(destination);
+  const auto visual_event = nearest(frames, 1.0);
+  assert_colour(visual_event, 0, 128, 0);
+  double event_time = 0.0;
+  double event_rms = 0.0;
+  for (double cursor = 0.50; cursor < 1.50; cursor += 0.02) {
+    const double value = audio_rms(destination, cursor, cursor + 0.02);
+    if (value > event_rms) {
+      event_rms = value;
+      event_time = cursor + 0.01;
+    }
+  }
+  const double sync_delta = std::abs(event_time - 1.0);
+  std::fprintf(stderr, "E6 A/V sync: visual=%.3f audio=%.3f delta=%.3f\n",
+               visual_event.timestamp, event_time, sync_delta);
+  assert(sync_delta <= 0.08);
+  std::filesystem::remove(destination);
+}
+
+void rational_fps_evidence(const std::filesystem::path& source,
+                           const std::filesystem::path& root) {
+  media::ffmpeg::FFmpegMediaProbe probe;
+  application::ProjectDocument document;
+  application::CommandProcessor processor{document};
+  const auto asset = processor.import_asset(source, probe);
+  (void)processor.add_clip(asset, {seconds(0), seconds(4)}, seconds(0));
+  const auto snapshot = document.snapshot();
+  const auto plan = exporting::ExportPlan::build(snapshot);
+  const auto destination = root / "rational.mp4";
+  export_snapshot(snapshot, destination);
+  const auto output = probe.probe(destination);
+  assert(output.video_streams.size() == 1);
+  assert(output.video_streams.front().nominal_frame_rate.has_value());
+  const auto expected_rate = domain::FrameRate{30'000, 1001};
+  assert(output.video_streams.front().nominal_frame_rate->rational() ==
+         expected_rate.rational());
+  assert(output.video_streams.front().duration == plan.output_duration());
+  assert(output.audio_streams.size() == 1);
+  const auto frames = decode_video_samples(destination);
+  assert_colour(nearest(frames, 0.5), 0, 255, 255);
+  assert_colour(nearest(frames, 1.5), 255, 0, 255);
+  std::fprintf(stderr, "E6 rational FPS: 30000/1001 duration=%.3f s\n",
+               static_cast<double>(plan.output_duration()));
+  std::filesystem::remove(destination);
 }
 
 void export_reference_project_and_inspect() {
@@ -241,15 +398,7 @@ void export_reference_project_and_inspect() {
   const auto plan = exporting::ExportPlan::build(snapshot);
   assert(plan.output_duration() == seconds(4));
   media::ffmpeg::FFmpegOfflineVideoSourceFactory video_sources;
-  media::ffmpeg::FFmpegOfflineAudioSourceFactory audio_sources(
-      [](const std::filesystem::path& logical) {
-        const auto value = logical.generic_string();
-        if (value.rfind("pulsar-sound:", 0) == 0) {
-          return std::filesystem::path{PULSAR_SOURCE_DIR} / "assets/sounds" /
-                 (value.substr(std::string{"pulsar-sound:"}.size()) + ".wav");
-        }
-        return logical;
-      });
+  media::ffmpeg::FFmpegOfflineAudioSourceFactory audio_sources{sound_resolver()};
   WriterFactory writers;
   project_file::FilesystemExportOutputPublisher publisher;
   exporting::ExportJob job{video_sources, audio_sources, writers, publisher};
@@ -278,14 +427,24 @@ void export_reference_project_and_inspect() {
   assert(output.video_streams.front().nominal_frame_rate->rational() == output_rate.rational());
 
   const auto frames = decode_video_samples(destination);
-  assert_colour(nearest(frames, 0.5), 255, 0, 0);
-  assert_colour(nearest(frames, 1.5), 0, 0, 0);
-  assert_colour(nearest(frames, 2.5), 255, 0, 255);
-  assert_colour(nearest(frames, 3.5), 0, 128, 0);
+  const auto before_one = nearest(frames, 0.96);
+  const auto at_one = nearest(frames, 1.00);
+  const auto before_two = nearest(frames, 1.96);
+  const auto at_two = nearest(frames, 2.00);
+  const auto before_three = nearest(frames, 2.96);
+  const auto at_three = nearest(frames, 3.00);
+  assert_colour(before_one, 255, 0, 0);
+  assert_colour(at_one, 0, 0, 0);
+  assert_colour(before_two, 0, 0, 0);
+  assert_colour(at_two, 255, 0, 255);
+  assert_colour(before_three, 255, 0, 255);
+  assert_colour(at_three, 0, 128, 0);
+  assert(std::abs(at_one.timestamp - 1.0) < 0.001);
+  assert(std::abs(at_two.timestamp - 2.0) < 0.001);
+  assert(std::abs(at_three.timestamp - 3.0) < 0.001);
   assert(audio_rms(destination, 1.05, 1.35) < 0.02);
   assert(audio_rms(destination, 0.25, 0.75) > 0.01);
   assert(audio_rms(destination, 2.25, 2.75) > 0.01);
-
   // A real pipeline cancellation is requested from the first progress unit;
   // no wall-clock sleep or UI thread is involved.
   { std::ofstream old{destination}; old << sentinel; }
@@ -327,6 +486,12 @@ void export_reference_project_and_inspect() {
   std::ifstream unchanged{destination};
   const std::string preserved{std::istreambuf_iterator<char>{unchanged}, {}};
   assert(preserved == sentinel);
+  gain_evidence(a, root);
+  overlap_evidence(a, b, root);
+  sound_and_sync_evidence(a, root);
+  rational_fps_evidence(std::filesystem::path{PULSAR_SOURCE_DIR} /
+                           "tests/fixtures/e6_video_rational.mp4",
+                       root);
   std::filesystem::remove(destination);
   std::filesystem::remove(project_path);
   std::filesystem::remove_all(root);
