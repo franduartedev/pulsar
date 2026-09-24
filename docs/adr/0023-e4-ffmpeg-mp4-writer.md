@@ -55,6 +55,24 @@ un error tipado y deja el writer destruible. El writer no decide nombres
 `.part`, rename atómico, fsync ni reemplazo de destinos: son responsabilidades
 de E5.
 
+El `AVFormatContext` tiene un deleter RAII que cierra `AVIOContext` antes de
+liberar el formato. Esto cubre también una excepción entre `avio_open()` y
+`avformat_write_header()`, cuando el objeto `Impl` todavía no terminó de
+construirse. Codecs, frames, packet y `SwsContext` tienen deleters propios;
+`close_output()` y `abort()` son idempotentes y best-effort/noexcept.
+
+El ciclo send/receive drena todos los packets hasta `EAGAIN` o `EOF`, reintenta
+un `send` que encuentre `EAGAIN`, y hace lo mismo durante flush. No se asume
+una relación frame/packet uno-a-uno. El FIFO temporal de audio está limitado a
+4096 frames; el `erase(begin())` queda acotado por ese máximo.
+
+La evidencia E4 inspecciona el MP4 real: CFR para 25 y 30000/1001, PTS desde
+cero, DTS de video monotónicos, time base de audio `1/48000`, duración de
+stream igual al `ExportPlan`, y perfil efectivo AAC-LC. El encoder emite un
+paquete físico AAC de priming con PTS `-1024` y `skip_samples=1024`; el primer
+paquete editorial empieza en cero. Los paquetes no negativos suman exactamente
+la duración lógica y el exceso físico queda explicado por ese priming.
+
 ## Portabilidad
 
 El seam neutral permite reemplazar el backend FFmpeg por libx264/AAC de otra

@@ -5,6 +5,8 @@
 #include <pulsar/application/media/media_probe.hpp>
 #include <pulsar/application/project/project_document.hpp>
 #include <pulsar/media/ffmpeg/ffmpeg_audio_decode_session.hpp>
+#include <pulsar/media/ffmpeg/detail/ffmpeg_export_audio_policy.hpp>
+#include <pulsar/media/ffmpeg/detail/ffmpeg_export_media_writer_test_hook.hpp>
 #include <pulsar/media/ffmpeg/ffmpeg_export_media_writer.hpp>
 #include <pulsar/media/ffmpeg/ffmpeg_media_probe.hpp>
 #include <pulsar/media/ffmpeg/ffmpeg_video_decode_session.hpp>
@@ -14,12 +16,18 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <limits>
 #include <optional>
 #include <string>
 #include <vector>
+
+extern "C" {
+#include <libavcodec/avcodec.h>
+#include <libavformat/avformat.h>
+}
 
 namespace {
 
@@ -45,6 +53,81 @@ private:
 std::filesystem::path temporary_output(const char* suffix) {
   return std::filesystem::temp_directory_path() /
          (std::string{"pulsar-e4-"} + suffix + ".mp4");
+}
+
+struct MuxEvidence {
+  int audio_profile{-1};
+  int audio_initial_padding{-1};
+  AVRational audio_time_base{};
+  AVRational video_time_base{};
+  std::int64_t audio_duration{AV_NOPTS_VALUE};
+  std::int64_t video_duration{AV_NOPTS_VALUE};
+  std::int64_t audio_packet_duration_sum{0};
+  std::int64_t audio_logical_packet_duration_sum{0};
+  std::int64_t video_packet_count{0};
+  std::int64_t audio_packet_count{0};
+  std::int64_t first_audio_pts{AV_NOPTS_VALUE};
+  std::int64_t last_audio_end{AV_NOPTS_VALUE};
+  std::int64_t previous_video_dts{AV_NOPTS_VALUE};
+  std::int64_t minimum_video_pts{AV_NOPTS_VALUE};
+  bool saw_aac_priming_packet{false};
+};
+
+MuxEvidence inspect_mux(const std::filesystem::path& path) {
+  AVFormatContext* format = nullptr;
+  assert(avformat_open_input(&format, path.c_str(), nullptr, nullptr) == 0);
+  assert(avformat_find_stream_info(format, nullptr) >= 0);
+  int video_index = -1;
+  int audio_index = -1;
+  for (unsigned index = 0; index < format->nb_streams; ++index) {
+    if (format->streams[index]->codecpar->codec_type == AVMEDIA_TYPE_VIDEO) video_index = index;
+    if (format->streams[index]->codecpar->codec_type == AVMEDIA_TYPE_AUDIO) audio_index = index;
+  }
+  assert(video_index >= 0 && audio_index >= 0);
+  const auto* video = format->streams[video_index];
+  const auto* audio = format->streams[audio_index];
+  MuxEvidence evidence{audio->codecpar->profile,
+                        audio->codecpar->initial_padding,
+                        audio->time_base,
+                        video->time_base,
+                        audio->duration,
+                        video->duration};
+  AVPacket* packet = av_packet_alloc();
+  assert(packet != nullptr);
+  while (av_read_frame(format, packet) >= 0) {
+    if (packet->stream_index == video_index) {
+      ++evidence.video_packet_count;
+      assert(packet->pts != AV_NOPTS_VALUE && packet->dts != AV_NOPTS_VALUE);
+      if (evidence.minimum_video_pts == AV_NOPTS_VALUE) evidence.minimum_video_pts = packet->pts;
+      assert(evidence.previous_video_dts == AV_NOPTS_VALUE ||
+             packet->dts >= evidence.previous_video_dts);
+      evidence.previous_video_dts = packet->dts;
+    } else if (packet->stream_index == audio_index) {
+      ++evidence.audio_packet_count;
+      assert(packet->pts != AV_NOPTS_VALUE && packet->duration > 0);
+      if (packet->pts < 0) {
+        std::uint32_t skipped = 0;
+        std::uint32_t discarded = 0;
+        size_t side_data_size = 0;
+        const auto* side_data = av_packet_get_side_data(
+            packet, AV_PKT_DATA_SKIP_SAMPLES, &side_data_size);
+        assert(side_data != nullptr && side_data_size >= 8);
+        std::memcpy(&skipped, side_data, sizeof(skipped));
+        std::memcpy(&discarded, side_data + 4, sizeof(discarded));
+        assert(skipped == 1024 && discarded == 0);
+        evidence.saw_aac_priming_packet = true;
+      } else if (evidence.first_audio_pts == AV_NOPTS_VALUE) {
+        evidence.first_audio_pts = packet->pts;
+      }
+      evidence.audio_packet_duration_sum += packet->duration;
+      if (packet->pts >= 0) evidence.audio_logical_packet_duration_sum += packet->duration;
+      evidence.last_audio_end = packet->pts + packet->duration;
+    }
+    av_packet_unref(packet);
+  }
+  av_packet_free(&packet);
+  avformat_close_input(&format);
+  return evidence;
 }
 
 pulsar::application::exporting::ExportPlan make_plan(pulsar::domain::FrameRate rate,
@@ -91,7 +174,7 @@ void write_synthetic(const pulsar::application::exporting::ExportPlan& plan,
       for (std::size_t index = 0; index < count; ++index) {
         const auto global = audio_cursor + static_cast<std::int64_t>(index);
         const float value = global == 0 ? 1.0F
-                                        : 0.2F * std::sin(static_cast<float>(global) * 0.01F);
+                                        : global == plan.audio_sample_count() - 1 ? -1.0F : 0.0F;
         audio[index * 2] = value;
         audio[index * 2 + 1] = value;
       }
@@ -120,6 +203,27 @@ void verifies_mp4_profile_and_decodes_audio(pulsar::domain::FrameRate rate,
   const auto plan = make_plan(rate, duration);
   write_synthetic(plan, path);
   assert(std::filesystem::file_size(path) > 0);
+
+  const auto mux = inspect_mux(path);
+  assert(mux.audio_profile == FF_PROFILE_AAC_LOW);
+  assert(mux.audio_initial_padding == 0);
+  assert(mux.audio_time_base.num == 1 && mux.audio_time_base.den == 48'000);
+  assert(mux.video_packet_count == plan.frame_count());
+  assert(mux.audio_packet_count > 0);
+  assert(mux.minimum_video_pts == 0);
+  assert(mux.audio_duration == plan.audio_sample_count());
+  assert(mux.video_duration == av_rescale_q(
+                                  plan.frame_count(),
+                                  AVRational{static_cast<int>(plan.frame_rate().rational().denominator()),
+                                             static_cast<int>(plan.frame_rate().rational().numerator())},
+                                  mux.video_time_base));
+  assert(mux.first_audio_pts == 0);
+  assert(mux.saw_aac_priming_packet);
+  // AAC packets are frame-shaped. Any physical tail is bounded to one codec
+  // frame and is explained by the exact logical stream duration above.
+  assert(mux.audio_packet_duration_sum >= plan.audio_sample_count());
+  assert(mux.audio_logical_packet_duration_sum == plan.audio_sample_count());
+  assert(mux.audio_packet_duration_sum == plan.audio_sample_count() + 1024);
 
   pulsar::media::ffmpeg::FFmpegMediaProbe probe;
   const auto result = probe.probe(path);
@@ -152,17 +256,29 @@ void verifies_mp4_profile_and_decodes_audio(pulsar::domain::FrameRate rate,
   pulsar::media::ffmpeg::FFmpegAudioDecodeSession audio{path, result.audio_streams[0].stream_index};
   std::uint64_t decoded_frames = 0;
   std::uint64_t non_zero = 0;
+  std::uint64_t decoded_cursor = 0;
+  std::uint64_t first_event = std::numeric_limits<std::uint64_t>::max();
+  std::uint64_t last_event = 0;
   while (const auto block = audio.decode_next()) {
     assert(block->sample_rate() == 48'000);
     assert(block->channel_count() == 2);
     decoded_frames += block->frame_count();
-    for (const auto sample : block->samples()) {
+    for (std::size_t index = 0; index < block->samples().size(); ++index) {
+      const auto sample = block->samples()[index];
       assert(std::isfinite(sample));
-      if (std::abs(sample) > 1.0e-4F) ++non_zero;
+      if (std::abs(sample) > 0.05F) {
+        ++non_zero;
+        const auto frame_index = decoded_cursor + index / 2;
+        first_event = std::min(first_event, frame_index);
+        last_event = frame_index;
+      }
     }
+    decoded_cursor += block->frame_count();
   }
   assert(decoded_frames >= static_cast<std::uint64_t>(plan.audio_sample_count()));
   assert(non_zero > 0);
+  assert(first_event < 2048);
+  assert(last_event + 4096 >= static_cast<std::uint64_t>(plan.audio_sample_count()));
   std::filesystem::remove(path);
 }
 
@@ -194,9 +310,12 @@ void rejects_non_finite_audio_and_unwritable_output() {
   using namespace pulsar;
   using namespace application::exporting;
   const auto plan = make_plan({25, 1}, {1, {1, 1}});
+  const auto missing_parent = std::filesystem::temp_directory_path() /
+                              "pulsar-e4-output-parent-does-not-exist";
+  std::filesystem::remove_all(missing_parent);
   bool output_failed = false;
   try {
-    media::ffmpeg::FFmpegExportMediaWriter writer{plan, "/definitely/not/a/real/pulsar.mp4"};
+    media::ffmpeg::FFmpegExportMediaWriter writer{plan, missing_parent / "output.mp4"};
   } catch (const ExportMediaWriterError& error) {
     output_failed = error.code() == ExportMediaWriterErrorCode::OutputOpenFailed;
   }
@@ -216,6 +335,53 @@ void rejects_non_finite_audio_and_unwritable_output() {
   std::filesystem::remove(path);
 }
 
+void verifies_hard_clip_policy() {
+  using pulsar::media::ffmpeg::detail::hard_clip_audio_sample;
+  const std::array<float, 5> input{-1.5F, -1.0F, 0.0F, 1.0F, 1.5F};
+  const std::array<float, 5> expected{-1.0F, -1.0F, 0.0F, 1.0F, 1.0F};
+  for (std::size_t index = 0; index < input.size(); ++index) {
+    assert(hard_clip_audio_sample(input[index]) == expected[index]);
+  }
+}
+
+void rejects_premature_finish_and_allows_idempotent_abort() {
+  using namespace pulsar;
+  using namespace application::exporting;
+  const auto path = temporary_output("premature");
+  const auto plan = make_plan({25, 1}, {1, {1, 1}});
+  media::ffmpeg::FFmpegExportMediaWriter writer{plan, path};
+  bool failed = false;
+  try {
+    writer.finish();
+  } catch (const ExportMediaWriterError& error) {
+    failed = error.code() == ExportMediaWriterErrorCode::TimestampInvariant;
+  }
+  assert(failed);
+  writer.abort();
+  writer.abort();
+  std::filesystem::remove(path);
+}
+
+int fail_header_for_test(AVFormatContext*) { return -1; }
+
+void cleans_up_when_header_write_fails() {
+  using namespace pulsar;
+  using namespace application::exporting;
+  const auto path = temporary_output("header-failure");
+  const auto plan = make_plan({25, 1}, {1, {1, 1}});
+  auto& hook = media::ffmpeg::detail::export_write_header_hook();
+  hook = &fail_header_for_test;
+  bool failed = false;
+  try {
+    media::ffmpeg::FFmpegExportMediaWriter writer{plan, path};
+  } catch (const ExportMediaWriterError& error) {
+    failed = error.code() == ExportMediaWriterErrorCode::MuxWriteFailed;
+  }
+  hook = nullptr;
+  assert(failed);
+  std::filesystem::remove(path);
+}
+
 } // namespace
 
 int main() {
@@ -223,4 +389,7 @@ int main() {
   verifies_mp4_profile_and_decodes_audio({30'000, 1001}, {2002, {1, 1'000}}, "2997fps");
   rejects_audio_timestamp_discontinuity();
   rejects_non_finite_audio_and_unwritable_output();
+  verifies_hard_clip_policy();
+  rejects_premature_finish_and_allows_idempotent_abort();
+  cleans_up_when_header_write_fails();
 }
