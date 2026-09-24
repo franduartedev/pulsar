@@ -45,6 +45,8 @@ using application::exporting::OfflinePixelFormat;
 using application::exporting::OfflineVideoFrame;
 using internal::ffmpeg_error_text;
 
+constexpr std::size_t kMaxAudioFifoFrames = 4096;
+
 [[noreturn]] void fail(ExportMediaWriterErrorCode code, std::string message) {
   throw ExportMediaWriterError{code, std::move(message)};
 }
@@ -320,6 +322,10 @@ void FFmpegExportMediaWriter::Impl::setup_audio() {
   audio_stream->codecpar->initial_padding = 0;
   audio_stream->codecpar->trailing_padding = 0;
   audio_frame_size = audio_codec->frame_size > 0 ? audio_codec->frame_size : 1024;
+  if (audio_frame_size > static_cast<int>(kMaxAudioFifoFrames)) {
+    fail(ExportMediaWriterErrorCode::InternalInvariant,
+         "AAC frame size exceeds the bounded E4 audio FIFO");
+  }
   audio_frame.reset(av_frame_alloc());
   if (!audio_frame) fail(ExportMediaWriterErrorCode::InternalInvariant,
                          "could not allocate reusable AAC frame");
@@ -522,7 +528,6 @@ void FFmpegExportMediaWriter::Impl::write_audio(const OfflineAudioBlock& block) 
   // Keep the transient FIFO bounded even if a caller supplies one giant
   // OfflineAudioBlock. The residual is at most 4096 frames; erase(begin) is
   // therefore intentionally acceptable and its cost is bounded by this cap.
-  constexpr std::size_t kMaxAudioFifoFrames = 4096;
   audio_fifo.reserve(kMaxAudioFifoFrames * 2);
   for (std::size_t offset = 0; offset < block.samples.size();) {
     const auto available = kMaxAudioFifoFrames * 2 - audio_fifo.size();

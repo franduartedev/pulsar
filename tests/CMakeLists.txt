@@ -111,6 +111,21 @@ pulsar_apply_compiler_warnings(pulsar_export_plan_tests)
 
 add_test(NAME pulsar.application.export_plan COMMAND pulsar_export_plan_tests)
 
+add_executable(pulsar_export_job_tests
+  application/export_job_test.cpp
+)
+
+target_link_libraries(pulsar_export_job_tests
+  PRIVATE
+    pulsar::application
+    pulsar::domain
+)
+
+pulsar_apply_project_options(pulsar_export_job_tests)
+pulsar_apply_compiler_warnings(pulsar_export_job_tests)
+
+add_test(NAME pulsar.application.export_job COMMAND pulsar_export_job_tests)
+
 add_executable(pulsar_offline_video_renderer_tests
   application/offline_video_renderer_test.cpp
 )
@@ -385,6 +400,29 @@ pulsar_apply_compiler_warnings(pulsar_ffmpeg_export_media_writer_tests)
 
 add_test(NAME pulsar.media.ffmpeg_export_media_writer
          COMMAND pulsar_ffmpeg_export_media_writer_tests)
+
+add_executable(pulsar_ffmpeg_export_job_smoke_tests
+  media/ffmpeg_export_job_smoke_test.cpp
+)
+
+target_compile_definitions(pulsar_ffmpeg_export_job_smoke_tests
+  PRIVATE
+    PULSAR_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+
+target_link_libraries(pulsar_ffmpeg_export_job_smoke_tests
+  PRIVATE
+    pulsar::media_ffmpeg
+    pulsar::project_file
+    pulsar::application
+    pulsar::domain
+)
+
+pulsar_apply_project_options(pulsar_ffmpeg_export_job_smoke_tests)
+pulsar_apply_compiler_warnings(pulsar_ffmpeg_export_job_smoke_tests)
+
+add_test(NAME pulsar.media.ffmpeg_export_job_smoke
+         COMMAND pulsar_ffmpeg_export_job_smoke_tests)
 
 add_executable(pulsar_ffmpeg_probe_tests
   media/ffmpeg_probe_test.cpp

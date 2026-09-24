@@ -16,6 +16,7 @@ add_library(pulsar_application
   src/project/project_codec.cpp
   src/timeline/timeline_clip_resolver.cpp
   src/export/export_plan.cpp
+  src/export/export_job.cpp
   src/export/offline_video_renderer.cpp
   src/export/offline_audio_renderer.cpp
   src/playback/monotonic_clock.cpp

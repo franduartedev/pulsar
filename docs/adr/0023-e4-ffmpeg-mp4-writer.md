@@ -73,6 +73,14 @@ paquete físico AAC de priming con PTS `-1024` y `skip_samples=1024`; el primer
 paquete editorial empieza en cero. Los paquetes no negativos suman exactamente
 la duración lógica y el exceso físico queda explicado por ese priming.
 
+El boundary E5 debe entregar una instancia de writer a un solo `ExportJob`.
+`ExportJob` rechaza un segundo `run()` concurrente sobre la misma instancia;
+la coordinación de destinos distintos queda en el owner del worker/job.
+
+El writer E4 conserva el FIFO máximo de 4096 frames y rechaza explícitamente
+un encoder cuyo `frame_size` exceda ese límite, evitando un loop sin avance
+si cambia el backend.
+
 ## Portabilidad
 
 El seam neutral permite reemplazar el backend FFmpeg por libx264/AAC de otra
