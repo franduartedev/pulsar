@@ -20,6 +20,7 @@
 
 #include <condition_variable>
 #include <cstdint>
+#include <atomic>
 #include <filesystem>
 #include <functional>
 #include <memory>
@@ -48,6 +49,10 @@ class DesktopController final : public QObject {
   Q_PROPERTY(bool hasVideoMedia READ hasVideoMedia NOTIFY mediaChanged)
   Q_PROPERTY(bool playing READ playing NOTIFY playbackChanged)
   Q_PROPERTY(bool busy READ busy NOTIFY busyChanged)
+  Q_PROPERTY(bool exportRunning READ exportRunning NOTIFY exportRunningChanged)
+  Q_PROPERTY(double exportProgress READ exportProgress NOTIFY exportProgressChanged)
+  Q_PROPERTY(QString exportStatus READ exportStatus NOTIFY exportStatusChanged)
+  Q_PROPERTY(QString exportDestination READ exportDestination NOTIFY exportDestinationChanged)
   Q_PROPERTY(bool projectDirty READ projectDirty NOTIFY projectDirtyChanged)
   Q_PROPERTY(QString activeProjectPath READ activeProjectPath NOTIFY activeProjectPathChanged)
   Q_PROPERTY(bool previewLate READ previewLate NOTIFY technicalStatusChanged)
@@ -88,6 +93,10 @@ public:
   [[nodiscard]] bool hasVideoMedia() const { return has_video_media_; }
   [[nodiscard]] bool playing() const { return playing_; }
   [[nodiscard]] bool busy() const { return busy_; }
+  [[nodiscard]] bool exportRunning() const noexcept { return export_running_; }
+  [[nodiscard]] double exportProgress() const noexcept { return export_progress_; }
+  [[nodiscard]] QString exportStatus() const { return export_status_; }
+  [[nodiscard]] QString exportDestination() const { return export_destination_; }
   [[nodiscard]] bool projectDirty() const noexcept {
     return active_session_ && active_session_->is_dirty();
   }
@@ -142,11 +151,15 @@ public:
   Q_INVOKABLE void insertBuiltinSound(const QString& sound_id);
   Q_INVOKABLE void saveProject(const QString& path);
   Q_INVOKABLE void openProject(const QString& path);
+  Q_INVOKABLE void exportProject(const QString& path);
+  Q_INVOKABLE void cancelExport();
   Q_INVOKABLE void attachWaveformItem(const QString& clip_key, QObject* item);
   Q_INVOKABLE void detachWaveformItem(QObject* item);
 signals:
   void statusChanged(); void technicalStatusChanged(); void mediaChanged(); void errorChanged();
   void previewChanged(); void positionChanged(); void playbackChanged(); void busyChanged();
+  void exportRunningChanged(); void exportProgressChanged(); void exportStatusChanged();
+  void exportDestinationChanged();
   void projectDirtyChanged(); void activeProjectPathChanged();
   void diagnosticsChanged(); void timelineChanged(); void timelinePlayheadChanged(); void timelineViewChanged(); void waveformPolicyChanged(); void editActionStateChanged(); void focusImportPathRequested();
   void soundLibraryChanged();
@@ -167,6 +180,9 @@ private:
   };
   struct VisualIdentity { std::uint64_t session_epoch; std::uint64_t document_generation; pulsar::domain::ClipId clip_id; pulsar::domain::MediaId media_id; std::uint64_t source_epoch; std::uint64_t ordinal; };
   void workerLoop();
+  void exportLoop(pulsar::application::ProjectSnapshot snapshot,
+                  std::filesystem::path destination, std::filesystem::path project_file,
+                  std::uint64_t generation);
   void postOpen(std::filesystem::path path, std::uint64_t generation);
   [[nodiscard]] std::unique_ptr<pulsar::desktop::EditorSession> makeEditorSession();
   // Worker factory bound to one mailbox, measuring construction for D3
@@ -196,6 +212,7 @@ private:
   void clearProgram(QString state);
   void displayLease(const pulsar::application::TimelinePresentSample&);
   void setBusy(bool); void setStatus(QString); void setTechnicalStatus(QString); void setPreviewLate(bool);
+  void setExportStatus(QString);
   void setError(QString); void clearError();
   [[nodiscard]] static QString formatTime(pulsar::domain::MediaTime);
   [[nodiscard]] static pulsar::domain::MediaTime mediaTimeFromSeconds(double);
@@ -219,9 +236,13 @@ private:
   std::uint64_t editor_session_epoch_{1};
   std::uint64_t import_request_generation_{0};
   std::thread worker_; mutable std::mutex mutex_; std::condition_variable wake_; bool stop_worker_{false}; std::optional<WorkerCommand> pending_command_;
+  std::thread export_thread_;
+  std::atomic_bool export_cancel_requested_{false};
+  std::uint64_t export_generation_{0};
   QString status_{"Vacío"}; QString technical_status_{"Preview CPU"}; QString media_name_; QString metadata_; QString error_message_; QString preview_source_; QString viewer_state_{"empty"}; QString position_text_{"00:00:00.000"}; QString duration_text_{"--:--:--.---"}; QString debug_metrics_; QVariantList timeline_ruler_ticks_; QVariantList timeline_tracks_; QString timeline_duration_text_{"00:00:00.000"}; QString selected_clip_key_;
   TimelineClipListModel timeline_model_;
-  double timeline_playhead_progress_{0.0}; double progress_{0.0}; bool has_media_{false}; bool has_video_media_{false}; bool playing_{false}; bool busy_{false}; bool preview_late_{false}; bool published_project_dirty_{false};
+  double timeline_playhead_progress_{0.0}; double progress_{0.0}; double export_progress_{0.0}; bool has_media_{false}; bool has_video_media_{false}; bool playing_{false}; bool busy_{false}; bool export_running_{false}; bool preview_late_{false}; bool published_project_dirty_{false};
+  QString export_status_{""}; QString export_destination_;
   std::optional<pulsar::domain::MediaTime> timeline_view_start_;
   std::optional<pulsar::domain::MediaTime> timeline_view_duration_;
   double timeline_zoom_{1.0};

@@ -62,6 +62,15 @@ Window {
         onAccepted: controller.saveProject(decodeURIComponent(selectedFile.toString().replace(/^file:\/\//, "")))
     }
 
+    FileDialog {
+        id: exportDialog
+        title: "Exportar vídeo"
+        fileMode: FileDialog.SaveFile
+        nameFilters: ["Vídeo MP4 (*.mp4)"]
+        defaultSuffix: "mp4"
+        onAccepted: controller.exportProject(decodeURIComponent(selectedFile.toString().replace(/^file:\/\//, "")))
+    }
+
     DropArea {
         anchors.fill: parent
         onDropped: function(drop) {
@@ -82,6 +91,7 @@ Window {
         onSaveProjectRequested: controller.activeProjectPath.length > 0 ? controller.saveProject(controller.activeProjectPath) : saveProjectDialog.open()
         onSaveProjectAsRequested: saveProjectDialog.open()
         onImportMediaRequested: fileDialog.open()
+        onExportRequested: exportDialog.open()
     }
 
     MediaPanel {

@@ -8,10 +8,15 @@
 #include <pulsar/media/ffmpeg/ffmpeg_audio_playback_source.hpp>
 #include <pulsar/media/ffmpeg/ffmpeg_playback_worker.hpp>
 #include <pulsar/media/ffmpeg/ffmpeg_preview_converter.hpp>
+#include <pulsar/media/ffmpeg/ffmpeg_offline_video_source.hpp>
+#include <pulsar/media/ffmpeg/ffmpeg_offline_audio_source.hpp>
+#include <pulsar/media/ffmpeg/ffmpeg_export_media_writer.hpp>
+#include <pulsar/application/export/export_job.hpp>
 #if defined(PULSAR_HAS_QT_AUDIO)
 #include <pulsar/media/qt_audio/qt_audio_output.hpp>
 #endif
 #include <pulsar/project_file/file_project_repository.hpp>
+#include <pulsar/project_file/filesystem_export_output_publisher.hpp>
 
 #include <QMetaObject>
 #include <QFile>
@@ -61,6 +66,61 @@ using pulsar::media::ffmpeg::FFmpegMediaProbe;
 using pulsar::media::ffmpeg::FFmpegPlaybackWorker;
 using pulsar::media::ffmpeg::FFmpegPreviewConverter;
 using pulsar::media::ffmpeg::FFmpegPreviewFrame;
+
+std::filesystem::path desktop_runtime_media_path(const std::filesystem::path& project_file,
+                                                  const std::filesystem::path& authored) {
+  return pulsar::desktop::is_builtin_sound_locator(authored)
+             ? pulsar::desktop::builtin_sound_runtime_path(authored)
+             : pulsar::desktop::resolve_runtime_media_path(project_file, authored);
+}
+
+class ResolvingExportVideoSourceFactory final
+    : public pulsar::application::exporting::OfflineVideoSourceFactory {
+public:
+  explicit ResolvingExportVideoSourceFactory(std::filesystem::path project_file)
+      : project_file_{std::move(project_file)} {}
+
+  [[nodiscard]] std::unique_ptr<pulsar::application::exporting::OfflineVideoSource> open(
+      const std::filesystem::path& logical_locator, int video_stream_index) override {
+    return std::make_unique<pulsar::media::ffmpeg::FFmpegOfflineVideoSource>(
+        desktop_runtime_media_path(project_file_, logical_locator), video_stream_index);
+  }
+
+private:
+  std::filesystem::path project_file_;
+};
+
+class DesktopExportWriterFactory final
+    : public pulsar::application::exporting::ExportMediaWriterFactory {
+public:
+  [[nodiscard]] std::unique_ptr<pulsar::application::exporting::ExportMediaWriter> open(
+      const pulsar::application::exporting::ExportPlan& plan,
+      const std::filesystem::path& temporary_output) override {
+    return std::make_unique<pulsar::media::ffmpeg::FFmpegExportMediaWriter>(plan,
+                                                                              temporary_output);
+  }
+};
+
+QString exportErrorMessage(const pulsar::application::exporting::ExportError& error) {
+  using Code = pulsar::application::exporting::ExportErrorCode;
+  switch (error.code()) {
+  case Code::MissingMedia: return QStringLiteral("Falta un archivo multimedia del proyecto.");
+  case Code::EncoderUnavailable:
+    return QStringLiteral("El codificador de vídeo/audio requerido no está disponible.");
+  case Code::OutputOpenFailed:
+    return QStringLiteral("No se pudo crear el archivo de exportación.");
+  case Code::PublishFailed: return QStringLiteral("No se pudo guardar el archivo final.");
+  case Code::Cancelled: return QStringLiteral("Exportación cancelada");
+  case Code::SourceOpenFailed: return QStringLiteral("No se pudo abrir un medio del proyecto.");
+  case Code::DecodeFailed: return QStringLiteral("No se pudo decodificar un medio del proyecto.");
+  case Code::RenderFailed: return QStringLiteral("No se pudo renderizar la timeline.");
+  case Code::MuxFailed: return QStringLiteral("No se pudo combinar vídeo y audio.");
+  case Code::FinalizeFailed: return QStringLiteral("No se pudo finalizar el archivo de exportación.");
+  case Code::InvalidProject: return QStringLiteral("El proyecto no se puede exportar.");
+  case Code::InternalInvariant: return QStringLiteral("Ocurrió un error interno de exportación.");
+  }
+  return QStringLiteral("Ocurrió un error de exportación.");
+}
 
 QString rationalText(Rational value) { return QString::number(value.numerator()) + "/" + QString::number(value.denominator()); }
 QImage imageFromPreview(const FFmpegPreviewFrame& preview) {
@@ -178,6 +238,8 @@ void DesktopController::loadSoundLibrary() {
 DesktopController::~DesktopController() {
   tick_timer_.stop();
   waveform_timer_.stop();
+  export_cancel_requested_.store(true, std::memory_order_release);
+  if (export_thread_.joinable()) export_thread_.join();
   waveform_items_.clear();
   waveform_item_stamps_.clear();
   { std::lock_guard lock{mutex_}; stop_worker_ = true; pending_command_.reset(); }
@@ -829,6 +891,115 @@ void DesktopController::openProject(const QString& path) {
   emit positionChanged();
 }
 
+void DesktopController::exportProject(const QString& path) {
+  const auto trimmed = path.trimmed();
+  if (export_running_) return;
+  if (!active_session_ || !has_video_media_) {
+    setExportStatus(QStringLiteral("No hay vídeo exportable en el proyecto."));
+    return;
+  }
+  if (trimmed.isEmpty()) {
+    setExportStatus(QStringLiteral("Selecciona un destino para exportar."));
+    return;
+  }
+  auto destination = std::filesystem::path{trimmed.toStdString()};
+  if (destination.extension() != ".mp4" && destination.extension() != ".MP4") {
+    setExportStatus(QStringLiteral("El destino debe ser un archivo .mp4."));
+    return;
+  }
+
+  if (export_thread_.joinable()) export_thread_.join();
+  const auto snapshot = active_session_->document().snapshot();
+  const auto project_file = active_project_file_;
+  const auto generation = ++export_generation_;
+  export_cancel_requested_.store(false, std::memory_order_release);
+  export_destination_ = QString::fromStdString(destination.string());
+  emit exportDestinationChanged();
+  export_progress_ = 0.0;
+  emit exportProgressChanged();
+  export_running_ = true;
+  emit exportRunningChanged();
+  setExportStatus(QStringLiteral("Exportando…"));
+  clearError();
+  pause();
+  export_thread_ = std::thread{&DesktopController::exportLoop, this, snapshot,
+                                std::move(destination), project_file, generation};
+}
+
+void DesktopController::cancelExport() {
+  if (!export_running_) return;
+  export_cancel_requested_.store(true, std::memory_order_release);
+  setExportStatus(QStringLiteral("Cancelando…"));
+}
+
+void DesktopController::exportLoop(pulsar::application::ProjectSnapshot snapshot,
+                                    std::filesystem::path destination,
+                                    std::filesystem::path project_file,
+                                    std::uint64_t generation) {
+  try {
+    ResolvingExportVideoSourceFactory video_sources{project_file};
+    pulsar::media::ffmpeg::FFmpegOfflineAudioSourceFactory audio_sources(
+        [project_file](const std::filesystem::path& logical) {
+          return desktop_runtime_media_path(project_file, logical);
+        });
+    DesktopExportWriterFactory writers;
+    pulsar::project_file::FilesystemExportOutputPublisher publisher;
+    pulsar::application::exporting::ExportJob job{video_sources, audio_sources, writers, publisher};
+    double last_published = -1.0;
+    const auto result = job.run(
+        {std::move(snapshot), destination, pulsar::application::exporting::ExportProfile::beta_v01()},
+        [this] { return export_cancel_requested_.load(std::memory_order_acquire); },
+        [this, generation, &last_published](
+            const pulsar::application::exporting::ExportProgress& progress) {
+          if (progress.fraction != 1.0 && progress.fraction - last_published < 0.01) return;
+          last_published = progress.fraction;
+          QMetaObject::invokeMethod(
+              this,
+              [this, generation, value = progress.fraction] {
+                if (generation != export_generation_) return;
+                export_progress_ = std::clamp(value, 0.0, 1.0);
+                emit exportProgressChanged();
+              },
+              Qt::QueuedConnection);
+        });
+    QMetaObject::invokeMethod(
+        this,
+        [this, generation, result] {
+          if (generation != export_generation_) return;
+          export_running_ = false;
+          emit exportRunningChanged();
+          export_progress_ = result.progress.fraction;
+          emit exportProgressChanged();
+          setExportStatus(QStringLiteral("Exportación completada"));
+        },
+        Qt::QueuedConnection);
+  } catch (const pulsar::application::exporting::ExportError& error) {
+    QMetaObject::invokeMethod(
+        this,
+        [this, generation, message = exportErrorMessage(error), cancelled =
+                                  error.code() == pulsar::application::exporting::ExportErrorCode::Cancelled] {
+          if (generation != export_generation_) return;
+          export_running_ = false;
+          emit exportRunningChanged();
+          setExportStatus(cancelled ? QStringLiteral("Exportación cancelada")
+                                    : QStringLiteral("Error de exportación"));
+          if (!cancelled) setError(message);
+        },
+        Qt::QueuedConnection);
+  } catch (const std::exception& error) {
+    QMetaObject::invokeMethod(
+        this,
+        [this, generation, message = QString::fromUtf8(error.what())] {
+          if (generation != export_generation_) return;
+          export_running_ = false;
+          emit exportRunningChanged();
+          setExportStatus(QStringLiteral("Error de exportación"));
+          setError(message);
+        },
+        Qt::QueuedConnection);
+  }
+}
+
 std::unique_ptr<pulsar::desktop::EditorSession> DesktopController::makeEditorSession() {
 #if defined(PULSAR_HAS_QT_AUDIO)
   auto output = std::make_unique<pulsar::media::qt_audio::QtAudioOutput>(
@@ -998,7 +1169,7 @@ QString DesktopController::performanceSnapshot() const {
   }
   return lines.join(QLatin1Char('\n'));
 }
-void DesktopController::setBusy(bool value){if(busy_==value)return;busy_=value;emit busyChanged();}void DesktopController::setStatus(QString value){if(status_==value)return;status_=std::move(value);emit statusChanged();}void DesktopController::setTechnicalStatus(QString value){if(technical_status_==value)return;technical_status_=std::move(value);emit technicalStatusChanged();}void DesktopController::setPreviewLate(bool value){if(preview_late_==value)return;preview_late_=value;emit technicalStatusChanged();}void DesktopController::setError(QString value){error_message_=std::move(value);emit errorChanged();}void DesktopController::clearError(){if(error_message_.isEmpty())return;error_message_.clear();emit errorChanged();}
+void DesktopController::setBusy(bool value){if(busy_==value)return;busy_=value;emit busyChanged();}void DesktopController::setStatus(QString value){if(status_==value)return;status_=std::move(value);emit statusChanged();}void DesktopController::setTechnicalStatus(QString value){if(technical_status_==value)return;technical_status_=std::move(value);emit technicalStatusChanged();}void DesktopController::setPreviewLate(bool value){if(preview_late_==value)return;preview_late_=value;emit technicalStatusChanged();}void DesktopController::setExportStatus(QString value){if(export_status_==value)return;export_status_=std::move(value);emit exportStatusChanged();}void DesktopController::setError(QString value){error_message_=std::move(value);emit errorChanged();}void DesktopController::clearError(){if(error_message_.isEmpty())return;error_message_.clear();emit errorChanged();}
 QString DesktopController::formatTime(MediaTime time){auto sec=time.seconds();auto whole=sec.numerator()/sec.denominator();auto rem=sec.numerator()%sec.denominator();auto ms=static_cast<std::int64_t>(std::llround(static_cast<long double>(rem)*1000.0L/static_cast<long double>(sec.denominator())));if(ms>=1000){++whole;ms=0;}return QString("%1:%2:%3.%4").arg(whole/3600,2,10,QChar('0')).arg((whole/60)%60,2,10,QChar('0')).arg(whole%60,2,10,QChar('0')).arg(ms,3,10,QChar('0'));}
 MediaTime DesktopController::mediaTimeFromSeconds(double seconds){if(!std::isfinite(seconds)||seconds<=0)return MediaTime::zero();const auto q=std::llround(seconds*1'000'000.0);return MediaTime{q,Rational{1,1'000'000}};}
 double DesktopController::secondsAsDouble(MediaTime time){const auto sec=time.seconds();return static_cast<double>(sec.numerator())/static_cast<double>(sec.denominator());}

@@ -7,6 +7,7 @@ Rectangle {
     signal saveProjectRequested()
     signal saveProjectAsRequested()
     signal importMediaRequested()
+    signal exportRequested()
     color: Theme.header
     border.color: Theme.border
     border.width: 1
@@ -53,6 +54,8 @@ Rectangle {
         PButton { width: 118; text: "GUARDAR COMO"; onClicked: header.saveProjectAsRequested() }
         Rectangle { width: 1; height: 26; color: Theme.border; anchors.verticalCenter: parent.verticalCenter; opacity: 0.8 }
         PButton { width: 116; text: "IMPORTAR MEDIO"; onClicked: header.importMediaRequested() }
+        PButton { width: 92; text: "EXPORTAR"; primary: true; enabled: controller.hasVideoMedia && !controller.exportRunning; onClicked: header.exportRequested() }
+        PButton { width: 92; text: "CANCELAR"; visible: controller.exportRunning; enabled: controller.exportRunning; onClicked: controller.cancelExport() }
     }
 
     Row {
@@ -65,8 +68,8 @@ Rectangle {
         Column {
             anchors.verticalCenter: parent.verticalCenter
             spacing: 1
-            Text { text: controller.errorMessage.length > 0 ? "ATENCIÓN" : (controller.playing ? "REPRODUCIENDO" : (controller.busy ? "PROCESANDO" : "LISTO")); color: controller.errorMessage.length > 0 ? Theme.danger : Theme.muted; font.pixelSize: Theme.fontSizeXS; font.bold: true; font.letterSpacing: 0.8 }
-            Text { text: controller.errorMessage.length > 0 ? controller.errorMessage : controller.status; color: controller.errorMessage.length > 0 ? Theme.danger : Theme.faint; font.pixelSize: Theme.fontSizeXS; elide: Text.ElideRight; width: 86 }
+            Text { text: controller.errorMessage.length > 0 ? "ATENCIÓN" : (controller.exportRunning ? "EXPORTANDO" : (controller.playing ? "REPRODUCIENDO" : (controller.busy ? "PROCESANDO" : "LISTO"))); color: controller.errorMessage.length > 0 ? Theme.danger : Theme.muted; font.pixelSize: Theme.fontSizeXS; font.bold: true; font.letterSpacing: 0.8 }
+            Text { text: controller.errorMessage.length > 0 ? controller.errorMessage : (controller.exportStatus.length > 0 ? controller.exportStatus : controller.status); color: controller.errorMessage.length > 0 ? Theme.danger : Theme.faint; font.pixelSize: Theme.fontSizeXS; elide: Text.ElideRight; width: 120 }
         }
     }
     Rectangle { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; height: 2; color: Theme.accent; opacity: 0.28 }
