@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <limits>
+#include <sstream>
 #include <type_traits>
 #include <utility>
 
@@ -180,8 +181,23 @@ const OfflineVideoSourceFrame& OfflineVideoRenderer::select_source_frame(
         *active.candidate->presentation_timestamp +
                 *active.candidate->presentation_duration <=
             source_time) {
-      throw OfflineVideoRenderError{OfflineVideoRenderErrorCode::SourceEndedEarly,
-                                    "offline video source ended before the requested interval"};
+      // A demuxer is allowed to end immediately after the final physical
+      // frame without exposing a duration for that frame.  The project
+      // already validated the half-open source range against the media
+      // duration, so the final decoded frame covers the remainder of this
+      // clip range.  Do not require a synthetic PTS at every output-grid
+      // instant.  An explicit duration still wins when the source provides
+      // one, because it can prove an actual gap before the clip boundary.
+      const auto nominal_output_duration = domain::MediaTime{
+          1, domain::Rational{plan_.frame_rate().rational().denominator(),
+                              plan_.frame_rate().rational().numerator()}};
+      if (active.candidate->presentation_duration.has_value() ||
+          source_time >= clip.source_range.end() ||
+          *active.candidate->presentation_timestamp + nominal_output_duration <= source_time) {
+        throw OfflineVideoRenderError{
+            OfflineVideoRenderErrorCode::SourceEndedEarly,
+            "offline video source ended before the requested interval"};
+      }
     }
   }
   update_live_frame_metric();
@@ -264,8 +280,18 @@ OfflineVideoFrame OfflineVideoRenderer::render_frame(domain::FrameNumber frame_i
   const auto timeline_time = output_frame_time(frame_index, plan_.frame_rate());
   const auto outcome = resolve_clip_at(plan_.snapshot(), plan_.snapshot().video_track_id,
                                        timeline_time);
-  OfflineVideoFrame output = std::visit(
-      [this, frame_index, timeline_time](const auto& resolved) -> OfflineVideoFrame {
+  std::ostringstream diagnostic;
+  diagnostic << "frame_index=" << frame_index.value()
+             << " timeline_time=" << static_cast<double>(timeline_time);
+  if (const auto* clip = std::get_if<ResolvedClip>(&outcome)) {
+    const auto source_time = clip_source_position(*clip, timeline_time);
+    diagnostic << " clip_id=" << clip->clip_id.value() << " media_id=" << clip->media_id.value()
+               << " source_time=" << static_cast<double>(source_time);
+  }
+
+  try {
+    OfflineVideoFrame output = std::visit(
+        [this, frame_index, timeline_time](const auto& resolved) -> OfflineVideoFrame {
         using Result = std::decay_t<decltype(resolved)>;
         if constexpr (std::is_same_v<Result, TimelineGap>) {
           active_source_.reset();
@@ -280,11 +306,27 @@ OfflineVideoFrame OfflineVideoRenderer::render_frame(domain::FrameNumber frame_i
           throw OfflineVideoRenderError{OfflineVideoRenderErrorCode::InternalInvariant,
                                         "timeline ended before the export plan"};
         }
-      },
-      outcome);
-  ++next_frame_index_;
-  ++metrics_.output_frames;
-  return output;
+        },
+        outcome);
+    ++next_frame_index_;
+    ++metrics_.output_frames;
+    return output;
+  } catch (OfflineVideoRenderError& error) {
+    if (active_source_ != nullptr) {
+      if (active_source_->candidate.has_value() &&
+          active_source_->candidate->presentation_timestamp.has_value()) {
+        diagnostic << " candidate_pts="
+                   << static_cast<double>(*active_source_->candidate->presentation_timestamp);
+      }
+      if (active_source_->lookahead.has_value() &&
+          active_source_->lookahead->presentation_timestamp.has_value()) {
+        diagnostic << " lookahead_pts="
+                   << static_cast<double>(*active_source_->lookahead->presentation_timestamp);
+      }
+    }
+    error.set_diagnostic_context(diagnostic.str());
+    throw;
+  }
 }
 
 } // namespace pulsar::application::exporting

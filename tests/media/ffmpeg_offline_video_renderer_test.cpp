@@ -159,10 +159,53 @@ void renders_long_fixtures_with_bounded_state() {
   }
 }
 
+void renders_h264_24fps_non_frame_aligned_source_range() {
+  const auto path = std::filesystem::temp_directory_path() /
+                    ("pulsar-e7-fix4-h264-24-" +
+                     std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) +
+                     ".mp4");
+  const auto command = shell_quote(PULSAR_TEST_FFMPEG_CLI) +
+                       " -y -hide_banner -loglevel error -f lavfi "
+                       "-i testsrc2=size=1280x720:rate=24:duration=11.458 "
+                       "-c:v libx264 -pix_fmt yuv420p -bf 2 -g 48 "
+                       "-video_track_timescale 12288 -an " + shell_quote(path);
+  if (std::system(command.c_str()) != 0) {
+    throw std::runtime_error{"could not create H264/24fps regression fixture"};
+  }
+
+  try {
+    pulsar::application::ProjectDocument document;
+    pulsar::application::CommandProcessor processor{document};
+    pulsar::media::ffmpeg::FFmpegMediaProbe probe;
+    const auto media = processor.import_asset(path, probe);
+    const auto asset = document.find_asset(media);
+    assert(asset.has_value());
+    const auto source_start = pulsar::domain::MediaTime{2127, {1, 1000}};
+    const auto source_end = pulsar::domain::MediaTime{11458, {1, 1000}};
+    (void)processor.add_clip(media,
+                             pulsar::domain::TimeRange{source_start, source_end},
+                             pulsar::domain::MediaTime::zero());
+    const auto snapshot = document.snapshot();
+    const auto plan = pulsar::application::exporting::ExportPlan::build(snapshot);
+    pulsar::media::ffmpeg::FFmpegOfflineVideoSourceFactory factory;
+    pulsar::application::exporting::OfflineVideoRenderer renderer{plan, factory};
+    for (std::int64_t index = 0; index < plan.frame_count(); ++index) {
+      (void)renderer.render_frame(pulsar::domain::FrameNumber{index});
+    }
+    assert(renderer.metrics().output_frames == static_cast<std::uint64_t>(plan.frame_count()));
+    assert(renderer.metrics().decoder_opens == 1);
+  } catch (...) {
+    std::filesystem::remove(path);
+    throw;
+  }
+  std::filesystem::remove(path);
+}
+
 } // namespace
 
 int main() {
   renders_real_fixture_sequentially();
   normalizes_non_zero_stream_origin();
   renders_long_fixtures_with_bounded_state();
+  renders_h264_24fps_non_frame_aligned_source_range();
 }

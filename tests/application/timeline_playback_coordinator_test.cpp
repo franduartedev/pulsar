@@ -231,6 +231,7 @@ public:
     metrics_.buffered_device_frames = pending_;
   }
   void report_underrun() { ++metrics_.underrun_count; }
+  void set_processed(std::uint64_t frames) { metrics_.device_frames_processed = frames; }
   bool running() const noexcept { return state_ == application::AudioOutputState::Running; }
 
 private:
@@ -758,6 +759,43 @@ void audio_device_is_the_single_running_clock() {
   assert(coordinator.timeline_position() < time(1));
 }
 
+void audio_device_cannot_move_past_timeline_end() {
+  Fixture fixture;
+  auto snapshot = snapshot_with_clip(fixture, fixture.media_one, TimeRange{time(0), time(10)},
+                                     time(0));
+  auto& asset = snapshot.assets.front();
+  snapshot.assets.front() = application::MediaAsset{
+      asset.id(), asset.source_locator(), asset.video_stream_index(), asset.playable_duration(),
+      asset.metadata(), asset.availability(), asset.availability_reason(),
+      application::AudioAssetMetadata{7, 44100, 1, Rational{1, 44100}, time(10)}};
+
+  FakeClock clock;
+  SyncOutput output;
+  TimelinePlaybackCoordinator coordinator{
+      clock, fixture.factory(),
+      [](const std::filesystem::path&, int) { return std::make_unique<SyncAudioSource>(); },
+      &output};
+  coordinator.set_snapshot(snapshot);
+  (void)coordinator.update();
+  coordinator.play();
+  (void)coordinator.update();
+
+  output.set_processed(9 * 44100 + 39'690);
+  (void)coordinator.update();
+  assert(coordinator.timeline_position() < time(10));
+
+  output.set_processed(20 * 44100);
+  (void)coordinator.update();
+  assert(coordinator.timeline_position() == time(10));
+  assert(coordinator.semantic_condition() == application::PlaybackSemanticCondition::TimelineEnded);
+  assert(!output.running());
+
+  output.set_processed(20 * 44100);
+  (void)coordinator.update();
+  assert(coordinator.timeline_position() == time(10));
+  assert(std::holds_alternative<TimelineEndedPresentation>(coordinator.update()));
+}
+
 void paused_starvation_recovery_does_not_resume() {
   Fixture fixture;
   auto snapshot = snapshot_with_clip(fixture, fixture.media_one, TimeRange{time(0), time(10)},
@@ -1097,6 +1135,7 @@ int main() {
   seek_preserves_intent_tests();
   edit_shrinking_timeline_reanchors_stale_playhead();
   audio_device_is_the_single_running_clock();
+  audio_device_cannot_move_past_timeline_end();
   paused_starvation_recovery_does_not_resume();
   video_hold_recovery_resumes_audio_without_user_action();
   no_audio_clip_is_healthy_silence_and_advances();

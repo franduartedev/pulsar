@@ -194,7 +194,15 @@ TimelinePresentation TimelinePlaybackCoordinator::update() {
 }
 
 domain::MediaTime TimelinePlaybackCoordinator::timeline_position() const {
-  return transport_.position().value();
+  const auto position = transport_.position().value();
+  if (!snapshot_.has_value()) return position;
+  const auto duration = snapshot_->timeline.duration();
+  // The public editorial position is bounded even between update ticks.  The
+  // next update still performs the semantic transition through enter_ended(),
+  // which stops audio and reanchors the transport; this guard prevents UI and
+  // diagnostics from observing physical/software clock overshoot meanwhile.
+  if (position > duration) return duration;
+  return position;
 }
 
 void TimelinePlaybackCoordinator::reconcile(const TimelineResolveOutcome& outcome,
@@ -430,6 +438,17 @@ void TimelinePlaybackCoordinator::synchronize_audio_clock() {
     apply_audio_condition(AudioPlaybackCondition::Present);
     if (const auto position = audio_session_->clock_position(); position.has_value()) {
       const auto editorial_position = timeline_position();
+      const auto duration = snapshot_->timeline.duration();
+      if (*position >= duration) {
+        // The device reports physical progress, which may include queued PCM
+        // beyond the logical editorial endpoint.  Once that endpoint is
+        // reached it becomes the authoritative transport state: stop the
+        // device, enter TimelineEnded, and reanchor exactly at duration.
+        audio_session_->pause();
+        clock_source_ = PlaybackClockSource::AudioDevice;
+        enter_ended(TimelineEnded{duration, duration}, false);
+        return;
+      }
       if (*position >= editorial_position) {
         clock_source_ = PlaybackClockSource::AudioDevice;
         reanchor_transport(*position);

@@ -67,9 +67,14 @@ public:
       : std::runtime_error{std::move(message)}, code_{code} {}
 
   [[nodiscard]] OfflineVideoRenderErrorCode code() const noexcept { return code_; }
+  void set_diagnostic_context(std::string context) { diagnostic_context_ = std::move(context); }
+  [[nodiscard]] const std::string& diagnostic_context() const noexcept {
+    return diagnostic_context_;
+  }
 
 private:
   OfflineVideoRenderErrorCode code_;
+  std::string diagnostic_context_;
 };
 
 struct OfflineVideoFrame {

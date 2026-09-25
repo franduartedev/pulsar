@@ -33,6 +33,7 @@
 #include <cstring>
 #include <exception>
 #include <iomanip>
+#include <iostream>
 #include <limits>
 #include <sstream>
 #include <stdexcept>
@@ -120,6 +121,25 @@ QString exportErrorMessage(const pulsar::application::exporting::ExportError& er
   case Code::InternalInvariant: return QStringLiteral("Ocurrió un error interno de exportación.");
   }
   return QStringLiteral("Ocurrió un error de exportación.");
+}
+
+const char* exportErrorCodeText(pulsar::application::exporting::ExportErrorCode code) noexcept {
+  using Code = pulsar::application::exporting::ExportErrorCode;
+  switch (code) {
+  case Code::InvalidProject: return "InvalidProject";
+  case Code::MissingMedia: return "MissingMedia";
+  case Code::SourceOpenFailed: return "SourceOpenFailed";
+  case Code::DecodeFailed: return "DecodeFailed";
+  case Code::RenderFailed: return "RenderFailed";
+  case Code::EncoderUnavailable: return "EncoderUnavailable";
+  case Code::OutputOpenFailed: return "OutputOpenFailed";
+  case Code::MuxFailed: return "MuxFailed";
+  case Code::FinalizeFailed: return "FinalizeFailed";
+  case Code::PublishFailed: return "PublishFailed";
+  case Code::Cancelled: return "Cancelled";
+  case Code::InternalInvariant: return "InternalInvariant";
+  }
+  return "Unknown";
 }
 
 QString rationalText(Rational value) { return QString::number(value.numerator()) + "/" + QString::number(value.denominator()); }
@@ -974,6 +994,11 @@ void DesktopController::exportLoop(pulsar::application::ProjectSnapshot snapshot
         },
         Qt::QueuedConnection);
   } catch (const pulsar::application::exporting::ExportError& error) {
+    if (error.code() != pulsar::application::exporting::ExportErrorCode::Cancelled) {
+      std::cerr << "EXPORT ERROR\n"
+                << "export_code=" << exportErrorCodeText(error.code())
+                << " cause=" << error.what() << '\n';
+    }
     QMetaObject::invokeMethod(
         this,
         [this, generation, message = exportErrorMessage(error), cancelled =
@@ -987,6 +1012,8 @@ void DesktopController::exportLoop(pulsar::application::ProjectSnapshot snapshot
         },
         Qt::QueuedConnection);
   } catch (const std::exception& error) {
+    std::cerr << "EXPORT ERROR\n"
+              << "export_code=InternalInvariant cause=" << error.what() << '\n';
     QMetaObject::invokeMethod(
         this,
         [this, generation, message = QString::fromUtf8(error.what())] {

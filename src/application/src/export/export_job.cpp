@@ -206,7 +206,11 @@ ExportResult ExportJob::run(const ExportRequest& request, CancelPredicate is_can
   } catch (const OfflineVideoRenderError& error) {
     if (writer) writer->abort();
     if (!published) publisher_.cleanup_temporary(temporary_output);
-    throw ExportError{map_video_error(error.code()), error.what()};
+    std::string message = error.what();
+    if (!error.diagnostic_context().empty()) {
+      message += " [" + error.diagnostic_context() + "]";
+    }
+    throw ExportError{map_video_error(error.code()), std::move(message)};
   } catch (const OfflineAudioRenderError& error) {
     if (writer) writer->abort();
     if (!published) publisher_.cleanup_temporary(temporary_output);
