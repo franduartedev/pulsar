@@ -973,15 +973,25 @@ void editorial_edit_reanchors_video_and_audio_at_half_open_boundaries() {
   coordinator.set_snapshot(fixture.document.snapshot());
   coordinator.seek(time(4));
   coordinator.play();
+  auto presentation = coordinator.update();
+  assert(std::holds_alternative<TimelinePresentSample>(presentation));
+  assert(!output.running());
   (void)coordinator.update();
+  assert(output.running());
 
   const auto right_id = fixture.processor.split_clip(first_id, time(5));
   coordinator.set_snapshot(fixture.document.snapshot());
   coordinator.play();
   assert(!output.running());
-  auto presentation = coordinator.update();
+  presentation = coordinator.update();
   assert(std::holds_alternative<TimelinePresentSample>(presentation) ||
          std::holds_alternative<TimelineHoldPresentation>(presentation));
+  // First pass: the fresh frame is returned before audio is allowed to start.
+  assert(!output.running());
+  presentation = coordinator.update();
+  assert(std::holds_alternative<TimelinePresentSample>(presentation) ||
+         std::holds_alternative<TimelineHoldPresentation>(presentation));
+  assert(output.running());
   assert(!fixture.requested_targets.empty());
   assert(fixture.requested_targets.back() == time(9));
 
@@ -995,7 +1005,19 @@ void editorial_edit_reanchors_video_and_audio_at_half_open_boundaries() {
   } else {
     assert(std::get<TimelineHoldPresentation>(presentation).clip_id == right_id);
   }
+  assert(!output.running());
+  (void)coordinator.update();
+  assert(output.running());
   assert(fixture.requested_targets.back() == time(10));
+  for (int pass = 0; pass < 3; ++pass) {
+    coordinator.seek(time(5));
+    presentation = coordinator.update();
+    assert(std::holds_alternative<TimelinePresentSample>(presentation) ||
+           std::holds_alternative<TimelineHoldPresentation>(presentation));
+    assert(!output.running());
+    (void)coordinator.update();
+    assert(output.running());
+  }
   coordinator.seek(time(6));
   presentation = coordinator.update();
   assert(fixture.requested_targets.back() == time(11));
@@ -1014,13 +1036,21 @@ void editorial_edit_reanchors_video_and_audio_at_half_open_boundaries() {
   presentation = coordinator.update();
   assert(std::holds_alternative<TimelinePresentSample>(presentation) ||
          std::holds_alternative<TimelineHoldPresentation>(presentation));
+  assert(!output.running());
+  (void)coordinator.update();
+  assert(output.running());
 
   assert(fixture.processor.undo());
   coordinator.set_snapshot(fixture.document.snapshot());
   (void)coordinator.update();
   assert(fixture.processor.redo());
   coordinator.set_snapshot(fixture.document.snapshot());
+  presentation = coordinator.update();
+  assert(std::holds_alternative<TimelinePresentSample>(presentation) ||
+         std::holds_alternative<TimelineHoldPresentation>(presentation));
+  assert(!output.running());
   (void)coordinator.update();
+  assert(output.running());
 }
 
 void audio_clock_crosses_boundary_before_video_mapping() {

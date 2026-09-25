@@ -180,6 +180,13 @@ private:
   // playing intent, but it must not become the master clock until video has
   // produced a valid presentation for the new position.
   bool editorial_transition_pending_{false};
+  // HoldPresentation may be a repeat of the sample presented before the
+  // discontinuity. Only a PresentSample after the current source reset is
+  // evidence that the new editorial state has a fresh video frame.
+  bool editorial_video_fresh_{false};
+  // The first fresh presentation is returned to the desktop before audio is
+  // allowed to start. The following update is the handoff point.
+  bool editorial_video_handoff_complete_{false};
   // A video starvation is a recoverable timeline hold, not a user pause.
 };
 

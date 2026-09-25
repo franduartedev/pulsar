@@ -51,6 +51,8 @@ void TimelinePlaybackCoordinator::set_snapshot(ProjectSnapshot snapshot) {
   const domain::MediaTime position = timeline_position();
   set_advance_permission(TimelineAdvancePermission::Hold);
   editorial_transition_pending_ = true;
+  editorial_video_fresh_ = false;
+  editorial_video_handoff_complete_ = false;
   reanchor_transport(position);
   reset_source();
   snapshot_ = std::move(snapshot);
@@ -69,6 +71,12 @@ void TimelinePlaybackCoordinator::set_snapshot(ProjectSnapshot snapshot) {
 
 void TimelinePlaybackCoordinator::play() {
   intent_ = PlaybackIntent::Playing;
+  if (editorial_transition_pending_ && editorial_video_fresh_) {
+    // A paused caller has already received the fresh frame on a previous
+    // update, so its explicit play action is the safe handoff point.
+    editorial_video_handoff_complete_ = true;
+    editorial_transition_pending_ = false;
+  }
   const auto* video_track = snapshot_.has_value()
                                 ? snapshot_->timeline.find_track(snapshot_->video_track_id)
                                 : nullptr;
@@ -112,6 +120,8 @@ void TimelinePlaybackCoordinator::seek(domain::MediaTime timeline_position_value
   const auto outcome = resolve_clip_at(*snapshot_, snapshot_->video_track_id,
                                        timeline_position_value);
   editorial_transition_pending_ = true;
+  editorial_video_fresh_ = false;
+  editorial_video_handoff_complete_ = false;
   reanchor_transport(timeline_position_value);
   // A seek is one authoritative discontinuity. Invalidate mixer sources and
   // queued device PCM before publishing the new video segment or resuming the
@@ -152,14 +162,24 @@ TimelinePresentation TimelinePlaybackCoordinator::update() {
 
   const domain::MediaTime before_audio = timeline_position();
   const auto first = present_at(before_audio);
-  const bool video_ready = std::holds_alternative<TimelinePresentSample>(first) ||
-                           std::holds_alternative<TimelineHoldPresentation>(first) ||
+  const bool fresh_video =
+                           (std::holds_alternative<TimelinePresentSample>(first) ||
+                            std::holds_alternative<TimelineHoldPresentation>(first)) &&
+                           editorial_video_fresh_;
+  const bool video_ready = fresh_video ||
                            std::holds_alternative<TimelineGapPresentation>(first) ||
                            std::holds_alternative<TimelineMissingMediaPresentation>(first) ||
                            std::holds_alternative<TimelineSourceGapPresentation>(first) ||
                            std::holds_alternative<TimelineSourceEndedEarlyPresentation>(first) ||
                            std::holds_alternative<TimelineEndedPresentation>(first);
   if (!video_ready) {
+    return first;
+  }
+  if (fresh_video && !editorial_video_handoff_complete_) {
+    // The desktop must get one completed update with the fresh frame before
+    // the audio device can become the master clock. A following Hold is now
+    // known to refer to that fresh frame, not to the pre-edit frame.
+    editorial_video_handoff_complete_ = true;
     return first;
   }
   editorial_transition_pending_ = false;
@@ -318,6 +338,7 @@ TimelinePresentation TimelinePlaybackCoordinator::evaluate_clip(const ResolvedCl
       source_session_->update_at(PlaybackPosition{source_time});
 
   if (std::holds_alternative<PresentSample>(decision)) {
+    if (editorial_transition_pending_) editorial_video_fresh_ = true;
     set_advance_permission(TimelineAdvancePermission::Advance);
     synchronize_transport();
     const auto& present = std::get<PresentSample>(decision);
