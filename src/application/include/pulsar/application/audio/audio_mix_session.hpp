@@ -102,6 +102,8 @@ private:
   class SourceState;
 
   [[nodiscard]] SourceState* find_source(const AudioContributor& contributor) noexcept;
+  [[nodiscard]] SourceState* transfer_contiguous_source(
+      const AudioContributor& contributor) noexcept;
   [[nodiscard]] SourceState* open_source(const AudioContributor& contributor,
                                          domain::MediaTime timeline_position,
                                          std::vector<AudioMixIssue>& issues);

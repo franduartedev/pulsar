@@ -69,6 +69,22 @@ namespace {
          lhs.channel_count == rhs.channel_count && lhs.time_base == rhs.time_base;
 }
 
+[[nodiscard]] bool seamless_contiguous_successor(const AudioContributor& previous,
+                                                 const AudioContributor& next) noexcept {
+  return previous.track_id == next.track_id &&
+         previous.track_kind == next.track_kind &&
+         previous.track_order == next.track_order &&
+         previous.media_id == next.media_id &&
+         previous.source_locator == next.source_locator &&
+         previous.stream_index == next.stream_index &&
+         previous.timeline_range.end() == next.timeline_range.start() &&
+         previous.source_range.end() == next.source_range.start() &&
+         previous.stream_origin == next.stream_origin &&
+         previous.sample_rate == next.sample_rate &&
+         previous.channel_count == next.channel_count &&
+         previous.time_base == next.time_base;
+}
+
 [[nodiscard]] bool same_unavailable_mapping(const UnavailableAudioContributor& lhs,
                                             const UnavailableAudioContributor& rhs) noexcept {
   return lhs.track_id == rhs.track_id && lhs.clip_id == rhs.clip_id &&
@@ -262,6 +278,18 @@ AudioMixSession::SourceState* AudioMixSession::find_source(
   return found == sources_.end() ? nullptr : found->get();
 }
 
+AudioMixSession::SourceState* AudioMixSession::transfer_contiguous_source(
+    const AudioContributor& contributor) noexcept {
+  const auto found = std::find_if(sources_.begin(), sources_.end(),
+                                  [&contributor](const auto& source) {
+                                    return seamless_contiguous_successor(
+                                        source->contributor, contributor);
+                                  });
+  if (found == sources_.end()) return nullptr;
+  (*found)->contributor = contributor;
+  return found->get();
+}
+
 AudioMixSession::SourceState* AudioMixSession::open_source(
     const AudioContributor& contributor, domain::MediaTime timeline_position,
     std::vector<AudioMixIssue>& issues) {
@@ -439,6 +467,11 @@ AudioMixRenderResult AudioMixSession::render(domain::MediaTime timeline_position
                                                          static_cast<std::int64_t>(output_begin),
                                                          domain::Rational{1, format_.sample_rate}};
     auto* state = find_source(contributor);
+    if (state == nullptr) {
+      // A split successor keeps the decoder/converter/queued PCM. clip_id is
+      // editorial identity, not decoder continuity identity.
+      state = transfer_contiguous_source(contributor);
+    }
     if (state != nullptr && state->next_timeline != source_timeline) {
       std::erase_if(sources_, [state](const auto& candidate) { return candidate.get() == state; });
       state = nullptr;

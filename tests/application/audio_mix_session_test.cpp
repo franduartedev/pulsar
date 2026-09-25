@@ -374,9 +374,15 @@ void editorial_split_is_pcm_equivalent_to_unsplit_source() {
   application::AudioMixSession split{split_bank.factory()};
   split.configure(snapshot({audio_asset(1, "signal")}, std::nullopt,
                            {{{1, 1, 0, 0, 1024}, {2, 1, 1024, 1024, 1024}}}));
-  const auto actual = split.render(frames(0), 2048).block.samples();
+  std::vector<float> actual;
+  const auto first_half = split.render(frames(0), 1024).block.samples();
+  const auto second_half = split.render(frames(1024), 1024).block.samples();
+  actual.insert(actual.end(), first_half.begin(), first_half.end());
+  actual.insert(actual.end(), second_half.begin(), second_half.end());
   assert(expected == actual);
   assert_near(actual[1024 * 2], 1.0F);
+  assert(split_bank.opens == 1);
+  assert(split.metrics().source_opens == 1);
 }
 
 void rates_channels_seek_and_block_invariance() {

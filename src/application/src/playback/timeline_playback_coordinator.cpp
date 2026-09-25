@@ -6,6 +6,19 @@
 
 namespace pulsar::application {
 
+namespace {
+
+[[nodiscard]] bool seamless_contiguous_successor(const ResolvedClip& previous,
+                                                 const ResolvedClip& next) noexcept {
+  return previous.media_id == next.media_id &&
+         previous.video_stream_index == next.video_stream_index &&
+         previous.source_locator == next.source_locator &&
+         previous.timeline_range.end() == next.timeline_range.start() &&
+         previous.source_range.end() == next.source_range.start();
+}
+
+} // namespace
+
 TimelinePlaybackCoordinator::TimelinePlaybackCoordinator(const MonotonicClock& clock,
                                                          PlaybackWorkerFactory worker_factory,
                                                          AudioPlaybackSourceFactory audio_source_factory,
@@ -72,6 +85,12 @@ void TimelinePlaybackCoordinator::play() {
     clock_source_ = PlaybackClockSource::Software;
   }
   synchronize_transport();
+  if (clock_source_ == PlaybackClockSource::AudioDevice) {
+    // Once the device is the clock, do not let PlaybackTransport accumulate
+    // software time between device observations. The next audio observation
+    // reanchors forward and resumes this transport for the next tick.
+    transport_.pause();
+  }
 }
 
 void TimelinePlaybackCoordinator::pause() {
@@ -123,6 +142,14 @@ TimelinePresentation TimelinePlaybackCoordinator::update() {
     return *current_presentation_;
   };
 
+  if (!editorial_transition_pending_) {
+    // Preserve the established playback order for ordinary starvation: the
+    // audio device remains the clock and video gets one evaluation per tick.
+    // The position is resolved only after any audio re-anchor.
+    synchronize_audio_clock();
+    return present_at(timeline_position());
+  }
+
   const domain::MediaTime before_audio = timeline_position();
   const auto first = present_at(before_audio);
   const bool video_ready = std::holds_alternative<TimelinePresentSample>(first) ||
@@ -131,16 +158,16 @@ TimelinePresentation TimelinePlaybackCoordinator::update() {
                            std::holds_alternative<TimelineMissingMediaPresentation>(first) ||
                            std::holds_alternative<TimelineSourceGapPresentation>(first) ||
                            std::holds_alternative<TimelineSourceEndedEarlyPresentation>(first) ||
-                           std::holds_alternative<TimelineEndedPresentation>(first) ||
-                           std::holds_alternative<TimelineSourceErrorPresentation>(first);
-  if (editorial_transition_pending_ && !video_ready) {
+                           std::holds_alternative<TimelineEndedPresentation>(first);
+  if (!video_ready) {
     return first;
   }
   editorial_transition_pending_ = false;
 
   synchronize_audio_clock();
   const domain::MediaTime after_audio = timeline_position();
-  if (after_audio != before_audio) {
+  if (after_audio != before_audio ||
+      (audio_session_ != nullptr && audio_session_->has_device_clock())) {
     return present_at(after_audio);
   }
   return first;
@@ -179,9 +206,17 @@ void TimelinePlaybackCoordinator::enter_clip(const ResolvedClip& clip, bool forc
   set_advance_permission(TimelineAdvancePermission::Hold);
   synchronize_transport();
   source_creation_error_.reset();
-  const PlaybackPosition source_position{clip.source_time};  const bool reuse_session = source_session_ != nullptr && active_clip_.has_value() &&
+  const PlaybackPosition source_position{clip.source_time};
+  const bool seamless = source_session_ != nullptr && active_clip_.has_value() &&
+                        !force_transition &&
+                        seamless_contiguous_successor(*active_clip_, clip);
+  const bool reuse_session = source_session_ != nullptr && active_clip_.has_value() &&
                              active_clip_->media_id == clip.media_id;
-  if (reuse_session) {
+  if (seamless) {
+    // A split of one source is only an editorial boundary. Keep the decoder,
+    // scheduler and lookahead alive; the next source position is exactly the
+    // position at which the previous clip ended.
+  } else if (reuse_session) {
     source_session_->seek(source_position);
   } else {
     reset_source();
@@ -372,10 +407,20 @@ void TimelinePlaybackCoordinator::synchronize_audio_clock() {
   if (audio_session_->state() == AudioPlaybackState::Running &&
       audio_session_->has_device_clock()) {
     apply_audio_condition(AudioPlaybackCondition::Present);
-    clock_source_ = PlaybackClockSource::AudioDevice;
     if (const auto position = audio_session_->clock_position(); position.has_value()) {
-      reanchor_transport(*position);
-      synchronize_transport();
+      const auto editorial_position = timeline_position();
+      if (*position >= editorial_position) {
+        clock_source_ = PlaybackClockSource::AudioDevice;
+        reanchor_transport(*position);
+        synchronize_transport();
+        transport_.pause();
+      } else {
+        // The output buffer can still be draining from just before a
+        // contiguous boundary. It is not allowed to move the authoritative
+        // editorial clock backwards during ordinary playback.
+        clock_source_ = PlaybackClockSource::AudioDevice;
+        transport_.pause();
+      }
     }
   } else if (intent_ == PlaybackIntent::Playing) {
     apply_audio_condition(audio_session_->condition());

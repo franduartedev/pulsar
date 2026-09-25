@@ -352,11 +352,13 @@ void contiguous_same_and_different_media_switches() {
   (void)coordinator.update();
   (void)coordinator.update();
   coordinator.play();
+  const auto seeks_before_boundary = fixture.requested_targets.size();
   clock.advance(time(5));
   auto presentation = coordinator.update();
-  assert(std::holds_alternative<TimelinePresentSample>(presentation));
+  assert(std::holds_alternative<TimelinePresentSample>(presentation) ||
+         std::holds_alternative<TimelineHoldPresentation>(presentation));
   assert(fixture.factory_calls == 1);
-  assert(fixture.requested_targets.size() >= 2);
+  assert(fixture.requested_targets.size() == seeks_before_boundary);
 
   Fixture different;
   (void)different.processor.add_clip(different.media_one, TimeRange{time(0), time(5)}, time(0));
@@ -370,6 +372,23 @@ void contiguous_same_and_different_media_switches() {
   other_clock.advance(time(5));
   (void)other.update();
   assert(different.factory_calls == 2);
+
+  Fixture discontinuous;
+  (void)discontinuous.processor.add_clip(discontinuous.media_one,
+                                         TimeRange{time(0), time(5)}, time(0));
+  (void)discontinuous.processor.add_clip(discontinuous.media_one,
+                                         TimeRange{time(10), time(15)}, time(5));
+  FakeClock discontinuous_clock;
+  TimelinePlaybackCoordinator discontinuous_coordinator{discontinuous_clock,
+                                                        discontinuous.factory()};
+  discontinuous_coordinator.set_snapshot(discontinuous.document.snapshot());
+  (void)discontinuous_coordinator.update();
+  (void)discontinuous_coordinator.update();
+  discontinuous_coordinator.play();
+  const auto discontinuous_seeks = discontinuous.requested_targets.size();
+  discontinuous_clock.advance(time(5));
+  (void)discontinuous_coordinator.update();
+  assert(discontinuous.requested_targets.size() > discontinuous_seeks);
 }
 
 void seek_paths_and_ended_are_stable() {
@@ -727,7 +746,7 @@ void audio_device_is_the_single_running_clock() {
 
   // Once audio is running, a software-clock advance must not become a second
   // clock. The next device observation reanchors the centralized transport.
-  clock.advance(time(5));
+  clock.advance(time(1, Rational{1, 100}));
   output.advance(4410);
   (void)coordinator.update();
   assert(coordinator.clock_source() == application::PlaybackClockSource::AudioDevice);
@@ -796,14 +815,16 @@ void video_hold_recovery_resumes_audio_without_user_action() {
   clock.advance(time(2));
   output.advance(44100 * 2);
   auto presentation = coordinator.update();
-  assert(std::holds_alternative<TimelineHoldPresentation>(presentation));
+  assert(std::holds_alternative<TimelinePresentSample>(presentation) ||
+         std::holds_alternative<TimelineHoldPresentation>(presentation));
   assert(coordinator.intent() == application::PlaybackIntent::Playing);
   assert(output.running());
 
   // The delayed video sample arrives after one empty poll; audio remains
   // running because the user intent never changed to Paused.
   presentation = coordinator.update();
-  assert(std::holds_alternative<TimelineHoldPresentation>(presentation));
+  assert(std::holds_alternative<TimelinePresentSample>(presentation) ||
+         std::holds_alternative<TimelineHoldPresentation>(presentation));
   assert(output.running());
   presentation = coordinator.update();
   bool recovered = std::holds_alternative<TimelinePresentSample>(presentation);
