@@ -934,6 +934,99 @@ void global_audio_seek_invalidates_old_pcm_and_reanchors_sources() {
   assert(coordinator.timeline_position() >= time(4));
 }
 
+void editorial_edit_reanchors_video_and_audio_at_half_open_boundaries() {
+  Fixture fixture;
+  const auto first_id = fixture.processor.add_clip(
+      fixture.media_one, TimeRange{time(0), time(10)}, time(0));
+  FakeClock clock;
+  std::vector<float> observed_samples;
+  SyncOutput output{&observed_samples};
+  std::vector<MediaTime> audio_seek_targets;
+  TimelinePlaybackCoordinator coordinator{
+      clock, fixture.factory(),
+      [&audio_seek_targets](const std::filesystem::path&, int) {
+        return std::make_unique<SyncAudioSource>(&audio_seek_targets);
+      },
+      &output};
+
+  coordinator.set_snapshot(fixture.document.snapshot());
+  coordinator.seek(time(4));
+  coordinator.play();
+  (void)coordinator.update();
+
+  const auto right_id = fixture.processor.split_clip(first_id, time(5));
+  coordinator.set_snapshot(fixture.document.snapshot());
+  coordinator.play();
+  assert(!output.running());
+  auto presentation = coordinator.update();
+  assert(std::holds_alternative<TimelinePresentSample>(presentation) ||
+         std::holds_alternative<TimelineHoldPresentation>(presentation));
+  assert(!fixture.requested_targets.empty());
+  assert(fixture.requested_targets.back() == time(9));
+
+  // The exact split boundary belongs exclusively to the right half.
+  coordinator.seek(time(5));
+  presentation = coordinator.update();
+  assert(std::holds_alternative<TimelinePresentSample>(presentation) ||
+         std::holds_alternative<TimelineHoldPresentation>(presentation));
+  if (std::holds_alternative<TimelinePresentSample>(presentation)) {
+    assert(std::get<TimelinePresentSample>(presentation).clip_id == right_id);
+  } else {
+    assert(std::get<TimelineHoldPresentation>(presentation).clip_id == right_id);
+  }
+  assert(fixture.requested_targets.back() == time(10));
+  coordinator.seek(time(6));
+  presentation = coordinator.update();
+  assert(fixture.requested_targets.back() == time(11));
+
+  // Separate and restore the right split while playing. Each snapshot is a
+  // fresh editorial discontinuity; no cached source may be evaluated outside
+  // its half-open range.
+  const auto track_id = fixture.document.timeline().tracks().front().id();
+  coordinator.seek(time(5));
+  fixture.processor.move_clip(right_id, track_id, time(6));
+  coordinator.set_snapshot(fixture.document.snapshot());
+  presentation = coordinator.update();
+  assert(std::holds_alternative<TimelineGapPresentation>(presentation));
+  fixture.processor.move_clip(right_id, track_id, time(5));
+  coordinator.set_snapshot(fixture.document.snapshot());
+  presentation = coordinator.update();
+  assert(std::holds_alternative<TimelinePresentSample>(presentation) ||
+         std::holds_alternative<TimelineHoldPresentation>(presentation));
+
+  assert(fixture.processor.undo());
+  coordinator.set_snapshot(fixture.document.snapshot());
+  (void)coordinator.update();
+  assert(fixture.processor.redo());
+  coordinator.set_snapshot(fixture.document.snapshot());
+  (void)coordinator.update();
+}
+
+void audio_clock_crosses_boundary_before_video_mapping() {
+  Fixture fixture;
+  (void)fixture.processor.add_clip(fixture.media_one, TimeRange{time(0), time(5)}, time(0));
+  (void)fixture.processor.add_clip(fixture.media_one, TimeRange{time(0), time(5)}, time(5));
+  FakeClock clock;
+  SyncOutput output;
+  TimelinePlaybackCoordinator coordinator{
+      clock, fixture.factory(),
+      [](const std::filesystem::path&, int) {
+        return std::make_unique<SyncAudioSource>();
+      },
+      &output};
+  coordinator.set_snapshot(fixture.document.snapshot());
+  (void)coordinator.update();
+  coordinator.play();
+  (void)coordinator.update();
+  output.advance(5 * 44100);
+
+  // The device clock lands exactly at A.end. The coordinator must resolve B
+  // before calling clip_source_position/evaluate_clip.
+  const auto presentation = coordinator.update();
+  assert(std::holds_alternative<TimelinePresentSample>(presentation) ||
+         std::holds_alternative<TimelineHoldPresentation>(presentation));
+}
+
 } // namespace
 
 int main() {
@@ -958,4 +1051,6 @@ int main() {
   no_audio_clip_is_healthy_silence_and_advances();
   multitrack_audio_runs_through_video_gap_and_audio_only_project();
   global_audio_seek_invalidates_old_pcm_and_reanchors_sources();
+  editorial_edit_reanchors_video_and_audio_at_half_open_boundaries();
+  audio_clock_crosses_boundary_before_video_mapping();
 }

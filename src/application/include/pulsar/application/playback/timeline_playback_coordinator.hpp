@@ -176,6 +176,10 @@ private:
   PlaybackSemanticCondition semantic_condition_{PlaybackSemanticCondition::Inactive};
   SegmentKind segment_kind_{SegmentKind::None};
   TimelineAdvancePermission advance_permission_{TimelineAdvancePermission::Hold};
+  // A snapshot/seek is an editorial discontinuity.  Audio may keep its
+  // playing intent, but it must not become the master clock until video has
+  // produced a valid presentation for the new position.
+  bool editorial_transition_pending_{false};
   // A video starvation is a recoverable timeline hold, not a user pause.
 };
 

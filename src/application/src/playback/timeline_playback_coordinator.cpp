@@ -37,6 +37,7 @@ void TimelinePlaybackCoordinator::reanchor_transport(domain::MediaTime position)
 void TimelinePlaybackCoordinator::set_snapshot(ProjectSnapshot snapshot) {
   const domain::MediaTime position = timeline_position();
   set_advance_permission(TimelineAdvancePermission::Hold);
+  editorial_transition_pending_ = true;
   reanchor_transport(position);
   reset_source();
   snapshot_ = std::move(snapshot);
@@ -55,7 +56,11 @@ void TimelinePlaybackCoordinator::set_snapshot(ProjectSnapshot snapshot) {
 
 void TimelinePlaybackCoordinator::play() {
   intent_ = PlaybackIntent::Playing;
-  if (audio_session_ != nullptr) {
+  const auto* video_track = snapshot_.has_value()
+                                ? snapshot_->timeline.find_track(snapshot_->video_track_id)
+                                : nullptr;
+  const bool has_video_track = video_track != nullptr && !video_track->clips().empty();
+  if (audio_session_ != nullptr && (!editorial_transition_pending_ || !has_video_track)) {
     audio_session_->play();
   }
   if (!snapshot_.has_value()) {
@@ -87,6 +92,7 @@ void TimelinePlaybackCoordinator::seek(domain::MediaTime timeline_position_value
   }
   const auto outcome = resolve_clip_at(*snapshot_, snapshot_->video_track_id,
                                        timeline_position_value);
+  editorial_transition_pending_ = true;
   reanchor_transport(timeline_position_value);
   // A seek is one authoritative discontinuity. Invalidate mixer sources and
   // queued device PCM before publishing the new video segment or resuming the
@@ -103,41 +109,41 @@ TimelinePresentation TimelinePlaybackCoordinator::update() {
     return TimelineEndedPresentation{domain::MediaTime::zero(), domain::MediaTime::zero()};
   }
 
-  synchronize_audio_clock();
-  const domain::MediaTime position = timeline_position();
-  switch (segment_kind_) {
-  case SegmentKind::Clip:
-    if (active_clip_.has_value() && position < active_clip_->timeline_range.end()) {
-      return evaluate_clip(*active_clip_, position);
+  const auto present_at = [this](domain::MediaTime position) {
+    const auto outcome = resolve_clip_at(*snapshot_, snapshot_->video_track_id, position);
+    // Re-resolving on every update is deliberate at this boundary: an audio
+    // device re-anchor can cross a half-open segment boundary between two
+    // calls, and the cached ResolvedClip must never be evaluated at the old
+    // position.  enter_* keeps the steady-state path cheap and does not seek
+    // again when the clip identity is unchanged.
+    reconcile(outcome, position, false);
+    if (std::holds_alternative<ResolvedClip>(outcome)) {
+      return evaluate_clip(std::get<ResolvedClip>(outcome), position);
     }
-    break;
-  case SegmentKind::Gap:
-    if (segment_end_.has_value() && position < *segment_end_) {
-      current_presentation_ = TimelineGapPresentation{position};
-      return *current_presentation_;
-    }
-    break;
-  case SegmentKind::Missing:
-    if (active_missing_.has_value() && position < active_missing_->timeline_range.end()) {
-      current_presentation_ = TimelineMissingMediaPresentation{
-          active_missing_->clip_id, active_missing_->media_id, position,
-          active_missing_->timeline_range, active_missing_->reason};
-      return *current_presentation_;
-    }
-    break;
-  case SegmentKind::Ended:
-  case SegmentKind::SourceError:
     return *current_presentation_;
-  case SegmentKind::None:
-    break;
-  }
+  };
 
-  const auto outcome = resolve_clip_at(*snapshot_, snapshot_->video_track_id, position);
-  reconcile(outcome, position, true);
-  if (std::holds_alternative<ResolvedClip>(outcome)) {
-    return evaluate_clip(std::get<ResolvedClip>(outcome), position);
+  const domain::MediaTime before_audio = timeline_position();
+  const auto first = present_at(before_audio);
+  const bool video_ready = std::holds_alternative<TimelinePresentSample>(first) ||
+                           std::holds_alternative<TimelineHoldPresentation>(first) ||
+                           std::holds_alternative<TimelineGapPresentation>(first) ||
+                           std::holds_alternative<TimelineMissingMediaPresentation>(first) ||
+                           std::holds_alternative<TimelineSourceGapPresentation>(first) ||
+                           std::holds_alternative<TimelineSourceEndedEarlyPresentation>(first) ||
+                           std::holds_alternative<TimelineEndedPresentation>(first) ||
+                           std::holds_alternative<TimelineSourceErrorPresentation>(first);
+  if (editorial_transition_pending_ && !video_ready) {
+    return first;
   }
-  return *current_presentation_;
+  editorial_transition_pending_ = false;
+
+  synchronize_audio_clock();
+  const domain::MediaTime after_audio = timeline_position();
+  if (after_audio != before_audio) {
+    return present_at(after_audio);
+  }
+  return first;
 }
 
 domain::MediaTime TimelinePlaybackCoordinator::timeline_position() const {
@@ -353,6 +359,9 @@ void TimelinePlaybackCoordinator::reset_source() {
 
 void TimelinePlaybackCoordinator::synchronize_audio_clock() {
   if (audio_session_ == nullptr || intent_ != PlaybackIntent::Playing || !snapshot_.has_value()) {
+    return;
+  }
+  if (editorial_transition_pending_) {
     return;
   }
   audio_session_->update(timeline_position());
