@@ -1,0 +1,203 @@
+// Release-safety integration test: save/open failures never lose or corrupt the
+// current project, missing media opens as "offline" without crashing, and export
+// failures never replace a good file. Each step has its own exit code.
+#include "../src/desktop_controller.hpp"
+#include "../src/preview_image_provider.hpp"
+
+#include <QEventLoop>
+#include <QGuiApplication>
+#include <QTimer>
+
+#include <cstdio>
+#include <filesystem>
+#include <fstream>
+#include <functional>
+#include <iterator>
+#include <sstream>
+#include <string>
+
+namespace {
+namespace fs = std::filesystem;
+
+bool wait_until(const std::function<bool()>& predicate, int timeout_ms = 30'000) {
+  if (predicate()) return true;
+  QEventLoop loop;
+  QTimer poll, timeout;
+  poll.setInterval(10);
+  QObject::connect(&poll, &QTimer::timeout, &loop, [&] { if (predicate()) loop.quit(); });
+  QObject::connect(&timeout, &QTimer::timeout, &loop, &QEventLoop::quit);
+  poll.start();
+  timeout.setSingleShot(true);
+  timeout.start(timeout_ms);
+  loop.exec();
+  return predicate();
+}
+void spin(int milliseconds) {
+  QEventLoop loop;
+  QTimer::singleShot(milliseconds, &loop, &QEventLoop::quit);
+  loop.exec();
+}
+std::string read_file(const fs::path& path) {
+  std::ifstream in{path, std::ios::binary};
+  return {std::istreambuf_iterator<char>{in}, std::istreambuf_iterator<char>{}};
+}
+void write_file(const fs::path& path, const std::string& bytes) {
+  std::ofstream out{path, std::ios::binary};
+  out << bytes;
+}
+int assets(DesktopController& c) { return c.mediaAssets()->rowCount(); }
+int clips(DesktopController& c) { return c.timelineClips()->rowCount(); }
+bool asset_available(DesktopController& c, int row) {
+  return c.mediaAssets()->index(row, 0).data(MediaAssetListModel::AvailableRole).toBool();
+}
+bool clip_missing(DesktopController& c, int row) {
+  return c.timelineClips()->index(row, 0).data(TimelineClipListModel::MissingRole).toBool();
+}
+bool import_and_wait(DesktopController& c, const fs::path& path, int expected) {
+  c.openPath(QString::fromStdString(path.string()));
+  return wait_until([&] { return assets(c) == expected && !c.busy(); });
+}
+QString q(const fs::path& p) { return QString::fromStdString(p.string()); }
+// A user-facing message must not leak internals.
+bool is_human(const QString& text) {
+  if (text.isEmpty()) return false;
+  for (const char* leak : {"cannot ", "std::", "exception", "tmp", ".pulsar.", "invalid_argument", "line "}) {
+    if (text.contains(QLatin1String(leak))) return false;
+  }
+  return true;
+}
+
+} // namespace
+
+#define REQUIRE(step, condition) do { if (!(condition)) { \
+  std::fprintf(stderr, "SAFETY step %d failed: %s | error='%s' assets=%d clips=%d dirty=%d\n", step, #condition, \
+               controller.errorMessage().toUtf8().constData(), assets(controller), clips(controller), \
+               controller.projectDirty() ? 1 : 0); \
+  return step; } } while (false)
+
+int main(int argc, char** argv) {
+  QGuiApplication application{argc, argv};
+  PreviewImageProvider image_provider;
+  DesktopController controller{image_provider, {}};
+  const auto fixtures = fs::path{PULSAR_SOURCE_DIR} / "tests/fixtures";
+  const auto root = fs::temp_directory_path() / "pulsar-safety-test";
+  fs::remove_all(root);
+  fs::create_directories(root / "media");
+  fs::copy_file(fixtures / "e6_video_a.mp4", root / "media/a.mp4");
+  fs::copy_file(fixtures / "e6_video_b.mp4", root / "media/b.mp4");
+
+  // ---- Save safety --------------------------------------------------------
+  REQUIRE(1, import_and_wait(controller, root / "media/a.mp4", 1));
+  REQUIRE(2, wait_until([&] { return controller.hasVideoMedia(); }) && controller.projectDirty());
+  const auto bad_parent = root / "not-a-folder.txt";
+  write_file(bad_parent, "x");
+  REQUIRE(3, !controller.saveProject(q(bad_parent / "p.pulsar")));      // parent is a file
+  REQUIRE(4, controller.projectDirty() && controller.activeProjectPath().isEmpty() && is_human(controller.errorMessage()));
+  REQUIRE(5, !controller.saveProject(q(root / "missing-dir/sub/p.pulsar")));
+  REQUIRE(6, controller.projectDirty() && clips(controller) == 1);
+  const auto project = root / "one.pulsar";
+  REQUIRE(7, controller.saveProject(q(project)) && !controller.projectDirty() && fs::exists(project));
+  REQUIRE(8, controller.activeProjectPath() == q(project) && controller.errorMessage().isEmpty());
+  // No temporary files are left next to the project.
+  int stray = 0;
+  for (const auto& entry : fs::directory_iterator(root)) {
+    const auto name = entry.path().filename().string();
+    if (name != "media" && name != "not-a-folder.txt" && name != "one.pulsar") ++stray;
+  }
+  REQUIRE(9, stray == 0);
+
+  // A later failed save leaves the saved file byte-identical and the project dirty.
+  REQUIRE(10, import_and_wait(controller, root / "media/b.mp4", 2));
+  controller.seekToEnd();
+  controller.insertAssetAtPlayhead(controller.mediaAssets()->index(1, 0).data(MediaAssetListModel::MediaIdRole).toString());
+  REQUIRE(11, clips(controller) == 2 && controller.projectDirty());
+  const auto good_bytes = read_file(project);
+  REQUIRE(12, !controller.saveProject(q(bad_parent / "again.pulsar")) && controller.projectDirty());
+  REQUIRE(13, read_file(project) == good_bytes);
+  // Save As: new file, the active path follows, dirty cleared only on success.
+  const auto second = root / "two.pulsar";
+  REQUIRE(14, controller.saveProject(q(second)) && !controller.projectDirty() && controller.activeProjectPath() == q(second));
+  REQUIRE(15, read_file(project) == good_bytes);                          // original untouched
+
+  // ---- Open safety: every failure keeps the current project ----------------
+  const int assets_before = assets(controller);
+  const int clips_before = clips(controller);
+  const auto expect_open_fails = [&](const fs::path& file) {
+    const bool dirty_before = controller.projectDirty();
+    const bool ok = controller.openProject(q(file));
+    return !ok && assets(controller) == assets_before && clips(controller) == clips_before &&
+           controller.projectDirty() == dirty_before && controller.activeProjectPath() == q(second) &&
+           is_human(controller.errorMessage());
+  };
+  const auto saved_two = read_file(second);
+  write_file(root / "garbage.pulsar", "this is not a project\n\x01\x02\x03");
+  REQUIRE(16, expect_open_fails(root / "garbage.pulsar"));
+  write_file(root / "truncated.pulsar", saved_two.substr(0, saved_two.size() / 2));
+  REQUIRE(17, expect_open_fails(root / "truncated.pulsar"));
+  write_file(root / "empty.pulsar", "");
+  REQUIRE(18, expect_open_fails(root / "empty.pulsar"));
+  write_file(root / "future.pulsar", "PULSAR_PROJECT 999\n" + saved_two.substr(saved_two.find('\n') + 1));
+  REQUIRE(19, expect_open_fails(root / "future.pulsar"));
+  REQUIRE(20, expect_open_fails(root / "does-not-exist.pulsar"));
+  REQUIRE(21, expect_open_fails(root));                                   // a directory
+
+  // ---- Missing media: opens, shows offline, never crashes ------------------
+  fs::remove(root / "media/b.mp4");
+  REQUIRE(22, controller.openProject(q(second)));
+  REQUIRE(23, controller.errorMessage().isEmpty() && assets(controller) == 2 && clips(controller) == 2);
+  REQUIRE(24, asset_available(controller, 0) && !asset_available(controller, 1));
+  REQUIRE(25, !clip_missing(controller, 0) && clip_missing(controller, 1));
+  REQUIRE(26, !controller.projectDirty());                                // opening is not an edit
+  // Preview over the offline clip does not crash and does not pretend to render it.
+  controller.seekToEnd();
+  controller.togglePlayback();
+  spin(400);
+  controller.togglePlayback();
+  controller.seekToStart();
+  spin(100);
+  // Offline assets cannot be (re)inserted or separated; clear messages.
+  const auto offline_id = controller.mediaAssets()->index(1, 0).data(MediaAssetListModel::MediaIdRole).toString();
+  const int before_ops = clips(controller);
+  controller.appendAssetToVideoTrack(offline_id);
+  REQUIRE(27, clips(controller) == before_ops && controller.errorMessage().contains(QStringLiteral("no está disponible")));
+  // Export fails clearly and a pre-existing good file is NOT replaced.
+  const auto destination = root / "out.mp4";
+  write_file(destination, "previous good export");
+  controller.exportProject(q(destination));
+  REQUIRE(28, wait_until([&] { return !controller.exportRunning(); }));
+  REQUIRE(29, controller.exportStatus() == QStringLiteral("Error de exportación"));
+  REQUIRE(30, controller.errorMessage().contains(QStringLiteral("multimedia")) && is_human(controller.errorMessage()));
+  REQUIRE(31, read_file(destination) == "previous good export");
+  int partial = 0;
+  for (const auto& entry : fs::directory_iterator(root)) {
+    const auto name = entry.path().filename().string();
+    if (name.find("out.mp4") != std::string::npos && name != "out.mp4") ++partial;
+  }
+  REQUIRE(32, partial == 0);                                              // no stray temporary export
+
+  // Restoring the file brings everything back (no hidden state).
+  fs::copy_file(fixtures / "e6_video_b.mp4", root / "media/b.mp4");
+  REQUIRE(33, controller.openProject(q(second)));
+  REQUIRE(34, asset_available(controller, 1) && !clip_missing(controller, 1));
+
+  // ---- Built-in sounds survive save -> reopen -> export (regression: the catalogue
+  // locator was looked up relative to the working directory and came back "offline").
+  REQUIRE(35, controller.soundPackAvailable());
+  const auto sound_id = controller.soundLibrary().front().toMap().value(QStringLiteral("id")).toString();
+  controller.seekToStart();
+  controller.insertBuiltinSound(sound_id);
+  REQUIRE(36, wait_until([&] { return controller.projectDirty() && clips(controller) >= 3; }));
+  const auto with_sound = root / "with-sound.pulsar";
+  REQUIRE(37, controller.saveProject(q(with_sound)));
+  REQUIRE(38, controller.openProject(q(with_sound)));
+  bool all_available = true;
+  for (int row = 0; row < assets(controller); ++row) all_available = all_available && asset_available(controller, row);
+  REQUIRE(39, all_available);
+  const auto sound_export = root / "sound-export.mp4";
+  controller.exportProject(q(sound_export));
+  REQUIRE(40, wait_until([&] { return !controller.exportRunning(); }));
+  REQUIRE(41, controller.exportStatus() == QStringLiteral("Exportación completada") && fs::exists(sound_export));
+
+  fs::remove_all(root);
+  return 0;
+}

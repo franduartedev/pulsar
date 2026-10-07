@@ -1,81 +1,76 @@
 # PULSAR
 
-PULSAR is a Linux-first professional video editor foundation. At M8 it contains a headless playback foundation, FFmpeg media adapters, real-media tests, and an opt-in Qt Quick desktop media viewer that can open a local video, show the first frame, play/pause, scrub the source, and display real metadata.
+Lightweight video editor built for fast, predictable editing.
 
-Product direction:
+> **Beta — PULSAR 0.1.0-beta** · Linux (x86_64) only · interface in Spanish
 
-- simple by default;
-- powerful by choice;
-- fast by design;
-- architecture before shortcuts.
+PULSAR is a desktop video editor written in C++ with Qt 6 and FFmpeg. It aims at a
+small, fast, predictable editing workflow: exact timing, no surprises on undo, and
+an export you can trust.
+
+## What it does today
+
+- Multi-video timeline on one video track: import, **Insert** at the playhead, **Add to end** (gapless)
+- Split, trim and move clips, with **magnetic snapping**
+- Undo / redo
+- Independent audio tracks, **detach audio** from a video clip, built-in sound effects (25 original SFX)
+- Per-clip gain and mute, waveforms
+- Save and reopen projects (`.pulsar`)
+- Export to **H.264 / AAC (MP4)**
+
+Not in this beta: Windows/macOS, multiple video tracks, transitions, effects, titles,
+subtitles, color tools, proxies, autosave/recovery. See the
+[release notes](docs/release/0.1.0-beta.md) for the full list of known limitations.
+
+## Run it
+
+1. Download `PULSAR-0.1.0-beta-linux-x86_64.tar.gz` (or the AppImage) from the release page.
+2. `tar xzf PULSAR-0.1.0-beta-linux-x86_64.tar.gz && cd PULSAR-0.1.0-beta`
+3. `./pulsar`
+
+No Qt or FFmpeg installation is needed. It was tested on Ubuntu 24.04; the bundle needs
+glibc 2.39 or newer (see the release notes). `./pulsar --version` prints the version.
+
+## Report a bug
+
+Open an issue using the **Bug report** template and include your PULSAR version
+(`./pulsar --version`), distro, and the steps to reproduce.
+
+## Roadmap
+
+Post-beta plans live in [`docs/release/roadmap.md`](docs/release/roadmap.md) and
+the changes of each release in [`CHANGELOG.md`](CHANGELOG.md).
+
+## Build from source
+
+Requirements (Ubuntu 24.04 package names): `cmake ninja-build g++ pkg-config`,
+Qt 6 (`qt6-base-dev qt6-declarative-dev qt6-multimedia-dev` plus the QML modules
+`qml6-module-qtquick qml6-module-qtquick-controls qml6-module-qtquick-dialogs qml6-module-qtquick-layouts qml6-module-qtquick-window qml6-module-qtquick-templates qml6-module-qtqml-workerscript`),
+and FFmpeg development files (`libavformat-dev libavcodec-dev libavutil-dev libswscale-dev libswresample-dev`).
+
+```sh
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DPULSAR_BUILD_DESKTOP=ON
+cmake --build build
+ctest --test-dir build --output-on-failure          # QT_QPA_PLATFORM=offscreen on a headless machine
+./build/apps/pulsar-desktop/pulsar-desktop
+```
+
+Core-only (no Qt/FFmpeg, domain + application tests): add `-DPULSAR_BUILD_FFMPEG=OFF` and
+leave `PULSAR_BUILD_DESKTOP` off. Sanitizer build: `-DPULSAR_ENABLE_ASAN=ON -DPULSAR_ENABLE_UBSAN=ON`.
+To make a release bundle see [`packaging/linux/README.md`](packaging/linux/README.md).
 
 ## Architecture
 
-The dependency direction is:
-
 ```text
-domain <- application <- adapters / UI
+domain  <-  application  <-  adapters (FFmpeg, Qt audio, project files)  <-  desktop app (Qt Quick)
 ```
 
-`domain` has no Qt, FFmpeg, Vulkan, SQLite, or Linux-specific dependencies. `application` owns orchestration contracts such as commands and playback timing without depending on FFmpeg or Qt. FFmpeg and Qt live at the outer adapter/UI boundary.
+`domain` has no external dependencies (exact rational time, timeline model).
+`application` owns commands/undo, project documents, playback coordination, and
+the export pipeline without depending on Qt or FFmpeg. See [`docs/architecture`](docs/architecture/README.md)
+and the ADRs in [`docs/adr`](docs/adr/README.md).
 
-## Build on Linux
+## Contributing
 
-Core + FFmpeg adapters and tests:
-
-```sh
-cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug
-cmake --build build
-ctest --test-dir build --output-on-failure
-```
-
-Core-only build, useful when FFmpeg development files are not installed:
-
-```sh
-cmake -S . -B build-core -G Ninja -DCMAKE_BUILD_TYPE=Debug -DPULSAR_BUILD_FFMPEG=OFF
-cmake --build build-core
-ctest --test-dir build-core --output-on-failure
-```
-
-Desktop media viewer, when Qt 6 Core/Gui/Qml/Quick and FFmpeg development files are available:
-
-```sh
-cmake -S . -B build-desktop -G Ninja -DCMAKE_BUILD_TYPE=Debug -DPULSAR_BUILD_DESKTOP=ON
-cmake --build build-desktop
-ctest --test-dir build-desktop --output-on-failure
-./build-desktop/apps/pulsar-desktop/pulsar-desktop /path/to/video.mp4
-```
-
-If Qt or FFmpeg is installed in a non-standard prefix, provide the normal CMake/pkg-config environment externally, for example `CMAKE_PREFIX_PATH` or `PKG_CONFIG_PATH`. The repository does not require project-specific absolute paths.
-
-## Development
-
-Sanitizer build:
-
-```sh
-cmake -S . -B build-sanitize -G Ninja -DCMAKE_BUILD_TYPE=Debug -DPULSAR_ENABLE_ASAN=ON -DPULSAR_ENABLE_UBSAN=ON
-cmake --build build-sanitize
-ctest --test-dir build-sanitize --output-on-failure
-```
-
-Warnings as errors:
-
-```sh
-cmake -S . -B build-werror -G Ninja -DCMAKE_BUILD_TYPE=Debug -DPULSAR_WARNINGS_AS_ERRORS=ON
-cmake --build build-werror
-ctest --test-dir build-werror --output-on-failure
-```
-
-Benchmarks:
-
-```sh
-cmake -S . -B build-bench -G Ninja -DCMAKE_BUILD_TYPE=Release -DPULSAR_BUILD_BENCHMARKS=ON
-cmake --build build-bench
-./build-bench/benchmarks/pulsar-benchmarks
-```
-
-Optional clang-tidy:
-
-```sh
-cmake -S . -B build-tidy -G Ninja -DPULSAR_ENABLE_CLANG_TIDY=ON
-```
+Run the tests before sending changes and keep modules' dependency direction. The
+engineering rules are in [`docs/development/engineering.md`](docs/development/engineering.md).

@@ -1,3 +1,7 @@
+> **HISTORICAL.** Internal checkpoint written on 2026-09-17 during milestone M9. It describes the
+> development state of that day and is superseded by the current docs (see [`../README.md`](../README.md)).
+> Kept only for traceability of the I1 fix reasoning.
+
 # Session checkpoint — 2026-09-17
 
 This checkpoint exists so the current PULSAR state can be resumed safely after shutting down the machine. The active development workspace was RAM-backed and will disappear on reboot.
@@ -12,20 +16,7 @@ This checkpoint exists so the current PULSAR state can be resumed safely after s
 - X1 baseline document:
   `docs/performance/x1-pre-i1-baseline.md`
 - All coherent product/instrumentation work through X1 is pushed to GitHub.
-- Local RAM workspaces such as `/dev/shm/pulsar-ram` and `/dev/shm/pulsar-x1` are disposable and will vanish on reboot.
 
-## Safety / workstation note
-
-The main Lexar NQ100 480 GB SSD has shown media/I/O errors and ext4 corruption. Do not use it for heavy writes, benchmark fixtures, rebuild storms, or recovery experiments.
-
-On resume:
-
-1. Recreate the working clone in RAM, preferably `/dev/shm/pulsar-ram`.
-2. Fetch/checkout `origin/feat/m9-cut-and-save`.
-3. Use RAM paths for generated fixtures and benchmark artifacts.
-4. Commit and push every coherent green block.
-
-Do not remount the failing filesystem read-write as a workaround and do not run fsck against a mounted filesystem.
 
 ## Completed M9 remediation sequence
 

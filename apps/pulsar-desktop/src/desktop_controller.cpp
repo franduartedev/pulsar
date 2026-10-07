@@ -1,5 +1,8 @@
 #include "desktop_controller.hpp"
 #include "builtin_sound_catalog.hpp"
+#include <QFileInfo>
+#include <QDir>
+#include <pulsar/domain/build_info.hpp>
 
 #include "project_path_resolution.hpp"
 #include "waveform_quick_item.hpp"
@@ -123,6 +126,27 @@ QString exportErrorMessage(const pulsar::application::exporting::ExportError& er
   return QStringLiteral("Ocurrió un error de exportación.");
 }
 
+// User-facing messages. The technical cause (what()) goes to stderr only: it can
+// contain internal ids, temporary paths or codec details nobody can act on.
+void logCause(const char* what, const std::exception& error) {
+  std::cerr << "[pulsar] " << what << ": " << error.what() << '\n';
+}
+QString projectOpenMessage(const std::exception& error) {
+  const std::string text = error.what();
+  if (text.find("cannot read") != std::string::npos || text.find("cannot open") != std::string::npos ||
+      text.find("does not exist") != std::string::npos) {
+    return QStringLiteral("No se pudo leer el archivo del proyecto. Revisá que exista y que tengas permiso para abrirlo.");
+  }
+  return QStringLiteral("No se pudo abrir el proyecto: el archivo está dañado o no es compatible con esta versión de PULSAR. El proyecto actual no se modificó.");
+}
+QString projectSaveMessage() {
+  return QStringLiteral("No se pudo guardar el proyecto. Revisá que la carpeta exista y que tengas permiso de escritura. Tus cambios siguen en la ventana.");
+}
+QString importMessage(const std::filesystem::path& path) {
+  return QStringLiteral("No se pudo abrir «%1»: el formato no es compatible o el archivo está dañado.")
+      .arg(QString::fromStdString(path.filename().string()));
+}
+
 const char* exportErrorCodeText(pulsar::application::exporting::ExportErrorCode code) noexcept {
   using Code = pulsar::application::exporting::ExportErrorCode;
   switch (code) {
@@ -235,8 +259,15 @@ DesktopController::DesktopController(PreviewImageProvider& image_provider,
   connect(&error_timer_, &QTimer::timeout, this, &DesktopController::clearError);
   worker_ = std::thread{&DesktopController::workerLoop, this};
 }
+QString DesktopController::appVersion() const {
+  const auto version = pulsar::domain::product_version();
+  return QStringLiteral("PULSAR ") + QString::fromUtf8(version.data(), static_cast<qsizetype>(version.size()));
+}
+
 void DesktopController::loadSoundLibrary() {
-  const auto manifest = std::filesystem::path{PULSAR_SOURCE_DIR} / "assets" / "sounds" / "index.json";
+  const auto assets = pulsar::project_file::assets_directory();
+  if (assets.empty()) return;  // pack not shipped: the Sonidos tab explains it
+  const auto manifest = assets / "sounds" / "index.json";
   QFile file(QString::fromStdString(manifest.string()));
   if (!file.open(QIODevice::ReadOnly)) return;
   QJsonParseError error;
@@ -588,8 +619,7 @@ void DesktopController::refreshWaveformItem(WaveformQuickItem* item) {
   const auto& audio = binding.metadata;
   std::filesystem::path runtime_path;
   try {
-    runtime_path = pulsar::desktop::resolve_runtime_media_path(active_project_file_,
-                                                                binding.source_locator);
+    runtime_path = desktop_runtime_media_path(active_project_file_, binding.source_locator);
   } catch (...) {
     item->setPreparedGeometry(empty_geometry(), WaveformQuickItem::Failed, false);
     return;
@@ -823,8 +853,9 @@ void DesktopController::installTimelineAsset(const pulsar::application::MediaPro
     setStatus("Pausado");
     emit mediaChanged();
   } catch (const std::exception& error) {
+    logCause("import failed", error);
     setBusy(false);
-    setError(QString::fromUtf8(error.what()));
+    setError(importMessage(result.path));
     setStatus("Error");
   }
 }
@@ -974,11 +1005,13 @@ void DesktopController::insertBuiltinSound(const QString& sound_id) {
     setError(QStringLiteral("Sonido no disponible en el catálogo."));
     return;
   }
+  bool sound_pack_missing = false;
   try {
     const std::filesystem::path locator{"pulsar-sound:" + found->second.id};
     const auto runtime = pulsar::desktop::builtin_sound_runtime_path(locator);
     std::error_code error;
     if (!std::filesystem::is_regular_file(runtime, error)) {
+      sound_pack_missing = true;
       throw std::runtime_error{"Core Sounds Pack no disponible"};
     }
     const auto media = active_session_->processor().import_asset(
@@ -1009,7 +1042,9 @@ void DesktopController::insertBuiltinSound(const QString& sound_id) {
     publishTimeline();
     emit mediaChanged();
   } catch (const std::exception& error) {
-    setError(QString::fromUtf8(error.what()));
+    logCause("insert sound failed", error);
+    setError(sound_pack_missing ? QStringLiteral("No se encontró el paquete de sonidos de PULSAR. Reinstalá la aplicación.")
+                                : QStringLiteral("No se pudo insertar el sonido."));
     setStatus(QStringLiteral("Error"));
   }
 }
@@ -1020,7 +1055,8 @@ void DesktopController::setSelectedClipGainDb(double gain_db) {
     clearError();
     publishTimeline();
   } catch (const std::exception& error) {
-    setError(QString::fromUtf8(error.what()));
+    logCause("edit failed", error);
+    setError(QStringLiteral("No se pudo aplicar el cambio."));
   }
 }
 void DesktopController::toggleSelectedClipMute() {
@@ -1030,15 +1066,16 @@ void DesktopController::toggleSelectedClipMute() {
     clearError();
     publishTimeline();
   } catch (const std::exception& error) {
-    setError(QString::fromUtf8(error.what()));
+    logCause("edit failed", error);
+    setError(QStringLiteral("No se pudo aplicar el cambio."));
   }
 }
 void DesktopController::undoEdit(){if(active_session_&&active_session_->undo()){clearProgram(has_video_media_ ? "loading" : "empty");publishTimeline();}}
 void DesktopController::redoEdit(){if(active_session_&&active_session_->redo()){clearProgram(has_video_media_ ? "loading" : "empty");publishTimeline();}}
-void DesktopController::saveProject(const QString& path) {
+bool DesktopController::saveProject(const QString& path) {
   const QString trimmed = path.trimmed().isEmpty() ? activeProjectPath() : path.trimmed();
   if (trimmed.isEmpty() || !active_session_) {
-    return;
+    return false;
   }
   try {
     const auto result = active_session_->save_project(std::filesystem::path{trimmed.toStdString()},
@@ -1055,14 +1092,18 @@ void DesktopController::saveProject(const QString& path) {
       emit activeProjectPathChanged();
     }
     publishProjectDirty();
-  } catch (const pulsar::application::ProjectRepositoryError& error) {
-    setError(QString::fromUtf8(error.what()));
+    return true;
+  } catch (const std::exception& error) {
+    // Nothing is marked saved: the project stays dirty and open.
+    logCause("save failed", error);
+    setError(projectSaveMessage());
+    return false;
   }
 }
-void DesktopController::openProject(const QString& path) {
+bool DesktopController::openProject(const QString& path) {
   const QString trimmed = path.trimmed();
   if (trimmed.isEmpty()) {
-    return;
+    return false;
   }
   const std::filesystem::path project_path{trimmed.toStdString()};
   setBusy(true);
@@ -1098,10 +1139,12 @@ void DesktopController::openProject(const QString& path) {
     waveform_item_stamps_.clear();
     ++editor_session_epoch_; selected_asset_id_.clear();
   } catch (const std::exception& error) {
+    // Candidate-first: the current session, mailbox and workers were never touched.
+    logCause("open project failed", error);
     setBusy(false);
-    setError(QString::fromUtf8(error.what()));
+    setError(projectOpenMessage(error));
     setStatus(QStringLiteral("Error"));
-    return;
+    return false;
   }
   pause();
   has_media_ = false;
@@ -1125,7 +1168,48 @@ void DesktopController::openProject(const QString& path) {
   emit mediaChanged();
   emit playbackChanged();
   emit positionChanged();
+  return true;
 }
+
+// ---- Save / export destination helpers -----------------------------------------------------
+QString DesktopController::suggestedPath(const QString& purpose) const {
+  const bool is_export = purpose == QStringLiteral("export");
+  QString directory;
+  if (!active_project_file_.empty()) {
+    directory = QString::fromStdString(active_project_file_.parent_path().string());
+  } else {
+    directory = QStandardPaths::writableLocation(is_export ? QStandardPaths::MoviesLocation
+                                                           : QStandardPaths::DocumentsLocation);
+    if (directory.isEmpty() || !QDir{directory}.exists()) directory = QDir::homePath();
+  }
+  QString stem = active_project_file_.empty() ? QStringLiteral("pulsar") : QString::fromStdString(active_project_file_.stem().string());
+  return QDir{directory}.filePath(stem + (is_export ? QStringLiteral(".mp4") : QStringLiteral(".pulsar")));
+}
+
+QString DesktopController::normalizeSavePath(const QString& text, const QString& extension) const {
+  QString path = text.trimmed();
+  if (path.startsWith(QStringLiteral("~/")) || path == QStringLiteral("~")) path = QDir::homePath() + path.mid(1);
+  if (!path.isEmpty() && QDir::isRelativePath(path)) {
+    const auto suggested = QFileInfo{suggestedPath(extension == QStringLiteral(".mp4") ? QStringLiteral("export") : QStringLiteral("project"))};
+    path = suggested.absolutePath() + QLatin1Char('/') + path;
+  }
+  path = QDir::cleanPath(path);
+  if (!path.isEmpty() && !extension.isEmpty() && !path.endsWith(extension, Qt::CaseInsensitive)) path += extension;
+  return path;
+}
+
+QString DesktopController::validateSavePath(const QString& path) const {
+  if (path.trimmed().isEmpty()) return QStringLiteral("Escribí la ruta del archivo.");
+  const QFileInfo info{path};
+  if (info.isDir()) return QStringLiteral("Esa ruta es una carpeta; escribí también el nombre del archivo.");
+  const QFileInfo parent{info.absolutePath()};
+  if (!parent.exists() || !parent.isDir()) return QStringLiteral("La carpeta no existe.");
+  if (!parent.isWritable()) return QStringLiteral("No tenés permiso para escribir en esa carpeta.");
+  if (info.exists() && !info.isWritable()) return QStringLiteral("No tenés permiso para reemplazar ese archivo.");
+  return {};
+}
+
+bool DesktopController::pathExists(const QString& path) const { return QFileInfo::exists(path); }
 
 void DesktopController::exportProject(const QString& path) {
   const auto trimmed = path.trimmed();
@@ -1232,7 +1316,7 @@ void DesktopController::exportLoop(pulsar::application::ProjectSnapshot snapshot
               << "export_code=InternalInvariant cause=" << error.what() << '\n';
     QMetaObject::invokeMethod(
         this,
-        [this, generation, message = QString::fromUtf8(error.what())] {
+        [this, generation, message = QStringLiteral("Ocurrió un error inesperado durante la exportación.")] {
           if (generation != export_generation_) return;
           export_running_ = false;
           emit exportRunningChanged();
@@ -1291,7 +1375,7 @@ pulsar::application::AudioPlaybackSourceFactory DesktopController::makeAudioSour
 
 void DesktopController::postOpen(std::filesystem::path path, std::uint64_t generation) { setBusy(true); setStatus("Preparando…"); setTechnicalStatus("Probing"); clearError(); enqueue(WorkerCommand{std::move(path),generation}); }
 void DesktopController::enqueue(WorkerCommand command){{std::lock_guard lock{mutex_};pending_command_=std::move(command);}wake_.notify_one();}
-void DesktopController::workerLoop(){while(true){WorkerCommand command;{std::unique_lock lock{mutex_};wake_.wait(lock,[this]{return stop_worker_||pending_command_.has_value();});if(stop_worker_)return;command=std::move(*pending_command_);pending_command_.reset();}try{FFmpegMediaProbe probe;auto result=probe.probe(command.path);if(result.video_streams.empty()&&result.audio_streams.empty())throw std::runtime_error{"media has no usable video or audio stream"};QMetaObject::invokeMethod(this,[this,generation=command.generation,result=std::move(result)]()mutable{if(generation!=import_request_generation_){++stale_visual_frames_;return;}installTimelineAsset(result);},Qt::QueuedConnection);}catch(const std::exception& error){QMetaObject::invokeMethod(this,[this,generation=command.generation,message=QString::fromUtf8(error.what())]{if(generation!=import_request_generation_)return;setBusy(false);setError(message);setStatus("Error");},Qt::QueuedConnection);}}}
+void DesktopController::workerLoop(){while(true){WorkerCommand command;{std::unique_lock lock{mutex_};wake_.wait(lock,[this]{return stop_worker_||pending_command_.has_value();});if(stop_worker_)return;command=std::move(*pending_command_);pending_command_.reset();}try{FFmpegMediaProbe probe;auto result=probe.probe(command.path);if(result.video_streams.empty()&&result.audio_streams.empty())throw std::runtime_error{"media has no usable video or audio stream"};QMetaObject::invokeMethod(this,[this,generation=command.generation,result=std::move(result)]()mutable{if(generation!=import_request_generation_){++stale_visual_frames_;return;}installTimelineAsset(result);},Qt::QueuedConnection);}catch(const std::exception& error){logCause("import failed",error);QMetaObject::invokeMethod(this,[this,generation=command.generation,message=importMessage(command.path)]{if(generation!=import_request_generation_)return;setBusy(false);setError(message);setStatus("Error");},Qt::QueuedConnection);}}}
 
 void DesktopController::presentTimeline(const pulsar::application::TimelinePresentation& presentation){std::visit([this](const auto& value){using T=std::decay_t<decltype(value)>;if constexpr(std::is_same_v<T,pulsar::application::TimelinePresentSample>){displayLease(value);}else if constexpr(std::is_same_v<T,pulsar::application::TimelineHoldPresentation>){pulsar::application::TimelinePresentSample present{value.clip_id,value.media_id,value.timeline_position,value.sample};displayLease(present);}else if constexpr(std::is_same_v<T,pulsar::application::TimelineGapPresentation>||std::is_same_v<T,pulsar::application::TimelineSourceGapPresentation>){clearProgram(has_video_media_ ? "gap" : "empty");}else if constexpr(std::is_same_v<T,pulsar::application::TimelineMissingMediaPresentation>){clearProgram(has_video_media_ ? "missing" : "empty");}else if constexpr(std::is_same_v<T,pulsar::application::TimelineStarvedPresentation>){
   const auto epoch = visual_mailbox_->active_epoch();

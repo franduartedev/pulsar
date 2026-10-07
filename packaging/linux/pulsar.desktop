@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=PULSAR
+GenericName=Video Editor
+Comment=Lightweight video editor built for fast, predictable editing
+Exec=pulsar-desktop
+Icon=pulsar
+Terminal=false
+Categories=AudioVideo;Video;AudioVideoEditing;
+StartupWMClass=pulsar
+Keywords=video;editor;timeline;audio;

@@ -12,6 +12,10 @@ add_library(pulsar_domain
 
 add_library(pulsar::domain ALIAS pulsar_domain)
 
+# The product version is injected into exactly one translation unit.
+set_source_files_properties(src/build_info.cpp PROPERTIES
+  COMPILE_DEFINITIONS "PULSAR_VERSION_STRING=\"${PULSAR_VERSION_STRING}\"")
+
 target_include_directories(pulsar_domain
   PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/include"

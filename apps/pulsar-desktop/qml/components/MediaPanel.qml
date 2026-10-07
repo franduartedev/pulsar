@@ -138,6 +138,15 @@ Panel {
         }
     }
 
+    Text {
+        visible: mediaPanel.soundsTab && !controller.soundPackAvailable
+        anchors.horizontalCenter: parent.horizontalCenter; anchors.top: tabs.bottom; anchors.topMargin: 40
+        width: parent.width - 2 * Theme.spaceXL
+        horizontalAlignment: Text.AlignHCenter; wrapMode: Text.WordWrap
+        text: "No se encontró el paquete de sonidos de PULSAR. Reinstalá la aplicación."
+        color: Theme.textSecondary; font.pixelSize: Theme.fontSizeS
+    }
+
     // ---- Open by path (secondary) -------------------------------------
     Text { id: pathLabel; visible: pathRow.visible; anchors.left: parent.left; anchors.leftMargin: Theme.spaceM; anchors.bottom: pathRow.top; anchors.bottomMargin: 6; text: "Abrir por ruta"; color: Theme.textMuted; font.pixelSize: Theme.fontSizeXS }
     Row {

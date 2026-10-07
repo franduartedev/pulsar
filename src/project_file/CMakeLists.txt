@@ -14,7 +14,6 @@ target_link_libraries(pulsar_project_file
   PUBLIC
     pulsar::application
 )
-target_compile_definitions(pulsar_project_file PRIVATE PULSAR_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 
 pulsar_apply_project_options(pulsar_project_file)
 pulsar_apply_compiler_warnings(pulsar_project_file)

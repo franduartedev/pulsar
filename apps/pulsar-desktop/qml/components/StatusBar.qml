@@ -21,11 +21,19 @@ Item {
         color: Theme.textMuted
         font.pixelSize: Theme.fontSizeXS
         elide: Text.ElideRight
-        width: Math.max(0, parent.width - statusRow.width - 3 * Theme.spaceL)
+        width: Math.max(0, parent.width - statusRow.width - versionText.width - 4 * Theme.spaceL)
+    }
+    Text {
+        id: versionText
+        anchors.right: parent.right; anchors.rightMargin: Theme.spaceM
+        anchors.verticalCenter: parent.verticalCenter
+        text: controller.appVersion
+        color: Theme.textMuted
+        font.pixelSize: Theme.fontSizeXS
     }
     Row {
         id: statusRow
-        anchors.right: parent.right; anchors.rightMargin: Theme.spaceM
+        anchors.right: versionText.left; anchors.rightMargin: Theme.spaceL
         anchors.verticalCenter: parent.verticalCenter
         spacing: 7
         StatusDot { anchors.verticalCenter: parent.verticalCenter; tone: bar.hasError ? "error" : (controller.exportRunning ? "live" : "ok") }

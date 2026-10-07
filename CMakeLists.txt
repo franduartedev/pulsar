@@ -3,9 +3,18 @@ cmake_minimum_required(VERSION 3.20)
 project(
   pulsar
   VERSION 0.1.0
-  DESCRIPTION "Linux-first video editor foundation"
+  DESCRIPTION "Lightweight video editor built for fast, predictable editing"
   LANGUAGES CXX
 )
+
+# Single source of truth for the product version shown to users:
+#   "<major>.<minor>.<patch>[-<label>]", e.g. 0.1.0-beta. Change it here only.
+set(PULSAR_VERSION_LABEL "beta" CACHE STRING "Pre-release label appended to the version (empty for a stable release)")
+if(PULSAR_VERSION_LABEL)
+  set(PULSAR_VERSION_STRING "${PROJECT_VERSION}-${PULSAR_VERSION_LABEL}")
+else()
+  set(PULSAR_VERSION_STRING "${PROJECT_VERSION}")
+endif()
 
 option(PULSAR_BUILD_TESTS "Build PULSAR tests" ON)
 option(PULSAR_BUILD_BENCHMARKS "Build PULSAR benchmark harness" OFF)

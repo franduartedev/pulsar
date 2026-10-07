@@ -1,19 +1,24 @@
 # Architecture
 
-PULSAR starts with two product layers and one executable target:
-
-- `pulsar_domain`: core product concepts and invariants. It depends only on the C++ standard library.
-- `pulsar_application`: application-level orchestration. It may depend on `pulsar_domain`.
-- `pulsar-engine-lab`: a small executable used to verify that applications can be built on top of the core.
-
-Dependency direction is inward:
+Dependency direction is inward; nothing in an inner layer knows about an outer one:
 
 ```text
-pulsar-engine-lab -> pulsar_application -> pulsar_domain
+domain  <-  application  <-  adapters  <-  apps
 ```
 
-`pulsar_domain` does not know about frameworks, operating-system APIs, multimedia libraries, storage, UI, or infrastructure. This keeps the product logic testable and allows future implementations to be replaced without forcing external technology choices into the domain.
+| Module | Path | Role | May depend on |
+|---|---|---|---|
+| `pulsar_domain` | `src/domain` | Exact rational time (`MediaTime`), timeline/track/clip model, ids. | C++ standard library only |
+| `pulsar_application` | `src/application` | Commands + undo/redo (`CommandProcessor`), `ProjectDocument`, project codec, playback coordination and A/V mix, offline export pipeline (`ExportPlan`, renderers, `ExportJob`), waveform cache. | domain |
+| `pulsar_project_file` | `src/project_file` | Filesystem adapters: atomic project save/load, export output publishing. | application |
+| `pulsar_media_ffmpeg` | `src/media/ffmpeg` | FFmpeg adapters: probe, video/audio decode, MP4 H.264/AAC writer. | application, FFmpeg |
+| `pulsar_media_qt_audio` | `src/media/qt_audio` | Preview audio output (Qt Multimedia). | application, Qt |
+| `pulsar-desktop` | `apps/pulsar-desktop` | Qt Quick app: `EditorSession` (Qt-free editing/snapping logic), `DesktopController` (QML bridge), QML UI. | everything above |
+| `pulsar-engine-lab`, `audio-smoke` | `apps/` | Developer tools for exercising the engine without the UI. | adapters |
 
-`pulsar_application` is where use-case coordination will live when real product behavior exists. It can call into the domain, but the domain must never call back into application code.
+Principles that shape the code: exact time (no floating-point timeline math), explicit
+ownership and failure states, bounded buffers, one source of truth per fact, and
+immutable snapshots for anything that runs off the UI thread (export, waveforms).
 
-Engine Lab will become the place to experiment with playback, decoding, seeking, GPU work, and performance. For this foundation milestone, it only proves that the project can build and run an executable over the core targets.
+Decisions and their reasoning are recorded as ADRs in [`../adr`](../adr/README.md).
+Performance budgets and measurements are in [`../performance`](../performance/README.md).

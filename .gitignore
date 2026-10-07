@@ -31,3 +31,18 @@ Testing/
 .idea/
 .vscode/
 .DS_Store
+dist/
+
+# Local outputs
+artifacts/
+*.log
+__pycache__/
+*.pyc
+core
+core.*
+screenshots/
+*.AppImage
+*.part
+CMakeUserPresets.json
+.vs/
+*.user

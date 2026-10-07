@@ -36,6 +36,8 @@ class WaveformQuickItem;
 
 class DesktopController final : public QObject {
   Q_OBJECT
+  Q_PROPERTY(QString appVersion READ appVersion CONSTANT)
+  Q_PROPERTY(bool soundPackAvailable READ soundPackAvailable CONSTANT)
   Q_PROPERTY(QString status READ status NOTIFY statusChanged)
   Q_PROPERTY(QString technicalStatus READ technicalStatus NOTIFY technicalStatusChanged)
   Q_PROPERTY(QString mediaName READ mediaName NOTIFY mediaChanged)
@@ -134,6 +136,8 @@ public:
   [[nodiscard]] bool canUndo() const { return active_session_ && active_session_->can_undo(); }
   [[nodiscard]] bool canRedo() const { return active_session_ && active_session_->can_redo(); }
   [[nodiscard]] QVariantList soundLibrary() const { return sound_library_; }
+  [[nodiscard]] QString appVersion() const;
+  [[nodiscard]] bool soundPackAvailable() const { return !sound_library_.isEmpty(); }
   Q_INVOKABLE void openPath(const QString& path);
   Q_INVOKABLE void openUrl(const QUrl& url);
   Q_INVOKABLE void importRequested();
@@ -168,13 +172,20 @@ public:
   Q_INVOKABLE void undoEdit();
   Q_INVOKABLE void redoEdit();
   Q_INVOKABLE void insertBuiltinSound(const QString& sound_id);
-  Q_INVOKABLE void saveProject(const QString& path);
-  Q_INVOKABLE void openProject(const QString& path);
+  // Returns true only when the project was written; the dirty state is cleared only then.
+  Q_INVOKABLE bool saveProject(const QString& path);
+  // Returns false (and keeps the current project untouched) if the file cannot be opened.
+  Q_INVOKABLE bool openProject(const QString& path);
   // Library actions on imported media. Video assets go to VIDEO 1 as one
   // undoable edit; overlap is refused without changing the project.
   Q_INVOKABLE void selectAsset(const QString& media_id);
   Q_INVOKABLE void insertAssetAtPlayhead(const QString& media_id);
   Q_INVOKABLE void appendAssetToVideoTrack(const QString& media_id);
+  // Save / export destination helpers (see PathPromptDialog).
+  Q_INVOKABLE QString suggestedPath(const QString& purpose) const;
+  Q_INVOKABLE QString normalizeSavePath(const QString& text, const QString& extension) const;
+  Q_INVOKABLE QString validateSavePath(const QString& path) const;   // "" when usable
+  Q_INVOKABLE bool pathExists(const QString& path) const;
   Q_INVOKABLE void exportProject(const QString& path);
   Q_INVOKABLE void cancelExport();
   Q_INVOKABLE void attachWaveformItem(const QString& clip_key, QObject* item);

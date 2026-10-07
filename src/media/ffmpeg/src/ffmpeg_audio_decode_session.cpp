@@ -112,6 +112,7 @@ struct ChannelLayoutDeleter {
   void operator()(AVChannelLayout* layout) const noexcept {
     if (layout != nullptr) {
       av_channel_layout_uninit(layout);
+      delete layout;  // allocated with `new` in make_channel_layout()
     }
   }
 };

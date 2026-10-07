@@ -1,3 +1,6 @@
+> **Historical measurement** (M9, 2026-09). Kept as a dated record; commands and paths refer to the
+> author's development machine and are not instructions for contributors.
+
 # X1 — Pre-I1 Playback/Edit Performance Baseline
 
 Date: 2026-09-17.

@@ -45,6 +45,8 @@ qt_add_resources(pulsar_desktop pulsar_desktop_qml
     qml/components/ClipBlock.qml
     qml/components/Playhead.qml
     qml/components/ToolButton.qml
+    qml/components/UnsavedChangesDialog.qml
+    qml/components/PathPromptDialog.qml
     qml/components/PSlider.qml
 )
 
@@ -78,7 +80,6 @@ target_link_libraries(pulsar_desktop
     pulsar::domain
     pulsar::project_file
 )
-target_compile_definitions(pulsar_desktop PRIVATE PULSAR_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 
 if(PULSAR_BUILD_QT_AUDIO)
   target_compile_definitions(pulsar_desktop PRIVATE PULSAR_HAS_QT_AUDIO=1)
@@ -88,8 +89,15 @@ endif()
 pulsar_apply_project_options(pulsar_desktop)
 pulsar_apply_compiler_warnings(pulsar_desktop)
 
+# Build tree mirrors the portable layout: assets/ next to the executable.
+add_custom_command(TARGET pulsar_desktop POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -E copy_directory
+          "${CMAKE_SOURCE_DIR}/assets" "$<TARGET_FILE_DIR:pulsar_desktop>/assets"
+  COMMENT "Staging assets next to pulsar-desktop")
+
 qt_import_qml_plugins(pulsar_desktop)
 
+if(PULSAR_BUILD_TESTS)
 add_test(NAME pulsar.desktop.smoke
          COMMAND pulsar_desktop --smoke-exit-ms 250)
 set_tests_properties(pulsar.desktop.smoke
@@ -135,6 +143,7 @@ target_compile_definitions(pulsar_desktop_export_tests
 )
 pulsar_apply_project_options(pulsar_desktop_export_tests)
 pulsar_apply_compiler_warnings(pulsar_desktop_export_tests)
+add_dependencies(pulsar_desktop_export_tests pulsar_desktop)  # stages assets/ next to the test
 add_test(NAME pulsar.desktop.export_integration
          COMMAND pulsar_desktop_export_tests)
 set_tests_properties(pulsar.desktop.export_integration
@@ -178,7 +187,57 @@ target_compile_definitions(pulsar_desktop_ingest_tests
 )
 pulsar_apply_project_options(pulsar_desktop_ingest_tests)
 pulsar_apply_compiler_warnings(pulsar_desktop_ingest_tests)
+add_dependencies(pulsar_desktop_ingest_tests pulsar_desktop)
 add_test(NAME pulsar.desktop.ingest_integration
          COMMAND pulsar_desktop_ingest_tests)
 set_tests_properties(pulsar.desktop.ingest_integration
   PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+# Release-safety desktop tests (same sources as the other controller tests).
+foreach(pair "safety|pulsar.desktop.safety" "shutdown|pulsar.desktop.shutdown")
+  string(REPLACE "|" ";" parts "${pair}")
+  list(GET parts 0 short)
+  list(GET parts 1 test_name)
+  set(target pulsar_desktop_${short}_tests)
+  add_executable(${target}
+    tests/desktop_controller_${short}_test.cpp
+    src/desktop_controller.cpp
+    src/desktop_controller.hpp
+    src/timeline_clip_list_model.cpp
+    src/timeline_clip_list_model.hpp
+    src/media_asset_list_model.cpp
+    src/media_asset_list_model.hpp
+    src/waveform_quick_item.cpp
+    src/waveform_quick_item.hpp
+    src/editor_session.cpp
+    src/editor_session.hpp
+    src/preview_image_provider.cpp
+    src/preview_image_provider.hpp
+    src/builtin_sound_catalog.hpp
+  )
+  set_target_properties(${target} PROPERTIES AUTOMOC ON)
+  target_include_directories(${target} PRIVATE src)
+  target_link_libraries(${target} PRIVATE
+    Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick Qt6::Multimedia
+    pulsar::media_ffmpeg pulsar::media_qt_audio pulsar::application pulsar::domain pulsar::project_file)
+  target_compile_definitions(${target} PRIVATE PULSAR_SOURCE_DIR="${CMAKE_SOURCE_DIR}" PULSAR_HAS_QT_AUDIO=1)
+  pulsar_apply_project_options(${target})
+  pulsar_apply_compiler_warnings(${target})
+  add_dependencies(${target} pulsar_desktop)
+  add_test(NAME ${test_name} COMMAND ${target})
+  set_tests_properties(${test_name} PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 300)
+endforeach()
+endif()
+
+# ---- Installation (portable bundle / AppImage / distro packaging) ----------
+# Layout under the prefix:
+#   bin/pulsar-desktop, share/pulsar/assets/sounds/*, share/applications/pulsar.desktop,
+#   share/icons/hicolor/{scalable,256x256}/apps/pulsar.*
+include(GNUInstallDirs)
+install(TARGETS pulsar_desktop RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+install(DIRECTORY "${CMAKE_SOURCE_DIR}/assets/" DESTINATION ${CMAKE_INSTALL_DATADIR}/pulsar/assets)
+install(FILES "${CMAKE_SOURCE_DIR}/packaging/linux/pulsar.desktop" DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
+install(FILES "${CMAKE_SOURCE_DIR}/packaging/linux/pulsar.svg"
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps)
+install(FILES "${CMAKE_SOURCE_DIR}/packaging/linux/pulsar-256.png"
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/256x256/apps RENAME pulsar.png)

@@ -3,6 +3,7 @@
 #include "preview_image_provider.hpp"
 #include "waveform_quick_item.hpp"
 
+#include <pulsar/domain/build_info.hpp>
 #include <pulsar/media/ffmpeg/ffmpeg_waveform_source.hpp>
 
 #include <QGuiApplication>
@@ -16,10 +17,24 @@
 #include <iostream>
 #include <filesystem>
 #include <memory>
+#include <string>
 #include <optional>
 
 int main(int argc, char** argv) {
+  // Answered before any Qt/display initialisation so it works over SSH/CI.
+  for (int index = 1; index < argc; ++index) {
+    const std::string argument{argv[index]};
+    if (argument == "--version" || argument == "-v") {
+      std::cout << pulsar::domain::product_name() << ' ' << pulsar::domain::product_version() << '\n';
+      return 0;
+    }
+  }
   QGuiApplication app{argc, argv};
+  QGuiApplication::setApplicationName(QStringLiteral("PULSAR"));
+  QGuiApplication::setApplicationVersion(QString::fromUtf8(pulsar::domain::product_version().data(),
+                                                           static_cast<qsizetype>(pulsar::domain::product_version().size())));
+  QGuiApplication::setOrganizationName(QStringLiteral("FD Labs"));
+  QGuiApplication::setDesktopFileName(QStringLiteral("pulsar"));
   app.setApplicationName(QStringLiteral("PULSAR"));
   app.setOrganizationName(QStringLiteral("PULSAR"));
 

@@ -32,6 +32,20 @@
         "CMAKE_BUILD_TYPE": "Release",
         "PULSAR_BUILD_TESTS": "ON"
       }
+    },
+    {
+      "name": "release-desktop",
+      "displayName": "Release desktop build for packaging",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build-release-desktop",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "PULSAR_BUILD_TESTS": "OFF",
+        "PULSAR_BUILD_DESKTOP": "ON",
+        "PULSAR_BUILD_QT_AUDIO": "ON",
+        "CMAKE_INSTALL_PREFIX": "/usr",
+        "CMAKE_CXX_FLAGS": "-ffile-prefix-map=${sourceDir}=. -fdebug-prefix-map=${sourceDir}=."
+      }
     }
   ]
 }

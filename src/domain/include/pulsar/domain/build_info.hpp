@@ -8,6 +8,9 @@ namespace pulsar::domain {
   return "PULSAR";
 }
 
+// "0.1.0-beta": defined once in the root CMakeLists (PULSAR_VERSION_STRING).
+[[nodiscard]] std::string_view product_version() noexcept;
+
 [[nodiscard]] constexpr bool cpp20_or_newer() noexcept {
   return __cplusplus >= 202002L;
 }

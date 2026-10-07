@@ -1,3 +1,6 @@
+> **Historical measurement** (M9, 2026-09). Kept as a dated record; commands and paths refer to the
+> author's development machine and are not instructions for contributors.
+
 # X2 — Post-I1 Controlled Comparison
 
 Date: 2026-09-18.
