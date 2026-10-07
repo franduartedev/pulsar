@@ -1,8 +1,8 @@
 import QtQuick
 import "../theme/Theme.js" as Theme
 
-// Quiet support panel: the loaded session object leads, manual path entry
-// stays secondary. Reads controller directly, like the rest of the UI.
+// Media library: real tabs (Medios / Sonidos), one row per asset with type
+// icon, name and short secondary info. Technical detail lives in the Inspector.
 Panel {
     signal importRequested()
     id: mediaPanel
@@ -30,91 +30,133 @@ Panel {
         pathInput.selectAll()
     }
 
-    property string codecInfo: metaValue("Codec") || metaValue("Audio codec")
-    property string resInfo: metaValue("Resolución")
-    property string subInfo: {
-        if (!controller.hasMedia) {
-            return "Importá o arrastrá un medio a la ventana."
+    // "Video · 1280 × 720" / "Audio · 44100 Hz": short, no codec jargon.
+    property string assetInfo: {
+        var res = metaValue("Resolución")
+        if (res.length > 0) {
+            return "Video · " + res
         }
-        if (codecInfo.length > 0 && resInfo.length > 0) {
-            return codecInfo + " · " + resInfo
-        }
-        return codecInfo + resInfo
+        var rate = metaValue("Audio sample rate")
+        return rate.length > 0 ? "Audio · " + rate : "Medio"
     }
     property bool soundsTab: false
 
-    Rectangle { anchors.left: parent.left; anchors.top: parent.top; width: 4; height: 18; color: Theme.accent; opacity: 0.9 }
-    SectionLabel { id: title; anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top; anchors.leftMargin: 14; anchors.rightMargin: 12; anchors.topMargin: 14; text: "BIBLIOTECA"; color: Theme.textBright }
-    Text { anchors.left: title.left; anchors.right: title.right; anchors.top: title.bottom; anchors.topMargin: 3; text: "Medios, fuentes y sonidos"; color: Theme.faint; font.pixelSize: Theme.fontSizeXS }
-    PButton { id: importButton; anchors.left: parent.left; anchors.right: parent.right; anchors.top: title.bottom; anchors.leftMargin: 12; anchors.rightMargin: 12; anchors.topMargin: 27; text: "+  IMPORTAR MEDIO"; primary: true; onClicked: mediaPanel.importRequested() }
+    Text { id: title; anchors.left: parent.left; anchors.top: parent.top; anchors.leftMargin: Theme.spaceL; anchors.topMargin: Theme.spaceL; text: "Biblioteca"; color: Theme.textPrimary; font.pixelSize: Theme.fontSizeL; font.bold: true }
+    PButton {
+        id: importButton
+        anchors.left: parent.left; anchors.right: parent.right; anchors.top: title.bottom
+        anchors.leftMargin: Theme.spaceM; anchors.rightMargin: Theme.spaceM; anchors.topMargin: Theme.spaceM
+        primary: true; text: "+  Importar medio"
+        onClicked: mediaPanel.importRequested()
+    }
 
-    Row {
+    // Underline tabs.
+    Item {
         id: tabs
         anchors.left: parent.left; anchors.right: parent.right; anchors.top: importButton.bottom
-        anchors.leftMargin: 12; anchors.rightMargin: 12; anchors.topMargin: 10; spacing: 6
-        PButton { width: (tabs.width - 6) / 2; height: 26; text: "MEDIOS"; primary: !mediaPanel.soundsTab; onClicked: mediaPanel.soundsTab = false }
-        PButton { width: (tabs.width - 6) / 2; height: 26; text: "SONIDOS"; primary: mediaPanel.soundsTab; onClicked: mediaPanel.soundsTab = true }
-    }
-
-    SectionLabel { id: sessionLabel; visible: !mediaPanel.soundsTab; anchors.left: parent.left; anchors.right: parent.right; anchors.top: tabs.bottom; anchors.leftMargin: 12; anchors.rightMargin: 12; anchors.topMargin: 12; text: "FUENTE ACTIVA" }
-    Rectangle {
-        id: activeCard
-        visible: !mediaPanel.soundsTab
-        anchors.left: parent.left; anchors.right: parent.right; anchors.top: sessionLabel.bottom; anchors.leftMargin: 12; anchors.rightMargin: 12; anchors.topMargin: 8
-        height: cardCol.height + 18
-        color: controller.hasMedia ? Theme.input : "transparent"
-        border.color: controller.hasMedia ? Theme.border : Theme.borderSoft
-        radius: Theme.radiusS
-        Column {
-            id: cardCol
-            anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top; anchors.leftMargin: 9; anchors.rightMargin: 9; anchors.topMargin: 9
-            spacing: 4
-            Row {
-                width: parent.width
-                spacing: 7
-                StatusDot { anchors.verticalCenter: parent.verticalCenter; tone: controller.hasMedia ? "live" : "idle" }
-                PText { width: parent.width - 14; anchors.verticalCenter: parent.verticalCenter; text: controller.hasMedia ? controller.mediaName : "Sin medios cargados"; color: controller.hasMedia ? Theme.textBright : Theme.muted }
+        anchors.leftMargin: Theme.spaceM; anchors.rightMargin: Theme.spaceM; anchors.topMargin: Theme.spaceM
+        height: 32
+        Rectangle { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; height: 1; color: Theme.borderSubtle }
+        Repeater {
+            model: [{label: "Medios", sounds: false}, {label: "Sonidos", sounds: true}]
+            delegate: Item {
+                width: tabs.width / 2; height: tabs.height
+                x: index * width
+                readonly property bool current: mediaPanel.soundsTab === modelData.sounds
+                activeFocusOnTab: true
+                Keys.onReturnPressed: mediaPanel.soundsTab = modelData.sounds
+                Keys.onSpacePressed: mediaPanel.soundsTab = modelData.sounds
+                Text { anchors.centerIn: parent; text: modelData.label; color: parent.current ? Theme.textPrimary : (tabMouse.containsMouse ? Theme.textPrimary : Theme.textSecondary); font.pixelSize: Theme.fontSizeM; font.bold: parent.current }
+                Rectangle { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; height: 2; color: parent.current ? Theme.accent : (parent.activeFocus ? Theme.focus : "transparent") }
+                MouseArea { id: tabMouse; anchors.fill: parent; hoverEnabled: true; onClicked: mediaPanel.soundsTab = modelData.sounds }
             }
-            PMuted { width: parent.width; text: mediaPanel.subInfo; wrapMode: Text.WordWrap }
         }
     }
 
-    SectionLabel { id: soundsTitle; anchors.left: parent.left; anchors.right: parent.right; anchors.top: mediaPanel.soundsTab ? tabs.bottom : activeCard.bottom; anchors.leftMargin: 12; anchors.rightMargin: 12; anchors.topMargin: mediaPanel.soundsTab ? 14 : 16; text: "CORE SOUNDS"; color: Theme.textBright; visible: mediaPanel.soundsTab }
+    // ---- Medios -------------------------------------------------------
+    ListView {
+        id: mediaList
+        visible: !mediaPanel.soundsTab
+        anchors.left: parent.left; anchors.right: parent.right; anchors.top: tabs.bottom
+        anchors.bottom: pathRow.visible ? pathLabel.top : parent.bottom
+        anchors.leftMargin: Theme.spaceM; anchors.rightMargin: Theme.spaceM
+        anchors.topMargin: Theme.spaceS; anchors.bottomMargin: Theme.spaceS
+        clip: true; spacing: 4
+        // One entry today (the active source). The row is the unit the media
+        // bin will list per asset once the controller exposes more than one.
+        model: controller.hasMedia ? 1 : 0
+        delegate: Rectangle {
+            width: mediaList.width; height: 52; radius: Theme.radiusM
+            color: Theme.bgSelected
+            Rectangle { anchors.left: parent.left; anchors.top: parent.top; anchors.bottom: parent.bottom; anchors.topMargin: 10; anchors.bottomMargin: 10; width: 2; radius: 1; color: Theme.accent }
+            Rectangle {
+                id: iconBox
+                anchors.left: parent.left; anchors.leftMargin: 12; anchors.verticalCenter: parent.verticalCenter
+                width: 32; height: 32; radius: Theme.radiusM; color: Theme.bgElevated
+                TGlyph { anchors.centerIn: parent; width: 18; height: 18; kind: controller.hasVideoMedia ? "video" : "audio"; ink: controller.hasVideoMedia ? Theme.waveform : Theme.waveformAudio }
+            }
+            Column {
+                anchors.left: iconBox.right; anchors.leftMargin: 10; anchors.right: parent.right; anchors.rightMargin: 10
+                anchors.verticalCenter: parent.verticalCenter
+                spacing: 2
+                Text { width: parent.width; text: controller.mediaName; color: Theme.textPrimary; font.pixelSize: Theme.fontSizeM; elide: Text.ElideMiddle }
+                Text { width: parent.width; text: mediaPanel.assetInfo; color: Theme.textSecondary; font.pixelSize: Theme.fontSizeXS; elide: Text.ElideRight }
+            }
+        }
+    }
+    Column {
+        visible: !mediaPanel.soundsTab && !controller.hasMedia
+        anchors.horizontalCenter: parent.horizontalCenter; anchors.top: tabs.bottom; anchors.topMargin: 40
+        width: parent.width - 2 * Theme.spaceXL
+        spacing: 6
+        Text { width: parent.width; horizontalAlignment: Text.AlignHCenter; text: "Sin medios"; color: Theme.textSecondary; font.pixelSize: Theme.fontSizeM }
+        Text { width: parent.width; horizontalAlignment: Text.AlignHCenter; wrapMode: Text.WordWrap; text: "Importá o arrastrá un archivo a la ventana"; color: Theme.textMuted; font.pixelSize: Theme.fontSizeXS }
+    }
+
+    // ---- Sonidos ------------------------------------------------------
     ListView {
         id: soundsList
-        anchors.left: parent.left; anchors.right: parent.right; anchors.top: soundsTitle.bottom
-        anchors.bottom: (!mediaPanel.soundsTab && manualTitle.visible) ? manualTitle.top : parent.bottom
-        anchors.leftMargin: 12; anchors.rightMargin: 12; anchors.topMargin: 8; anchors.bottomMargin: (!mediaPanel.soundsTab && manualTitle.visible) ? 4 : 10
-        clip: true; spacing: 6; model: controller.soundLibrary
+        visible: mediaPanel.soundsTab
+        anchors.left: parent.left; anchors.right: parent.right; anchors.top: tabs.bottom; anchors.bottom: parent.bottom
+        anchors.leftMargin: Theme.spaceM; anchors.rightMargin: Theme.spaceM
+        anchors.topMargin: Theme.spaceS; anchors.bottomMargin: Theme.spaceM
+        clip: true; spacing: 4; model: controller.soundLibrary
         delegate: Rectangle {
-            width: soundsList.width; height: 46; radius: Theme.radiusS; color: Theme.panelAlt; border.color: Theme.borderSoft
-            Row {
-                anchors.fill: parent; anchors.margins: 7; spacing: 8
-                Rectangle { width: 3; height: parent.height; radius: 2; color: Theme.waveform; opacity: 0.7 }
+            width: soundsList.width; height: 48; radius: Theme.radiusM
+            color: rowMouse.containsMouse ? Theme.bgHover : "transparent"
+            Rectangle {
+                id: soundIcon
+                anchors.left: parent.left; anchors.leftMargin: 8; anchors.verticalCenter: parent.verticalCenter
+                width: 32; height: 32; radius: Theme.radiusM; color: Theme.bgElevated
+                TGlyph { anchors.centerIn: parent; width: 18; height: 18; kind: "audio"; ink: Theme.waveformAudio }
+            }
             Column {
-                width: parent.width - insert.width - 15; anchors.verticalCenter: parent.verticalCenter; spacing: 2
-                Text { text: modelData.name; color: Theme.text; font.pixelSize: Theme.fontSizeM; font.bold: true; elide: Text.ElideRight; width: parent.width }
-                Text { text: modelData.category; color: Theme.faint; font.pixelSize: Theme.fontSizeXS; font.letterSpacing: 0.8; elide: Text.ElideRight; width: parent.width }
+                anchors.left: soundIcon.right; anchors.leftMargin: 10; anchors.right: insert.left; anchors.rightMargin: 8
+                anchors.verticalCenter: parent.verticalCenter
+                spacing: 2
+                Text { width: parent.width; text: modelData.name; color: Theme.textPrimary; font.pixelSize: Theme.fontSizeM; elide: Text.ElideRight }
+                Text { width: parent.width; text: modelData.category; color: Theme.textSecondary; font.pixelSize: Theme.fontSizeXS; elide: Text.ElideRight }
             }
-            PButton { id: insert; width: 62; height: 28; text: "INSERTAR"; anchors.verticalCenter: parent.verticalCenter; onClicked: controller.insertBuiltinSound(modelData.id) }
-            }
+            MouseArea { id: rowMouse; anchors.fill: parent; hoverEnabled: true; acceptedButtons: Qt.NoButton }
+            PButton { id: insert; anchors.right: parent.right; anchors.rightMargin: 8; anchors.verticalCenter: parent.verticalCenter; height: Theme.controlHeightSmall; text: "Insertar"; onClicked: controller.insertBuiltinSound(modelData.id) }
         }
     }
 
-    Rectangle { id: manualSep; visible: !mediaPanel.soundsTab && parent.height > 400; anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: pathRow.top; anchors.leftMargin: 10; anchors.rightMargin: 10; anchors.bottomMargin: 8; height: 1; color: Theme.borderSoft }
-    SectionLabel { id: manualTitle; visible: !mediaPanel.soundsTab && parent.height > 400; anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: manualSep.top; anchors.leftMargin: 12; anchors.rightMargin: 12; anchors.bottomMargin: 8; text: "AVANZADO · RUTA DEL MEDIO"; opacity: 0.72 }
+    // ---- Open by path (secondary) -------------------------------------
+    Text { id: pathLabel; visible: pathRow.visible; anchors.left: parent.left; anchors.leftMargin: Theme.spaceM; anchors.bottom: pathRow.top; anchors.bottomMargin: 6; text: "Abrir por ruta"; color: Theme.textMuted; font.pixelSize: Theme.fontSizeXS }
     Row {
         id: pathRow
         visible: !mediaPanel.soundsTab && parent.height > 400
-        anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; anchors.leftMargin: 12; anchors.rightMargin: 12; anchors.bottomMargin: 12; opacity: 0.82
+        anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom
+        anchors.leftMargin: Theme.spaceM; anchors.rightMargin: Theme.spaceM; anchors.bottomMargin: Theme.spaceM
         spacing: 6
         Rectangle {
-            id: pathBox
             width: parent.width - openButton.width - 6
-            height: 28
-            color: Theme.input; border.color: pathInput.activeFocus ? Theme.accent : Theme.border; radius: Theme.radiusS
-            TextInput { id: pathInput; anchors.fill: parent; anchors.leftMargin: 7; anchors.rightMargin: 7; anchors.topMargin: 6; anchors.bottomMargin: 6; color: Theme.text; selectedTextColor: Theme.textBright; selectionColor: Theme.accent; clip: true; font.pixelSize: Theme.fontSizeM; onAccepted: controller.openPath(text) }
-            Text { anchors.left: parent.left; anchors.leftMargin: 7; anchors.verticalCenter: parent.verticalCenter; text: "/ruta/video.mp4"; color: Theme.faint; font.pixelSize: Theme.fontSizeM; visible: pathInput.text.length === 0 && !pathInput.activeFocus }
+            height: Theme.controlHeight
+            color: Theme.bgInput; radius: Theme.radiusM
+            border.width: 1; border.color: pathInput.activeFocus ? Theme.focus : Theme.borderSubtle
+            TextInput { id: pathInput; anchors.fill: parent; anchors.leftMargin: 8; anchors.rightMargin: 8; verticalAlignment: TextInput.AlignVCenter; color: Theme.textPrimary; selectedTextColor: Theme.textOnAccent; selectionColor: Theme.accent; clip: true; font.pixelSize: Theme.fontSizeS; onAccepted: controller.openPath(text) }
+            Text { anchors.left: parent.left; anchors.leftMargin: 8; anchors.verticalCenter: parent.verticalCenter; text: "/ruta/al/video.mp4"; color: Theme.textMuted; font.pixelSize: Theme.fontSizeS; visible: pathInput.text.length === 0 && !pathInput.activeFocus }
         }
         PButton { id: openButton; width: 56; text: "Abrir"; enabled: pathInput.text.length > 0; onClicked: controller.openPath(pathInput.text) }
     }

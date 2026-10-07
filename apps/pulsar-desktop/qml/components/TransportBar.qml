@@ -1,27 +1,25 @@
 import QtQuick
 import "../theme/Theme.js" as Theme
 
-// Transport strip attached to the monitor module: centered control cluster
-// with a dominant play action, strong current-position timecode at right.
-// Lives inside the monitor module frame composed by Main.qml.
+// Transport attached to the viewer: timecode left, controls centered.
 Item {
     id: bar
 
-    Text { anchors.left: parent.left; anchors.leftMargin: 16; anchors.verticalCenter: parent.verticalCenter; text: "TRANSPORTE"; color: Theme.faint; font.pixelSize: Theme.fontSizeXS; font.bold: true; font.letterSpacing: 1.4 }
     Row {
-        anchors.horizontalCenter: parent.horizontalCenter
+        id: timecode
+        anchors.left: parent.left; anchors.leftMargin: Theme.spaceL
         anchors.verticalCenter: parent.verticalCenter
         spacing: 8
-        TButton { glyph: "home"; enabled: controller.hasMedia; onClicked: controller.seekToStart() }
-        TButton { glyph: controller.playing ? "pause" : "play"; dominant: true; enabled: controller.hasMedia && !controller.busy; onClicked: controller.togglePlayback() }
-        TButton { glyph: "end"; enabled: controller.hasMedia; onClicked: controller.seekToEnd() }
+        Text { anchors.verticalCenter: parent.verticalCenter; text: controller.positionText; color: controller.hasMedia ? Theme.textPrimary : Theme.textMuted; font.family: Theme.mono; font.pixelSize: Theme.fontSizeTC }
+        Text { visible: bar.width > 560; anchors.verticalCenter: parent.verticalCenter; text: "/ " + controller.durationText; color: Theme.textMuted; font.family: Theme.mono; font.pixelSize: Theme.fontSizeM }
     }
     Row {
-        anchors.right: parent.right
-        anchors.rightMargin: 16
+        id: controls
+        x: Math.max(timecode.x + timecode.width + Theme.spaceL, (bar.width - width) / 2)
         anchors.verticalCenter: parent.verticalCenter
-        spacing: 8
-        Text { anchors.verticalCenter: parent.verticalCenter; text: controller.positionText; color: controller.hasMedia ? Theme.textBright : Theme.muted; font.family: "monospace"; font.pixelSize: Theme.fontSizeTC }
-        Text { anchors.verticalCenter: parent.verticalCenter; text: "/ " + controller.durationText; color: Theme.faint; font.family: "monospace"; font.pixelSize: Theme.fontSizeM }
+        spacing: 6
+        TButton { glyph: "home"; enabled: controller.hasMedia; onClicked: controller.seekToStart() }
+        TButton { glyph: controller.playing ? "pause" : "play"; dominant: true; active: controller.playing; enabled: controller.hasMedia && !controller.busy; onClicked: controller.togglePlayback() }
+        TButton { glyph: "end"; enabled: controller.hasMedia; onClicked: controller.seekToEnd() }
     }
 }

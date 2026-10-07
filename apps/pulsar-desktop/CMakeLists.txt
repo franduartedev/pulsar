@@ -42,6 +42,8 @@ qt_add_resources(pulsar_desktop pulsar_desktop_qml
     qml/components/VideoTrack.qml
     qml/components/ClipBlock.qml
     qml/components/Playhead.qml
+    qml/components/ToolButton.qml
+    qml/components/PSlider.qml
 )
 
 set_source_files_properties(imports/QtQml/WorkerScript/qmldir

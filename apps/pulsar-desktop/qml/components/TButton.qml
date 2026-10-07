@@ -1,48 +1,41 @@
 import QtQuick
 import "../theme/Theme.js" as Theme
 
-// Designed transport button. Play uses dominant: true for a larger,
-// accent-framed primary action. Glyphs come from TGlyph.
+// Transport icon button. Play uses dominant: true and takes the accent fill
+// while playing (active state); otherwise it stays neutral.
 Rectangle {
     id: btn
     property string glyph: "play"
     property bool dominant: false
+    property bool active: false
     signal clicked()
     activeFocusOnTab: true
     Keys.onReturnPressed: btn.clicked()
     Keys.onEnterPressed: btn.clicked()
 
-    width: dominant ? 58 : 44
-    height: 40
+    width: dominant ? 48 : 36
+    height: 32
     radius: Theme.radiusM
+    opacity: enabled ? 1.0 : 0.42
     color: {
-        if (!enabled) {
-            return Theme.buttonDisabled
+        if (active) {
+            return mouse.pressed ? Theme.accentPressed : (mouse.containsMouse ? Theme.accentHover : Theme.accent)
         }
         if (mouse.pressed) {
-            return dominant ? Theme.accent : Theme.buttonPressed
+            return Theme.bgPressed
         }
         if (mouse.containsMouse) {
-            return dominant ? Theme.accentHover : Theme.buttonHover
+            return Theme.bgHover
         }
-        return dominant ? Theme.accentDim : Theme.buttonBase
+        return dominant ? Theme.bgElevated : "transparent"
     }
-    border.color: {
-        if (!enabled) {
-            return Theme.borderSoft
-        }
-        return btn.activeFocus ? Theme.focus : (dominant ? Theme.accent : Theme.border)
-    }
+    border.width: btn.activeFocus ? 1 : 0
+    border.color: Theme.focus
 
     TGlyph {
         anchors.centerIn: parent
         kind: btn.glyph
-        ink: {
-            if (!btn.enabled) {
-                return Theme.muted
-            }
-            return btn.dominant ? Theme.textBright : Theme.text
-        }
+        ink: btn.active ? Theme.textOnAccent : Theme.textPrimary
     }
 
     MouseArea {

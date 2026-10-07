@@ -1,26 +1,47 @@
 import QtQuick
 import "../theme/Theme.js" as Theme
 
-// Subtle workstation footer: hints left, technical state right.
-Rectangle {
-    color: Theme.header
-    border.color: Theme.borderSoft
-    radius: Theme.radiusS
-    height: 28
+// One quiet line: shortcuts on the left, the single global status on the right.
+Item {
+    id: bar
+    readonly property bool hasError: controller.errorMessage.length > 0
+    readonly property string statusText: {
+        if (hasError) return controller.errorMessage
+        if (controller.exportRunning) return "Exportando " + Math.round(controller.exportProgress * 100) + "%"
+        if (controller.busy) return "Procesando…"
+        if (controller.status.indexOf("Proyecto guardado") === 0) return controller.status
+        if (controller.exportStatus.length > 0) return controller.exportStatus
+        return controller.playing ? "Reproduciendo" : "Listo"
+    }
 
-    Text { anchors.left: parent.left; anchors.leftMargin: 12; anchors.verticalCenter: parent.verticalCenter; text: controller.exportRunning ? ("EXPORTANDO " + Math.round(controller.exportProgress * 100) + "%") : "ESPACIO reproducir/pausar   ·   CTRL+I importar   ·   CTRL+S guardar   ·   INICIO/FIN navegar"; color: controller.exportRunning ? Theme.accent : Theme.faint; font.pixelSize: Theme.fontSizeXS }
+    Text {
+        anchors.left: parent.left; anchors.leftMargin: Theme.spaceM
+        anchors.verticalCenter: parent.verticalCenter
+        text: "Espacio  Reproducir   ·   S  Cortar   ·   Supr  Borrar   ·   Ctrl+Z  Deshacer   ·   Ctrl+S  Guardar"
+        color: Theme.textMuted
+        font.pixelSize: Theme.fontSizeXS
+        elide: Text.ElideRight
+        width: Math.max(0, parent.width - statusRow.width - 3 * Theme.spaceL)
+    }
+    Row {
+        id: statusRow
+        anchors.right: parent.right; anchors.rightMargin: Theme.spaceM
+        anchors.verticalCenter: parent.verticalCenter
+        spacing: 7
+        StatusDot { anchors.verticalCenter: parent.verticalCenter; tone: bar.hasError ? "error" : (controller.exportRunning ? "live" : "ok") }
+        Text {
+            anchors.verticalCenter: parent.verticalCenter
+            text: bar.statusText
+            color: bar.hasError ? Theme.error : Theme.textSecondary
+            font.pixelSize: Theme.fontSizeS
+            elide: Text.ElideRight
+            width: Math.min(implicitWidth, Math.max(120, bar.width * 0.45))
+        }
+    }
     Rectangle {
         visible: controller.exportRunning
         anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom
-        height: 2; color: Theme.border
+        height: 2; color: Theme.track
         Rectangle { width: parent.width * controller.exportProgress; height: parent.height; color: Theme.accent }
-    }
-    Row {
-        anchors.right: parent.right
-        anchors.rightMargin: 12
-        anchors.verticalCenter: parent.verticalCenter
-        spacing: 7
-        StatusDot { anchors.verticalCenter: parent.verticalCenter; tone: controller.errorMessage.length > 0 ? "error" : "idle" }
-        Text { anchors.verticalCenter: parent.verticalCenter; text: controller.errorMessage.length > 0 ? controller.errorMessage : (controller.exportStatus.length > 0 ? controller.exportStatus : controller.technicalStatus); color: controller.errorMessage.length > 0 ? Theme.danger : Theme.muted; font.pixelSize: Theme.fontSizeS; elide: Text.ElideRight }
     }
 }

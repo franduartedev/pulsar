@@ -4,9 +4,9 @@ import QtQuick.Dialogs
 import "theme/Theme.js" as Theme
 import "components"
 
-// High-level composition: workspace chrome, quiet support panels and one
-// central monitor module (viewer + attached transport). All behavior lives
-// in the existing controller; this file only composes areas.
+// High-level composition: project bar, quiet support panels, one central
+// monitor module (viewer + attached transport), timeline and status line.
+// All behavior lives in the existing controller; this file only composes areas.
 Window {
     id: root
     width: 1280
@@ -15,11 +15,12 @@ Window {
     minimumHeight: 600
     visible: true
     title: controller.projectDirty ? "PULSAR *" : "PULSAR"
-    color: Theme.workspace
+    color: Theme.bgRoot
 
     // Viewer stays dominant: side panels take bounded relative slices.
-    property real mediaWidth: Math.max(238, Math.min(310, width * 0.205))
-    property real inspectorWidth: Math.max(270, Math.min(330, width * 0.22))
+    readonly property real gap: compactWorkspace ? Theme.spaceS : Theme.spaceM
+    property real mediaWidth: Math.max(224, Math.min(290, width * 0.19))
+    property real inspectorWidth: Math.max(250, Math.min(310, width * 0.21))
     property bool compactWorkspace: height <= 650
 
     Shortcut { sequence: "Space"; onActivated: controller.togglePlayback() }
@@ -86,7 +87,7 @@ Window {
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.top: parent.top
-        height: 58
+        height: 52
         onOpenProjectRequested: openProjectDialog.open()
         onSaveProjectRequested: controller.activeProjectPath.length > 0 ? controller.saveProject(controller.activeProjectPath) : saveProjectDialog.open()
         onSaveProjectAsRequested: saveProjectDialog.open()
@@ -98,9 +99,10 @@ Window {
         id: mediaPanel
         anchors.left: parent.left
         anchors.top: header.bottom
-        anchors.topMargin: compactWorkspace ? 8 : 12
         anchors.bottom: scrubber.top
-        anchors.bottomMargin: compactWorkspace ? 6 : 8
+        anchors.leftMargin: root.gap
+        anchors.topMargin: root.gap
+        anchors.bottomMargin: 2
         width: root.mediaWidth
         onImportRequested: fileDialog.open()
     }
@@ -109,37 +111,35 @@ Window {
         id: inspector
         anchors.right: parent.right
         anchors.top: header.bottom
-        anchors.topMargin: compactWorkspace ? 8 : 12
         anchors.bottom: scrubber.top
-        anchors.bottomMargin: compactWorkspace ? 6 : 8
+        anchors.rightMargin: root.gap
+        anchors.topMargin: root.gap
+        anchors.bottomMargin: 2
         width: root.inspectorWidth
     }
 
+    // Monitor module: viewer + attached transport on one surface.
     Rectangle {
         id: monitor
         anchors.left: mediaPanel.right
         anchors.right: inspector.left
         anchors.top: header.bottom
-        anchors.leftMargin: compactWorkspace ? 8 : 10
-        anchors.rightMargin: compactWorkspace ? 8 : 10
-        anchors.topMargin: compactWorkspace ? 8 : 12
         anchors.bottom: scrubber.top
-        anchors.bottomMargin: compactWorkspace ? 6 : 8
-        color: Theme.monitor
-        border.color: Theme.border
-        border.width: 1
-        radius: Theme.radiusM
+        anchors.leftMargin: root.gap
+        anchors.rightMargin: root.gap
+        anchors.topMargin: root.gap
+        anchors.bottomMargin: 2
+        color: Theme.bgPanel
+        radius: Theme.radiusL
         Column {
             anchors.fill: parent
-            anchors.margins: 1
             spacing: 0
             ViewerPane {
                 width: parent.width
-                height: Math.max(150, parent.height - transportBar.height - 1)
+                height: Math.max(150, parent.height - transportBar.height)
                 onImportRequested: fileDialog.open()
             }
-            Rectangle { width: parent.width; height: 1; color: Theme.edge; opacity: 0.55 }
-            TransportBar { id: transportBar; width: parent.width; height: compactWorkspace ? 58 : 64 }
+            TransportBar { id: transportBar; width: parent.width; height: compactWorkspace ? 48 : 56 }
         }
     }
 
@@ -148,9 +148,9 @@ Window {
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.bottom: timelinePane.top
-        anchors.leftMargin: compactWorkspace ? 8 : 12
-        anchors.rightMargin: compactWorkspace ? 8 : 12
-        height: compactWorkspace ? 38 : 42
+        anchors.leftMargin: root.gap
+        anchors.rightMargin: root.gap
+        height: 20
     }
 
     TimelinePane {
@@ -158,10 +158,10 @@ Window {
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.bottom: statusBar.top
-        anchors.leftMargin: 12
-        anchors.rightMargin: 12
-        anchors.bottomMargin: 12
-        height: compactWorkspace ? 188 : Math.max(210, Math.min(276, root.height * 0.32))
+        anchors.leftMargin: root.gap
+        anchors.rightMargin: root.gap
+        anchors.bottomMargin: 2
+        height: compactWorkspace ? 188 : Math.max(214, Math.min(290, root.height * 0.34))
     }
 
     StatusBar {
@@ -169,8 +169,6 @@ Window {
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.bottom: parent.bottom
-        anchors.leftMargin: 12
-        anchors.rightMargin: 12
-        anchors.bottomMargin: 12
+        height: 26
     }
 }

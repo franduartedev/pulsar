@@ -1,79 +1,116 @@
 .pragma library
 
-// Backgrounds: three levels — workspace frame, monitor module, quiet panels.
-var base      = "#0d1117"
-var workspace = "#080c12"
-var header    = "#0b1119"
-var panel     = "#101923"
-var panelAlt  = "#0d151f"
-var surfaceRaised = "#172432"
-var ruler = "#0a1018"
-var lane = "#0a0f16"
-var monitor   = "#111c28"
-var viewer    = "#05070a"
-var input     = "#0c121a"
+// PULSAR design tokens. Dark, neutral and cinematic: accent blue is reserved
+// for selection, primary actions, playhead, focus and progress.
+// Names in the "Semantic" block are the contract; the legacy aliases below
+// keep older components working and should not be used in new code.
 
-// Borders
-var border     = "#2b3a4b"
-var borderSoft = "#202e3d"
-var edge       = "#405a73"
+// ---- Surfaces (darkest -> lightest) --------------------------------------
+var bgRoot     = "#0a0c10"   // window / gutters
+var bgPanel    = "#11141a"   // panels, monitor module
+var bgElevated = "#171b22"   // controls, track headers, rows
+var bgHover    = "#1e232c"
+var bgSelected = "#18283f"   // selected row / tinted selection
+var bgViewer   = "#030405"   // video mat, near-pure black
+var bgInput    = "#0d1015"
+var bgPressed  = "#222833"
 
-// Text
-var text       = "#d7dee8"
-var textBright = "#f0f4f9"
-var muted      = "#91a0af"
-var faint      = "#647486"
+// ---- Text -----------------------------------------------------------------
+var textPrimary   = "#e8ebf0"
+var textSecondary = "#9ba4b1"
+var textMuted     = "#737d8a"
+var textOnAccent  = "#ffffff"
+var textOnWarning = "#1a1306"
+var chipOverlay   = "#66000000"   // translucent chip over clips
 
-// Accent
-var accent      = "#4c8dff"
-var accentHover = "#5f9bff"
-var accentDim   = "#21456e"
+// ---- Lines ----------------------------------------------------------------
+var borderSubtle = "#1f242d"
+var borderStrong = "#2e3541"   // inputs, focus-less outlines
 
-// Interactive
-var buttonBase     = "#131c27"
-var clipBase        = "#1c3044"
-var clipHover       = "#27445d"
-var clipSelected    = "#28527d"
-var missingClip     = "#302126"
-var buttonHover    = "#182232"
-var buttonPressed  = "#1d2a38"
-var buttonDisabled = "#10151c"
+// ---- Accent ---------------------------------------------------------------
+var accent        = "#4d8dff"
+var accentHover   = "#6ba0ff"
+var accentPressed = "#3a74e0"
+var accentDim     = "#1c3358"   // tinted accent background
+var focus         = "#8db8ff"
 
-// Slider track
-var track = "#202b38"
+// ---- Status ---------------------------------------------------------------
+var success = "#3fcf8e"
+var warning = "#e3ab4f"
+var error   = "#f26d6d"
 
-// Semantic
-var danger = "#ff6b6b"
-var waveform = "#71a4ff"
-var waveformSelected = "#c7dcff"
-var waveformPending = "#d3a85d"
-var waveformBaseline = "#56667b"
+// ---- Timeline content -----------------------------------------------------
+var clipVideo         = "#243449"
+var clipVideoHover    = "#2b3e56"
+var clipVideoSelected = "#2b4a78"
+var clipAudio         = "#1d3a3a"
+var clipAudioHover    = "#244746"
+var clipAudioSelected = "#25524f"
+var clipMissing       = "#34202a"
+var laneVideo = "#0e1116"
+var laneAudio = "#0c0f13"
+var ruler     = "#0d1015"
+var track     = "#252c37"       // slider rails
+
+var waveform            = "#7fb0ff"
+var waveformSelected    = "#cfe0ff"
+var waveformAudio       = "#6fd3b4"
+var waveformAudioSelected = "#d2f5ea"
+var waveformPending     = "#d3a85d"
+var waveformBaseline    = "#56667b"
 var waveformUnavailable = "#69717c"
 
-// Overlay
-var badge = "#aa101820"
+// ---- Geometry -------------------------------------------------------------
+var radiusS = 4
+var radiusM = 6
+var radiusL = 8
 
-// Geometry
-var radiusS = 2
-var radiusM = 3
-var radiusL = 4
-
-// Workspace rhythm
 var spaceXS = 4
-var spaceS = 8
-var spaceM = 12
-var spaceL = 18
-var controlHeight = 28
-var controlHeightSmall = 24
-var panelPadding = 12
-var focus = "#8db8ff"
-var disabledText = "#566170"
+var spaceS  = 8
+var spaceM  = 12
+var spaceL  = 16
+var spaceXL = 24
 
-// Font sizes
-var fontSizeXS = 10
-var fontSizeS  = 11
-var fontSizeM  = 12
-var fontSizeL  = 13
-var fontSizeXL = 16
-var fontSizeTC = 19
-var fontSizeXXL = 30
+var controlHeight = 30
+var controlHeightSmall = 26
+
+// ---- Type -----------------------------------------------------------------
+var fontSizeXS = 11   // captions, chips
+var fontSizeS  = 12   // metadata, secondary
+var fontSizeM  = 13   // body, controls
+var fontSizeL  = 14   // panel titles
+var fontSizeXL = 15   // wordmark
+var fontSizeTC = 22   // timecode
+var fontSizeXXL = 26  // empty-state mark
+var mono = "monospace"
+
+// ---- Legacy aliases (do not use in new code) ------------------------------
+var base = bgRoot
+var workspace = bgRoot
+var header = bgRoot
+var panel = bgPanel
+var panelAlt = bgElevated
+var surfaceRaised = bgElevated
+var monitor = bgPanel
+var viewer = bgViewer
+var lane = laneVideo
+var input = bgInput
+var border = borderStrong
+var borderSoft = borderSubtle
+var edge = "#3a424f"
+var text = textPrimary
+var textBright = "#f3f5f8"
+var muted = textSecondary
+var faint = textMuted
+var buttonBase = bgElevated
+var buttonHover = bgHover
+var buttonPressed = bgPressed
+var buttonDisabled = "#12151a"
+var clipBase = clipVideo
+var clipHover = clipVideoHover
+var clipSelected = clipVideoSelected
+var missingClip = clipMissing
+var danger = error
+var disabledText = "#566170"
+var panelPadding = 12
+var badge = "#aa101820"

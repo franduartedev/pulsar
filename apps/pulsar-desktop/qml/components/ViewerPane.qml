@@ -1,70 +1,68 @@
 import QtQuick
 import "../theme/Theme.js" as Theme
 
-// Monitor surface: viewer chrome (PROGRAMA context + preview state) on top,
-// clean black mat with the image as hero, no overlays over the picture.
-// Lives inside the monitor module frame composed by Main.qml.
+// Monitor surface: the picture is the hero. A single quiet line above it
+// carries the source name and preview health; nothing overlays the image.
 Item {
     id: pane
     signal importRequested()
 
-    Text { id: originLabel; anchors.left: parent.left; anchors.leftMargin: 12; anchors.verticalCenter: chromeCenter.verticalCenter; text: "VISOR"; color: Theme.faint; font.pixelSize: Theme.fontSizeS; font.letterSpacing: 1.5 }
-    Text {
-        anchors.left: originLabel.right
-        anchors.right: badgeRow.left
-        anchors.leftMargin: 12
-        anchors.rightMargin: 12
-        anchors.verticalCenter: chromeCenter.verticalCenter
-        text: controller.hasMedia ? controller.mediaName : "SALIDA  /  SIN SEÑAL"
-        color: Theme.muted
-        font.pixelSize: Theme.fontSizeS
-        elide: Text.ElideMiddle
+    readonly property string stateLabel: controller.viewerState === "loading" ? "Preparando…"
+        : (controller.viewerState === "gap" ? "Espacio vacío"
+        : (controller.viewerState === "missing" ? "Medio no disponible"
+        : (controller.viewerState === "error" ? "No se pudo presentar este segmento"
+        : "Fin del programa")))
+
+    Item {
+        id: chrome
+        anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top
+        height: 36
+        Text {
+            anchors.left: parent.left; anchors.leftMargin: Theme.spaceL
+            anchors.right: lateRow.left; anchors.rightMargin: Theme.spaceM
+            anchors.verticalCenter: parent.verticalCenter
+            text: controller.hasMedia ? controller.mediaName : ""
+            color: Theme.textSecondary
+            font.pixelSize: Theme.fontSizeS
+            elide: Text.ElideMiddle
+        }
+        Row {
+            id: lateRow
+            visible: controller.previewLate
+            anchors.right: parent.right; anchors.rightMargin: Theme.spaceL
+            anchors.verticalCenter: parent.verticalCenter
+            spacing: 6
+            StatusDot { anchors.verticalCenter: parent.verticalCenter; tone: "warn" }
+            Text { anchors.verticalCenter: parent.verticalCenter; text: "Preview con retraso"; color: Theme.warning; font.pixelSize: Theme.fontSizeXS }
+        }
     }
-    Row {
-        id: badgeRow
-        anchors.right: parent.right
-        anchors.rightMargin: 12
-        anchors.verticalCenter: chromeCenter.verticalCenter
-        spacing: 6
-        StatusDot { anchors.verticalCenter: parent.verticalCenter; tone: controller.previewLate ? "error" : (controller.hasMedia ? "live" : "idle") }
-        Text { anchors.verticalCenter: parent.verticalCenter; text: controller.previewLate ? "RETRASO" : ""; color: controller.previewLate ? Theme.danger : Theme.muted; font.pixelSize: Theme.fontSizeS; font.letterSpacing: 1 }
-    }
-    Item { id: chromeCenter; anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top; height: 30 }
 
     Rectangle {
         id: mat
-        anchors.left: parent.left
-        anchors.right: parent.right
-        anchors.top: chromeCenter.bottom
-        anchors.bottom: parent.bottom
-        anchors.leftMargin: 10
-        anchors.rightMargin: 10
-        anchors.bottomMargin: 10
-        color: Theme.viewer
-        border.color: Theme.border
-        border.width: 1
+        anchors.left: parent.left; anchors.right: parent.right
+        anchors.top: chrome.bottom; anchors.bottom: parent.bottom
+        anchors.leftMargin: Theme.spaceM; anchors.rightMargin: Theme.spaceM
+        anchors.bottomMargin: Theme.spaceS
+        color: Theme.bgViewer
         radius: Theme.radiusS
         clip: true
 
-        Image { anchors.fill: parent; anchors.margins: 1; source: controller.previewSource; cache: false; fillMode: Image.PreserveAspectFit; visible: controller.previewSource.length > 0 }
+        Image { anchors.fill: parent; source: controller.previewSource; cache: false; fillMode: Image.PreserveAspectFit; visible: controller.previewSource.length > 0 }
+
         Column {
             anchors.centerIn: parent
-            spacing: mat.height < 180 ? 5 : 10
+            spacing: mat.height < 180 ? 6 : 12
             visible: controller.previewSource.length === 0 && controller.viewerState === "empty"
-            Text { anchors.horizontalCenter: parent.horizontalCenter; text: "PULSAR"; color: Theme.textBright; font.pixelSize: mat.height < 180 ? 18 : 28; font.bold: true; font.letterSpacing: 4 }
-            Text { anchors.horizontalCenter: parent.horizontalCenter; text: controller.viewerState === "gap" ? "ESPACIO VACÍO" : (controller.viewerState === "missing" ? "MEDIO NO DISPONIBLE" : (controller.viewerState === "ended" ? "FIN DEL PROGRAMA" : "SIN SEÑAL")); color: Theme.muted; font.pixelSize: Theme.fontSizeS; font.letterSpacing: 2 }
-            Rectangle { anchors.horizontalCenter: parent.horizontalCenter; width: 56; height: 2; color: Theme.accent; opacity: 0.55 }
-            Text { anchors.horizontalCenter: parent.horizontalCenter; text: controller.viewerState === "loading" ? "Preparando presentación…" : (controller.viewerState === "error" ? "No se pudo presentar este segmento" : (controller.busy ? "Preparando medio…" : "Importá o arrastrá un medio")); color: Theme.muted; font.pixelSize: Theme.fontSizeL }
-            PButton { anchors.horizontalCenter: parent.horizontalCenter; width: 170; text: "IMPORTAR MEDIO"; primary: true; onClicked: pane.importRequested() }
-            PMuted { visible: mat.height > 180; anchors.horizontalCenter: parent.horizontalCenter; text: "Espacio · reproducir / pausar"; color: Theme.faint }
+            Text { anchors.horizontalCenter: parent.horizontalCenter; text: "PULSAR"; color: Theme.textMuted; font.pixelSize: mat.height < 180 ? 18 : Theme.fontSizeXXL; font.bold: true; font.letterSpacing: 6 }
+            Text { anchors.horizontalCenter: parent.horizontalCenter; text: controller.busy ? "Preparando medio…" : "Importá un medio para comenzar"; color: Theme.textSecondary; font.pixelSize: Theme.fontSizeM }
+            PButton { anchors.horizontalCenter: parent.horizontalCenter; visible: !controller.busy; primary: true; text: "Importar medio"; onClicked: pane.importRequested() }
         }
         Text {
             anchors.centerIn: parent
             visible: controller.previewSource.length === 0 && controller.viewerState !== "empty"
-            text: controller.viewerState === "loading" ? "PREPARANDO PRESENTACIÓN…" : (controller.viewerState === "gap" ? "ESPACIO VACÍO" : (controller.viewerState === "missing" ? "MEDIO NO DISPONIBLE" : (controller.viewerState === "error" ? "NO SE PUDO PRESENTAR ESTE SEGMENTO" : "FIN DEL PROGRAMA")))
-            color: Theme.muted
-            font.pixelSize: Theme.fontSizeS
-            font.letterSpacing: 1.5
+            text: pane.stateLabel
+            color: Theme.textSecondary
+            font.pixelSize: Theme.fontSizeM
         }
     }
 }

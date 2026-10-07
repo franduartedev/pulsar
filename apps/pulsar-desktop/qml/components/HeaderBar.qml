@@ -1,6 +1,8 @@
 import QtQuick
 import "../theme/Theme.js" as Theme
 
+// Project bar: identity + project on the left, secondary actions flat,
+// Exportar as the single primary action. Global status lives in StatusBar.
 Rectangle {
     id: header
     signal openProjectRequested()
@@ -8,69 +10,67 @@ Rectangle {
     signal saveProjectAsRequested()
     signal importMediaRequested()
     signal exportRequested()
-    color: Theme.header
-    border.color: Theme.border
-    border.width: 1
+    color: Theme.bgRoot
 
     function projectName() {
         var path = controller.activeProjectPath
-        if (!path || path.length === 0) return "Proyecto sin guardar"
+        if (!path || path.length === 0) return "Proyecto sin título"
         var parts = path.split("/")
         return parts[parts.length - 1]
     }
 
     Row {
+        id: identity
         anchors.left: parent.left
-        anchors.leftMargin: 18
+        anchors.leftMargin: Theme.spaceL
         anchors.verticalCenter: parent.verticalCenter
-        spacing: 12
-        Rectangle { width: 5; height: 30; radius: 2; color: Theme.accent; anchors.verticalCenter: parent.verticalCenter }
-        Column {
+        spacing: 10
+        // Pulse mark: three bars, accent only on the tallest.
+        Item {
             anchors.verticalCenter: parent.verticalCenter
-            spacing: 2
-            Row {
-                spacing: 8
-                Text { text: "PULSAR"; color: Theme.textBright; font.pixelSize: Theme.fontSizeXL; font.bold: true; font.letterSpacing: 2.4 }
-                Text { text: "EDITOR"; color: Theme.accent; font.pixelSize: Theme.fontSizeXS; font.bold: true; font.letterSpacing: 1.5; anchors.bottom: parent.bottom; anchors.bottomMargin: 2 }
-            }
-            Row {
-                spacing: 6
-                Text { text: projectName(); color: Theme.text; font.pixelSize: Theme.fontSizeS; elide: Text.ElideMiddle; width: 220 }
-                Rectangle { visible: controller.projectDirty; width: 8; height: 8; radius: 4; color: Theme.waveformPending; anchors.verticalCenter: parent.verticalCenter }
-                Text { visible: controller.projectDirty; text: "CAMBIOS SIN GUARDAR"; color: Theme.waveformPending; font.pixelSize: Theme.fontSizeXS; font.bold: true; font.letterSpacing: 0.7 }
-                Text { visible: !controller.projectDirty && controller.status.indexOf("Proyecto guardado") === 0; text: "GUARDADO"; color: Theme.accent; font.pixelSize: Theme.fontSizeXS; font.bold: true; font.letterSpacing: 0.8 }
-            }
+            width: 16; height: 18
+            Rectangle { x: 0; y: 6; width: 3; height: 8; radius: 1.5; color: Theme.textMuted }
+            Rectangle { x: 6.5; y: 0; width: 3; height: 18; radius: 1.5; color: Theme.accent }
+            Rectangle { x: 13; y: 4; width: 3; height: 11; radius: 1.5; color: Theme.textMuted }
+        }
+        Text { anchors.verticalCenter: parent.verticalCenter; text: "PULSAR"; color: Theme.textPrimary; font.pixelSize: Theme.fontSizeXL; font.bold: true; font.letterSpacing: 2.4 }
+        Rectangle { anchors.verticalCenter: parent.verticalCenter; width: 1; height: 16; color: Theme.borderStrong }
+        Text {
+            anchors.verticalCenter: parent.verticalCenter
+            text: projectName()
+            color: Theme.textSecondary
+            font.pixelSize: Theme.fontSizeM
+            elide: Text.ElideMiddle
+            width: Math.min(implicitWidth, Math.max(90, header.width - 640))
+        }
+        Row {
+            visible: controller.projectDirty
+            anchors.verticalCenter: parent.verticalCenter
+            spacing: 6
+            Rectangle { anchors.verticalCenter: parent.verticalCenter; width: 6; height: 6; radius: 3; color: Theme.warning }
+            Text { anchors.verticalCenter: parent.verticalCenter; text: "Sin guardar"; color: Theme.warning; font.pixelSize: Theme.fontSizeXS }
         }
     }
 
     Row {
-        id: projectActions
-        anchors.right: statusArea.left
-        anchors.rightMargin: 18
-        anchors.verticalCenter: parent.verticalCenter
-        spacing: 6
-        PButton { width: 76; text: "ABRIR"; onClicked: header.openProjectRequested() }
-        PButton { width: 88; text: "GUARDAR"; primary: true; enabled: controller.projectDirty; onClicked: header.saveProjectRequested() }
-        PButton { width: 118; text: "GUARDAR COMO"; onClicked: header.saveProjectAsRequested() }
-        Rectangle { width: 1; height: 26; color: Theme.border; anchors.verticalCenter: parent.verticalCenter; opacity: 0.8 }
-        PButton { width: 116; text: "IMPORTAR MEDIO"; onClicked: header.importMediaRequested() }
-        PButton { width: 92; text: "EXPORTAR"; primary: true; enabled: controller.hasVideoMedia && !controller.exportRunning; onClicked: header.exportRequested() }
-        PButton { width: 92; text: "CANCELAR"; visible: controller.exportRunning; enabled: controller.exportRunning; onClicked: controller.cancelExport() }
-    }
-
-    Row {
-        id: statusArea
         anchors.right: parent.right
-        anchors.rightMargin: 18
+        anchors.rightMargin: Theme.spaceL
         anchors.verticalCenter: parent.verticalCenter
-        spacing: 7
-        StatusDot { anchors.verticalCenter: parent.verticalCenter; tone: controller.errorMessage.length > 0 ? "error" : (controller.playing ? "live" : "idle") }
-        Column {
-            anchors.verticalCenter: parent.verticalCenter
-            spacing: 1
-            Text { text: controller.errorMessage.length > 0 ? "ATENCIÓN" : (controller.exportRunning ? "EXPORTANDO" : (controller.playing ? "REPRODUCIENDO" : (controller.busy ? "PROCESANDO" : "LISTO"))); color: controller.errorMessage.length > 0 ? Theme.danger : Theme.muted; font.pixelSize: Theme.fontSizeXS; font.bold: true; font.letterSpacing: 0.8 }
-            Text { text: controller.errorMessage.length > 0 ? controller.errorMessage : (controller.exportStatus.length > 0 ? controller.exportStatus : controller.status); color: controller.errorMessage.length > 0 ? Theme.danger : Theme.faint; font.pixelSize: Theme.fontSizeXS; elide: Text.ElideRight; width: 120 }
+        spacing: 4
+        PButton { flat: true; text: "Abrir"; onClicked: header.openProjectRequested() }
+        PButton { flat: true; text: "Guardar"; enabled: controller.projectDirty; onClicked: header.saveProjectRequested() }
+        PButton { flat: true; text: "Guardar como…"; onClicked: header.saveProjectAsRequested() }
+        PButton { flat: true; text: "Importar"; onClicked: header.importMediaRequested() }
+        Item { width: Theme.spaceM; height: 1 }
+        PButton { text: "Cancelar"; visible: controller.exportRunning; onClicked: controller.cancelExport() }
+        PButton {
+            width: 108; height: 34
+            primary: true
+            text: controller.exportRunning ? "Exportando…" : "Exportar"
+            enabled: controller.hasVideoMedia && !controller.exportRunning
+            onClicked: header.exportRequested()
         }
     }
-    Rectangle { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; height: 2; color: Theme.accent; opacity: 0.28 }
+
+    Rectangle { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; height: 1; color: Theme.borderSubtle }
 }

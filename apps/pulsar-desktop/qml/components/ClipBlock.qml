@@ -12,6 +12,7 @@ Rectangle {
     property bool selected: false
     property bool muted: false
     property real gainDb: 0
+    property bool audioClip: false
     property real canonicalStartX: 0
     property real canonicalWidth: 3
     property real timelineWidth: 1
@@ -28,27 +29,29 @@ Rectangle {
 
     x: canonicalStartX + previewOffset
     width: Math.max(3, canonicalWidth + trimWidthDelta)
-    color: missing ? Theme.missingClip : (muted ? Theme.panelAlt : (selected ? Theme.clipSelected : (body.containsMouse ? Theme.clipHover : Theme.clipBase)))
-    border.color: missing ? Theme.danger : (selected ? Theme.focus : (body.containsMouse ? Theme.edge : Theme.border))
-    border.width: selected ? 2 : 1
+    color: missing ? Theme.clipMissing
+         : (selected ? (audioClip ? Theme.clipAudioSelected : Theme.clipVideoSelected)
+         : (body.containsMouse ? (audioClip ? Theme.clipAudioHover : Theme.clipVideoHover)
+         : (audioClip ? Theme.clipAudio : Theme.clipVideo)))
+    // Selection is the only outline; hover and rest stay borderless.
+    border.color: missing ? Theme.error : Theme.accent
+    border.width: selected ? 2 : (missing ? 1 : 0)
     radius: Theme.radiusM
     clip: true
+    opacity: muted ? 0.62 : 1.0
 
-    Rectangle { anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top; height: 2; color: missing ? Theme.danger : (selected ? Theme.accent : Theme.edge); opacity: selected || missing ? 0.9 : 0.5 }
-    Rectangle { visible: block.muted; anchors.fill: parent; color: Theme.muted; opacity: 0.06 }
-    Rectangle { visible: block.muted; anchors.left: parent.left; anchors.top: parent.top; anchors.bottom: parent.bottom; width: 4; color: Theme.waveformPending; opacity: 0.9 }
     WaveformItem {
         id: waveform
         x: 4
-        y: 25
+        y: 22
         width: Math.max(0, parent.width - 8)
-        height: Math.max(0, parent.height - 48)
+        height: Math.max(0, parent.height - 26)
         clipKey: block.clipKey
         selected: block.selected
         muted: block.muted
         density: controller.waveformDensity
-        normalColor: Theme.waveform
-        selectedColor: Theme.waveformSelected
+        normalColor: block.audioClip ? Theme.waveformAudio : Theme.waveform
+        selectedColor: block.audioClip ? Theme.waveformAudioSelected : Theme.waveformSelected
         pendingColor: Theme.waveformPending
         unavailableColor: Theme.waveformUnavailable
         baselineColor: Theme.waveformBaseline
@@ -56,26 +59,53 @@ Rectangle {
         Component.onCompleted: controller.attachWaveformItem(block.clipKey, waveform)
         Component.onDestruction: controller.detachWaveformItem(waveform)
     }
-    Text { anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top; anchors.margins: 7; text: block.clipName; color: Theme.textBright; font.pixelSize: Theme.fontSizeS; font.bold: block.selected; elide: Text.ElideRight }
-    Rectangle { visible: block.muted; anchors.left: parent.left; anchors.bottom: parent.bottom; anchors.leftMargin: 6; anchors.bottomMargin: 4; width: 42; height: 16; radius: 2; color: Theme.waveformPending; opacity: 0.18 }
-    Text { anchors.left: parent.left; anchors.bottom: parent.bottom; anchors.leftMargin: 10; anchors.bottomMargin: 6; text: block.missing ? "OFFLINE" : (block.muted ? "MUTED" : (Math.abs(block.gainDb) >= 0.05 ? block.gainDb.toFixed(0) + " dB" : "")); color: block.missing ? Theme.danger : (block.muted ? Theme.waveformPending : Theme.muted); font.pixelSize: Theme.fontSizeXS; font.bold: block.muted; font.family: "monospace"; visible: width > 24 }
-    Text { anchors.right: parent.right; anchors.bottom: parent.bottom; anchors.rightMargin: 7; anchors.bottomMargin: 6; text: block.startText + "  →  " + block.endText; color: block.missing ? Theme.danger : Theme.muted; font.pixelSize: Theme.fontSizeXS; font.family: "monospace"; elide: Text.ElideRight; width: Math.max(0, parent.width - 18); horizontalAlignment: Text.AlignRight }
+    // One name per clip; hidden when the clip is too narrow to read it.
     Text {
-        anchors.centerIn: waveform
-        text: waveform.waveformState === WaveformItem.Failed ? "WAVEFORM UNAVAILABLE" :
-              (waveform.waveformState === WaveformItem.Missing || waveform.waveformState === WaveformItem.Generating ? "WAVEFORM PENDING" :
-              (waveform.hasUnavailableRange ? "NO SOURCE AUDIO" : ""))
-        color: Theme.waveformPending
+        visible: parent.width > 56
+        anchors.left: parent.left; anchors.leftMargin: 8
+        anchors.right: chips.visible ? chips.left : parent.right; anchors.rightMargin: 6
+        anchors.top: parent.top; anchors.topMargin: 5
+        text: block.clipName
+        color: Theme.textPrimary
         font.pixelSize: Theme.fontSizeXS
-        font.family: "monospace"
-        visible: waveform.visible && text.length > 0
+        font.bold: true
+        elide: Text.ElideRight
+    }
+    // State chips: only what is not the default (mute, gain, offline).
+    Row {
+        id: chips
+        visible: parent.width > 90 && (block.muted || block.missing || Math.abs(block.gainDb) >= 0.05)
+        anchors.right: parent.right; anchors.rightMargin: 6
+        anchors.top: parent.top; anchors.topMargin: 4
+        spacing: 4
+        Rectangle { visible: block.missing; height: 15; width: offlineText.implicitWidth + 10; radius: 3; color: Theme.error
+            Text { id: offlineText; anchors.centerIn: parent; text: "Offline"; color: Theme.textOnAccent; font.pixelSize: 10; font.bold: true } }
+        Rectangle { visible: block.muted; height: 15; width: muteText.implicitWidth + 10; radius: 3; color: Theme.warning
+            Text { id: muteText; anchors.centerIn: parent; text: "Mute"; color: Theme.textOnWarning; font.pixelSize: 10; font.bold: true } }
+        Rectangle { visible: !block.muted && Math.abs(block.gainDb) >= 0.05; height: 15; width: gainText.implicitWidth + 10; radius: 3; color: Theme.chipOverlay
+            Text { id: gainText; anchors.centerIn: parent; text: (block.gainDb > 0 ? "+" : "") + block.gainDb.toFixed(0) + " dB"; color: Theme.textPrimary; font.pixelSize: 10; font.family: Theme.mono } }
+    }
+    // Waveform status stays a whisper, never a headline. Ranges without source
+    // audio are drawn by the waveform itself (flat unavailable baseline).
+    Text {
+        readonly property string note: waveform.waveformState === WaveformItem.Failed ? "Onda no disponible"
+            : (waveform.waveformState === WaveformItem.Missing || waveform.waveformState === WaveformItem.Generating ? "Generando onda…" : "")
+        anchors.left: parent.left; anchors.leftMargin: 8
+        anchors.bottom: parent.bottom; anchors.bottomMargin: 5
+        text: note
+        color: Theme.textSecondary
+        opacity: 0.7
+        font.pixelSize: 10
+        visible: waveform.visible && note.length > 0 && parent.width > 90
     }
 
     Rectangle {
         id: leftHandle
         x: 0; y: 0; width: selected ? 8 : 4; height: parent.height
-        color: selected ? Theme.accent : "transparent"
-        opacity: selected ? 0.8 : 0.25
+        color: "transparent"
+        // Visible only on hover (hint) or selection (grip); never idle.
+        Rectangle { visible: block.selected || body.containsMouse; anchors.fill: parent; color: block.selected ? Theme.accent : Theme.textSecondary; opacity: block.selected ? 1.0 : 0.45; radius: 1 }
+        Rectangle { visible: block.selected && parent.width >= 8; anchors.centerIn: parent; width: 2; height: Math.min(14, parent.height - 8); radius: 1; color: Theme.textOnAccent; opacity: 0.85 }
         MouseArea {
             anchors.fill: parent
             enabled: block.selected
@@ -113,8 +143,9 @@ Rectangle {
     Rectangle {
         id: rightHandle
         anchors.right: parent.right; y: 0; width: selected ? 8 : 4; height: parent.height
-        color: selected ? Theme.accent : "transparent"
-        opacity: selected ? 0.8 : 0.25
+        color: "transparent"
+        Rectangle { visible: block.selected || body.containsMouse; anchors.fill: parent; color: block.selected ? Theme.accent : Theme.textSecondary; opacity: block.selected ? 1.0 : 0.45; radius: 1 }
+        Rectangle { visible: block.selected && parent.width >= 8; anchors.centerIn: parent; width: 2; height: Math.min(14, parent.height - 8); radius: 1; color: Theme.textOnAccent; opacity: 0.85 }
         MouseArea {
             anchors.fill: parent
             enabled: block.selected

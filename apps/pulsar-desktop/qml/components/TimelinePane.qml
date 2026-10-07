@@ -2,93 +2,86 @@ import QtQuick
 import "../theme/Theme.js" as Theme
 
 Panel {
-    border.width: 0
-    radius: 0
     id: pane
-    property real gutterWidth: Math.max(96, Math.min(138, width * 0.115))
-    property real trackLaneHeight: 78
+    property real gutterWidth: Math.max(88, Math.min(120, width * 0.095))
+    property real trackLaneHeight: 72
 
-    Rectangle {
+    function trackTitle(label) {
+        // "VIDEO 1" -> "Video 1"
+        return label.length > 0 ? label.charAt(0) + label.slice(1).toLowerCase() : label
+    }
+
+    // ---- Toolbar: title, edit actions, view controls ------------------
+    Item {
         id: toolbar
+        z: 10
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.top: parent.top
-        height: 46
-        color: Theme.surfaceRaised
-        Rectangle { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; height: 1; color: Theme.border; opacity: 0.8 }
-            Row {
+        height: 40
+        Row {
             anchors.left: parent.left
-            anchors.leftMargin: 16
+            anchors.leftMargin: Theme.spaceL
             anchors.verticalCenter: parent.verticalCenter
-            spacing: 7
-            Text { text: "TIMELINE"; color: Theme.textBright; font.pixelSize: Theme.fontSizeS; font.bold: true; font.letterSpacing: 1.6 }
-            Rectangle { width: 1; height: 16; color: Theme.border; opacity: 0.8 }
-            PButton { text: "CORTAR"; enabled: controller.canSplit; width: 64; height: Theme.controlHeightSmall; onClicked: controller.splitSelectedClip() }
-            PButton { text: "BORRAR"; enabled: controller.selectedClipKey.length > 0; width: 64; height: Theme.controlHeightSmall; onClicked: controller.deleteSelectedClip() }
-            Rectangle { width: 1; height: 16; color: Theme.border; opacity: 0.8 }
-            PButton { text: "DESHACER"; enabled: controller.canUndo; width: 76; height: Theme.controlHeightSmall; onClicked: controller.undoEdit() }
-            PButton { text: "REHACER"; enabled: controller.canRedo; width: 72; height: Theme.controlHeightSmall; onClicked: controller.redoEdit() }
+            spacing: 4
+            Text { anchors.verticalCenter: parent.verticalCenter; text: "Timeline"; color: Theme.textPrimary; font.pixelSize: Theme.fontSizeL; font.bold: true; rightPadding: Theme.spaceM }
+            ToolButton { glyph: "split"; text: "Cortar"; tip: "Cortar en el cabezal (S)"; enabled: controller.canSplit; onClicked: controller.splitSelectedClip() }
+            ToolButton { glyph: "trash"; text: "Borrar"; tip: "Borrar clip (Supr)"; enabled: controller.selectedClipKey.length > 0; onClicked: controller.deleteSelectedClip() }
+            Rectangle { anchors.verticalCenter: parent.verticalCenter; width: 1; height: 16; color: Theme.borderStrong }
+            ToolButton { glyph: "undo"; text: "Deshacer"; tip: "Deshacer (Ctrl+Z)"; enabled: controller.canUndo; onClicked: controller.undoEdit() }
+            ToolButton { glyph: "redo"; text: "Rehacer"; tip: "Rehacer (Ctrl+Shift+Z)"; enabled: controller.canRedo; onClicked: controller.redoEdit() }
         }
         Row {
             anchors.right: parent.right
-            anchors.rightMargin: 14
+            anchors.rightMargin: Theme.spaceL
             anchors.verticalCenter: parent.verticalCenter
-            spacing: 8
-            Text { text: "VISTA"; color: Theme.faint; font.pixelSize: Theme.fontSizeXS; font.bold: true; font.letterSpacing: 0.8; anchors.verticalCenter: parent.verticalCenter }
-            Rectangle {
-                width: 112; height: 20; radius: Theme.radiusS; color: Theme.track; anchors.verticalCenter: parent.verticalCenter
-                Rectangle { x: (Math.log(controller.timelineZoom) / Math.LN10 / 7) * (parent.width - width); y: 5; width: 12; height: 10; radius: 5; color: Theme.accent }
-                MouseArea {
-                    anchors.fill: parent
-                    onPressed: function(mouse) { controller.setTimelineZoom(Math.pow(10, 7 * Math.max(0, Math.min(1, mouse.x / width)))) }
-                    onPositionChanged: function(mouse) { if (pressed) controller.setTimelineZoom(Math.pow(10, 7 * Math.max(0, Math.min(1, mouse.x / width)))) }
-                }
+            spacing: 6
+            Text { anchors.verticalCenter: parent.verticalCenter; text: "Zoom"; color: Theme.textSecondary; font.pixelSize: Theme.fontSizeXS }
+            PSlider {
+                anchors.verticalCenter: parent.verticalCenter; width: 96
+                value: Math.log(controller.timelineZoom) / Math.LN10 / 7
+                onMoved: function(v) { controller.setTimelineZoom(Math.pow(10, 7 * v)) }
             }
-            Text { text: "PAN"; color: controller.timelineZoom > 1.0 ? Theme.muted : Theme.disabledText; font.pixelSize: Theme.fontSizeXS; anchors.verticalCenter: parent.verticalCenter }
-            Rectangle {
-                width: 90; height: 20; radius: Theme.radiusS; color: Theme.track; opacity: controller.timelineZoom > 1.0 ? 1.0 : 0.42; anchors.verticalCenter: parent.verticalCenter
-                Rectangle { x: controller.timelineScroll * (parent.width - width); y: 5; width: 14; height: 10; radius: 4; color: controller.timelineZoom > 1.0 ? Theme.waveform : Theme.disabledText }
-                MouseArea {
-                    anchors.fill: parent
-                    enabled: controller.timelineZoom > 1.0
-                    onPressed: function(mouse) { controller.setTimelineScroll(Math.max(0, Math.min(1, mouse.x / width))) }
-                    onPositionChanged: function(mouse) { if (pressed) controller.setTimelineScroll(Math.max(0, Math.min(1, mouse.x / width))) }
-                }
+            Item { width: Theme.spaceS; height: 1 }
+            Text { anchors.verticalCenter: parent.verticalCenter; text: "Pan"; color: controller.timelineZoom > 1.0 ? Theme.textSecondary : Theme.textMuted; font.pixelSize: Theme.fontSizeXS }
+            PSlider {
+                anchors.verticalCenter: parent.verticalCenter; width: 72
+                enabled: controller.timelineZoom > 1.0
+                fill: Theme.textSecondary
+                value: controller.timelineScroll
+                onMoved: function(v) { controller.setTimelineScroll(v) }
             }
-            Text { text: "FORMA %1x".arg(controller.waveformDensity.toFixed(1)); color: Theme.muted; font.pixelSize: Theme.fontSizeXS; anchors.verticalCenter: parent.verticalCenter }
-            Rectangle {
-                width: 72; height: 20; radius: Theme.radiusS; color: Theme.track; anchors.verticalCenter: parent.verticalCenter
-                Rectangle { x: ((controller.waveformDensity - 0.5) / 1.5) * (parent.width - width); y: 5; width: 12; height: 10; radius: 4; color: Theme.waveform }
-                MouseArea {
-                    anchors.fill: parent
-                    onPressed: function(mouse) { controller.setWaveformDensity(0.5 + 1.5 * Math.max(0, Math.min(1, mouse.x / width))) }
-                    onPositionChanged: function(mouse) { if (pressed) controller.setWaveformDensity(0.5 + 1.5 * Math.max(0, Math.min(1, mouse.x / width))) }
-                }
+            Item { width: Theme.spaceS; height: 1 }
+            Text { anchors.verticalCenter: parent.verticalCenter; text: "Onda"; color: Theme.textSecondary; font.pixelSize: Theme.fontSizeXS }
+            PSlider {
+                anchors.verticalCenter: parent.verticalCenter; width: 64
+                fill: Theme.waveform
+                value: (controller.waveformDensity - 0.5) / 1.5
+                onMoved: function(v) { controller.setWaveformDensity(0.5 + 1.5 * v) }
             }
         }
     }
 
+    // ---- Ruler ---------------------------------------------------------
     Item {
         id: ruler
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.top: toolbar.bottom
-        height: 30
+        height: 26
         clip: true
         Rectangle { anchors.fill: parent; color: Theme.ruler }
-        Rectangle { width: pane.gutterWidth; anchors.top: parent.top; anchors.bottom: parent.bottom; color: Theme.surfaceRaised; opacity: 0.9 }
-        Text { x: 16; anchors.bottom: parent.bottom; anchors.bottomMargin: 7; text: "PISTAS"; color: Theme.faint; font.pixelSize: Theme.fontSizeXS; font.bold: true; font.letterSpacing: 1.1 }
         Repeater {
-            model: controller.timelineRulerTicks
+            model: controller.hasMedia ? controller.timelineRulerTicks : []
             delegate: Item {
                 x: pane.gutterWidth + modelData.progress * (ruler.width - pane.gutterWidth)
                 width: 1
                 height: ruler.height
-                Rectangle { anchors.bottom: parent.bottom; width: 1; height: 12; color: Theme.accent; opacity: 0.6 }
-                Text { anchors.left: parent.left; anchors.bottom: parent.bottom; anchors.bottomMargin: 12; text: modelData.label; color: Theme.muted; font.family: "monospace"; font.pixelSize: Theme.fontSizeXS; visible: index % 2 === 0 }
+                Rectangle { anchors.bottom: parent.bottom; width: 1; height: 7; color: Theme.textMuted; opacity: 0.7 }
+                Text { anchors.left: parent.left; anchors.leftMargin: 4; anchors.verticalCenter: parent.verticalCenter; anchors.verticalCenterOffset: -2; text: modelData.label; color: Theme.textSecondary; font.family: Theme.mono; font.pixelSize: Theme.fontSizeXS; visible: index % 2 === 0 }
             }
         }
-        Rectangle { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; height: 1; color: Theme.border }
+        Rectangle { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; height: 1; color: Theme.borderSubtle }
     }
 
     Item {
@@ -110,21 +103,19 @@ Panel {
                 id: contentArea
                 width: trackScroll.width
                 height: trackScroll.contentHeight
-                Rectangle { anchors.fill: parent; color: Theme.lane }
+                Rectangle { anchors.fill: parent; color: Theme.laneAudio }
                 Repeater {
                     model: controller.timelineTracks
-                    delegate: Rectangle {
-                        x: 0
+                    delegate: Item {
                         y: modelData.index * pane.trackLaneHeight
                         width: contentArea.width
                         height: pane.trackLaneHeight
-                        color: modelData.kind === "audio" ? Theme.panelAlt : Theme.lane
-                        border.color: Theme.borderSoft
-                        border.width: 1
-                        Rectangle { width: pane.gutterWidth; anchors.top: parent.top; anchors.bottom: parent.bottom; color: Theme.surfaceRaised; opacity: 0.72 }
-                        Rectangle { x: pane.gutterWidth; anchors.top: parent.top; anchors.bottom: parent.bottom; width: 1; color: Theme.border; opacity: 0.9 }
-                        Text { x: 16; y: 18; text: modelData.kind === "video" ? "VIDEO" : "AUDIO"; color: modelData.kind === "video" ? Theme.waveform : Theme.waveformPending; font.pixelSize: Theme.fontSizeXS; font.bold: true; font.letterSpacing: 1.2 }
-                        Text { x: 16; y: 35; text: modelData.label; color: Theme.text; font.pixelSize: Theme.fontSizeS; font.bold: true; elide: Text.ElideRight; width: pane.gutterWidth - 24 }
+                        // Lane (empty space is real background) + header gutter.
+                        Rectangle { anchors.fill: parent; color: modelData.kind === "audio" ? Theme.laneAudio : Theme.laneVideo }
+                        Rectangle { width: pane.gutterWidth; anchors.top: parent.top; anchors.bottom: parent.bottom; color: Theme.bgElevated }
+                        Rectangle { width: 3; anchors.left: parent.left; anchors.top: parent.top; anchors.bottom: parent.bottom; color: modelData.kind === "audio" ? Theme.waveformAudio : Theme.waveform; opacity: 0.85 }
+                        Text { x: 14; anchors.verticalCenter: parent.verticalCenter; text: pane.trackTitle(modelData.label); color: Theme.textPrimary; font.pixelSize: Theme.fontSizeS; elide: Text.ElideRight; width: pane.gutterWidth - 22 }
+                        Rectangle { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; height: 1; color: Theme.bgRoot }
                     }
                 }
                 Repeater {
@@ -132,10 +123,11 @@ Panel {
                     delegate: ClipBlock {
                         z: 2
                         visible: model.inViewport
-                        y: model.trackIndex * pane.trackLaneHeight + 9
+                        y: model.trackIndex * pane.trackLaneHeight + 6
                         canonicalStartX: pane.gutterWidth + model.startProgress * (contentArea.width - pane.gutterWidth)
                         canonicalWidth: Math.max(3, (model.endProgress - model.startProgress) * (contentArea.width - pane.gutterWidth))
-                        height: pane.trackLaneHeight - 14
+                        height: pane.trackLaneHeight - 12
+                        audioClip: model.audioTrack
                         timelineWidth: contentArea.width - pane.gutterWidth
                         clipName: model.clipName
                         startText: model.startText

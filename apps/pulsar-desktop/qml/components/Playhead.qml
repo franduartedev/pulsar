@@ -1,6 +1,7 @@
 import QtQuick
 import "../theme/Theme.js" as Theme
 
+// Single accent line with a small head. Dragging seeks (behaviour unchanged).
 Item {
     id: head
     property real progress: 0
@@ -9,8 +10,9 @@ Item {
     visible: progress >= 0
     width: 12
     x: Math.max(0, Math.min(parent.width - width, progress * parent.width - width / 2))
-    Rectangle { anchors.horizontalCenter: parent.horizontalCenter; width: 2; height: parent.height; color: Theme.accentHover; opacity: 0.95 }
-    Rectangle { anchors.top: parent.top; anchors.horizontalCenter: parent.horizontalCenter; width: 11; height: 11; color: Theme.accentHover; border.color: Theme.textBright; border.width: 1; rotation: 45 }
+    Rectangle { anchors.horizontalCenter: parent.horizontalCenter; width: 2; height: parent.height; color: Theme.accent }
+    // Half-clipped diamond reads as a downward pointer at the top edge.
+    Rectangle { anchors.top: parent.top; anchors.topMargin: -5; anchors.horizontalCenter: parent.horizontalCenter; width: 10; height: 10; color: Theme.accent; rotation: 45 }
     MouseArea {
         id: hit
         anchors.fill: parent
