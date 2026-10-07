@@ -961,6 +961,341 @@ void asset_revision_tracks_asset_set_only() {
   assert(session.document().asset_list().empty());
 }
 
+// ---- Beta editorization: snapping + exact append ---------------------------
+
+MediaTime ms(std::int64_t value) { return MediaTime{value, Rational{1, 1000}}; }
+
+struct SnapFixture {
+  EditorSession session;
+  domain::ClipId a{1}, b{1}, c{1};
+  SnapFixture() {
+    const auto ma = session.processor().import_asset("a.mp4", SecondsProbe{10});
+    const auto mb = session.processor().import_asset("b.mp4", SecondsProbe{3});
+    const auto mc = session.processor().import_asset("c.mp4", SecondsProbe{4});
+    a = session.processor().add_clip(ma, TimeRange{MediaTime::zero(), secs(10)}, MediaTime::zero());
+    b = session.processor().add_clip(mb, TimeRange{MediaTime::zero(), secs(3)}, secs(20));
+    c = session.processor().add_clip(mc, TimeRange{MediaTime::zero(), secs(4)}, secs(30));
+    session.synchronize_document_state();
+  }
+  [[nodiscard]] MediaTime start_of(domain::ClipId id) const {
+    return session.document().timeline().find_clip(id)->timeline_start();
+  }
+};
+
+// A drag that ends within tolerance of a neighbour's edge lands exactly on it.
+void snap_aligns_start_to_previous_clip_end_exactly() {
+  SnapFixture f;
+  // B at 20 dragged left by 9.96 s -> desired start 10.04 s, 40 ms from A's end.
+  const auto resolution = f.session.resolve_move(f.b, ms(0), ms(-9'960), ms(100));
+  assert(resolution.snapped && resolution.new_start == secs(10) && resolution.guide == secs(10));
+  f.session.move_clip(f.b, ms(0), ms(-9'960), ms(100));
+  assert(f.start_of(f.b) == secs(10));  // exactly A's end: no micro-gap
+  // Undo restores the original place.
+  assert(f.session.undo());
+  assert(f.start_of(f.b) == secs(20));
+}
+
+// The clip's own END snaps too (to the next clip's start).
+void snap_aligns_end_to_next_clip_start() {
+  SnapFixture f;
+  // B (3 s) at 20; moving +6.95 s puts its end at 29.95 s, 50 ms from C's start (30 s).
+  const auto resolution = f.session.resolve_move(f.b, ms(0), ms(6'950), ms(100));
+  assert(resolution.snapped && resolution.new_start == secs(27) && resolution.guide == secs(30));
+}
+
+void snap_ignores_edges_outside_tolerance_and_zero_tolerance_disables_it() {
+  SnapFixture f;
+  const auto outside = f.session.resolve_move(f.b, ms(0), ms(-9'800), ms(100));  // 200 ms away
+  assert(!outside.snapped && outside.new_start == ms(10'200));
+  const auto off = f.session.resolve_move(f.b, ms(0), ms(-9'960), MediaTime::zero());
+  assert(!off.snapped && off.new_start == ms(10'040));
+}
+
+// A snap target that would overlap a clip on the same track is discarded;
+// nothing else is ever moved.
+void snap_never_creates_overlap_or_ripple() {
+  SnapFixture f;
+  f.session.seek(secs(5));  // playhead inside A: snapping B's start to 5 s would overlap A
+  const auto resolution = f.session.resolve_move(f.b, ms(0), ms(-14'990), ms(100));
+  assert(resolution.new_start == secs(10));  // confined flush after A, never at the playhead (5 s)
+  assert(!(resolution.snapped && resolution.guide == secs(5)));
+  assert(f.start_of(f.a) == MediaTime::zero());
+  assert(f.start_of(f.c) == secs(30));
+  // The same drag with the playhead in free space does snap to it.
+  f.session.seek(secs(14));
+  const auto free_space = f.session.resolve_move(f.b, ms(0), ms(-5'990), ms(100));
+  assert(free_space.snapped && free_space.new_start == secs(14));
+}
+
+// The tolerance is defined in pixels: converted with the current viewport, the
+// same on-screen distance snaps at any zoom, and a farther one never does.
+void snap_tolerance_is_constant_in_pixels_across_zoom() {
+  SnapFixture f;
+  for (const auto view_ms : {std::int64_t{40'000}, std::int64_t{4'000}, std::int64_t{400}}) {
+    TimelineViewport viewport{ms(0), ms(view_ms)};
+    const double width = 1000.0;
+    const auto tolerance = viewport.time_at(8.0, width).value() - viewport.time_at(0.0, width).value();
+    const auto micro = [](std::int64_t value) { return MediaTime{value, Rational{1, 1'000'000}}; };
+    const std::int64_t per_pixel_us = view_ms;  // view_ms over 1000 px, in microseconds
+    // 5 px short of A's end snaps; 20 px short does not.
+    const auto drag_near = micro(-10'000'000 + per_pixel_us * 5);
+    const auto drag_far = micro(-10'000'000 + per_pixel_us * 20);
+    assert(f.session.resolve_move(f.b, ms(0), drag_near, tolerance).snapped);
+    assert(!f.session.resolve_move(f.b, ms(0), drag_far, tolerance).snapped);
+  }
+}
+
+void trim_snaps_to_neighbour_edges() {
+  SnapFixture f;
+  // Trim C's start from 30 s toward B's end (23 s): target 23.04 s snaps to 23 s... clipped by source,
+  // so check the pure resolution: the edge a few ms away is returned exactly.
+  const auto resolution = f.session.resolve_trim_edge(f.c, ms(23'040), ms(100));
+  assert(resolution.snapped && resolution.time == secs(23));
+  assert(!f.session.resolve_trim_edge(f.c, ms(23'500), ms(100)).snapped);
+  // End trim snaps to the playhead.
+  f.session.seek(ms(32'500));
+  const auto end = f.session.resolve_trim_edge(f.c, ms(32'470), ms(100));
+  assert(end.snapped && end.time == ms(32'500));
+}
+
+// Dragging into a neighbour stops flush against it (exact), never overlaps and
+// never jumps over it; neighbours stay where they are.
+void move_stops_flush_at_neighbours() {
+  SnapFixture f;
+  // B (3 s) at 20 dragged far left: stops at A's end (10 s).
+  const auto left = f.session.resolve_move(f.b, ms(0), ms(-18'000), MediaTime::zero());
+  assert(left.new_start == secs(10));
+  // Dragged far right: stops with its end at C's start (30 s) -> start 27 s.
+  const auto right = f.session.resolve_move(f.b, ms(0), ms(+18'000), MediaTime::zero());
+  assert(right.new_start == secs(27));
+  // Committing the clamped move works (no error) and is exact.
+  f.session.move_clip(f.b, ms(0), ms(-18'000), ms(100));
+  assert(f.start_of(f.b) == secs(10));
+  assert(f.start_of(f.a) == MediaTime::zero() && f.start_of(f.c) == secs(30));
+  assert(f.session.undo());
+  assert(f.start_of(f.b) == secs(20));
+}
+
+// Dragging beyond zero clamps at zero instead of failing.
+void move_clamps_at_zero() {
+  SnapFixture f;
+  const auto resolution = f.session.resolve_move(f.a, ms(0), ms(-50'000), MediaTime::zero());
+  assert(resolution.new_start == MediaTime::zero());
+}
+
+// "Al final" is exact for non-trivial rational durations: no micro-gap, ever.
+void append_is_gapless_for_rational_durations() {
+  EditorSession session;
+  const MediaTime d1{1001, Rational{1, 250}};          // 4.004 s
+  const MediaTime d2{10'957'333, Rational{1, 1'000'000}};  // 10.957333 s
+  const MediaTime d3{7, Rational{30'000, 1001}};      // 7 frames at 29.97 fps
+  class RationalProbe final : public MediaProbe {
+  public:
+    explicit RationalProbe(MediaTime duration) : duration_{duration} {}
+    MediaProbeResult probe(const std::filesystem::path& path) const override {
+      MediaProbeResult result;
+      result.path = path;
+      result.video_streams.push_back(VideoStreamInfo{0, "h264", 1280, 720, Rational{1, 90000}, duration_, std::nullopt});
+      return result;
+    }
+  private:
+    MediaTime duration_;
+  };
+  const auto m1 = session.processor().import_asset("1.mp4", RationalProbe{d1});
+  const auto m2 = session.processor().import_asset("2.mp4", RationalProbe{d2});
+  const auto m3 = session.processor().import_asset("3.mp4", RationalProbe{d3});
+  const auto c1 = session.append_video_asset(m1);
+  const auto c2 = session.append_video_asset(m2);
+  const auto c3 = session.append_video_asset(m3);
+  const auto& timeline = session.document().timeline();
+  assert(timeline.find_clip(c1)->timeline_range().end() == timeline.find_clip(c2)->timeline_start());
+  assert(timeline.find_clip(c2)->timeline_range().end() == timeline.find_clip(c3)->timeline_start());
+  assert(timeline.find_clip(c1)->timeline_start() == MediaTime::zero());
+  assert(session.video_track_end() == timeline.find_clip(c3)->timeline_range().end());
+}
+
+// ---- Separar audio ----------------------------------------------------------
+
+class CustomAudioProbe final : public MediaProbe {
+public:
+  CustomAudioProbe(std::int64_t video_s, std::optional<std::int64_t> audio_s) : video_{video_s}, audio_{audio_s} {}
+  MediaProbeResult probe(const std::filesystem::path& path) const override {
+    MediaProbeResult result;
+    result.path = path;
+    result.video_streams.push_back(VideoStreamInfo{0, "h264", 1280, 720, Rational{1, 90000}, secs(video_), std::nullopt});
+    if (audio_.has_value()) {
+      result.audio_streams.push_back(application::AudioStreamInfo{1, "aac", 48'000, 2, Rational{1, 48'000}, secs(*audio_)});
+    }
+    return result;
+  }
+private:
+  std::int64_t video_;
+  std::optional<std::int64_t> audio_;
+};
+
+std::size_t audio_track_count(const EditorSession& session) {
+  std::size_t count = 0;
+  for (const auto& track : session.document().timeline().tracks()) {
+    if (track.kind() == domain::TrackKind::Audio) ++count;
+  }
+  return count;
+}
+const domain::Track* first_audio_track(const EditorSession& session) {
+  for (const auto& track : session.document().timeline().tracks()) {
+    if (track.kind() == domain::TrackKind::Audio) return &track;
+  }
+  return nullptr;
+}
+
+// Same range, embedded audio muted, one undo/redo step, exact restore.
+void separate_audio_creates_synced_clip_as_one_undo_step() {
+  EditorSession session;
+  const auto media = session.processor().import_asset("a.mp4", SecondsProbe{10});
+  // A trimmed clip placed late: the audio must follow the *clip*, not the asset.
+  const auto video = session.processor().add_clip(media, TimeRange{secs(2), secs(9)}, secs(5));
+  session.processor().set_clip_audio_gain(video, -6.0);
+  session.synchronize_document_state();
+  const auto undo_before = session.processor().undo_size();
+  const auto history_before = session.document().history_state_id();
+
+  const auto audio = session.separate_audio(video);
+  const auto* video_clip = session.document().timeline().find_clip(video);
+  const auto* audio_clip = session.document().timeline().find_clip(audio);
+  assert(video_clip != nullptr && audio_clip != nullptr);
+  assert(audio_clip->media_id() == media);
+  assert(audio_clip->timeline_start() == video_clip->timeline_start());
+  assert(audio_clip->timeline_range().start() == video_clip->timeline_range().start());
+  assert(audio_clip->timeline_range().end() == video_clip->timeline_range().end());
+  assert(audio_clip->source_range().start() == video_clip->source_range().start());
+  assert(audio_clip->source_range().end() == video_clip->source_range().end());
+  assert(video_clip->muted());                 // embedded audio silenced
+  assert(!audio_clip->muted());                // the separated copy is audible
+  assert(audio_clip->audio_gain_db() == -6.0); // gain moved with the sound
+  assert(audio_track_count(session) == 1);
+  assert(session.selected_clip() == std::optional<domain::ClipId>{audio});
+  assert(session.processor().undo_size() == undo_before + 4);  // add_track, add_clip, gain, mute ...
+  assert(!session.can_separate_audio(video));  // already separated / silenced
+
+  // ONE undo restores everything (clip, track, mute), bit for bit.
+  assert(session.undo());
+  assert(session.document().timeline().find_clip(audio) == nullptr);
+  assert(!session.document().timeline().find_clip(video)->muted());
+  assert(audio_track_count(session) == 0);
+  assert(session.document().history_state_id() == history_before);
+  assert(session.timeline_views().size() == 1);  // only the video clip remains
+  assert(session.document().timeline().find_clip(video)->audio_gain_db() == -6.0);
+  assert(session.processor().undo_size() == undo_before);
+  // ONE redo brings it all back.
+  assert(session.redo());
+  assert(session.document().timeline().find_clip(audio) != nullptr);
+  assert(session.document().timeline().find_clip(video)->muted());
+  assert(audio_track_count(session) == 1);
+}
+
+// It survives save -> reload (the audio is an ordinary independent clip).
+void separate_audio_persists() {
+  EditorSession session;
+  const auto media = session.processor().import_asset("a.mp4", SecondsProbe{10});
+  const auto video = session.processor().add_clip(media, TimeRange{MediaTime::zero(), secs(10)}, MediaTime::zero());
+  session.synchronize_document_state();
+  const auto audio = session.separate_audio(video);
+  const auto bytes = application::ProjectCodec::encode(session.document().snapshot());
+  EditorSession loaded(application::ProjectCodec::decode(bytes),
+                       [](const std::filesystem::path&, int) { return std::unique_ptr<application::PlaybackMediaWorker>{}; });
+  const auto* a = loaded.document().timeline().find_clip(audio);
+  const auto* v = loaded.document().timeline().find_clip(video);
+  assert(a != nullptr && v != nullptr && v->muted() && !a->muted());
+  assert(a->source_range().end() == v->source_range().end() && a->timeline_start() == v->timeline_start());
+  assert(application::ProjectCodec::encode(loaded.document().snapshot()) == bytes);
+}
+
+// Reuses a free audio track; otherwise adds one. Never overlaps existing audio.
+void separate_audio_reuses_or_adds_audio_tracks() {
+  EditorSession session;
+  const auto m1 = session.processor().import_asset("a.mp4", SecondsProbe{4});
+  const auto m2 = session.processor().import_asset("b.mp4", SecondsProbe{4});
+  const auto v1 = session.processor().add_clip(m1, TimeRange{MediaTime::zero(), secs(4)}, MediaTime::zero());
+  const auto v2 = session.processor().add_clip(m2, TimeRange{MediaTime::zero(), secs(4)}, secs(4));
+  session.synchronize_document_state();
+  (void)session.separate_audio(v1);
+  (void)session.separate_audio(v2);          // [4,8) is free on the same audio track
+  assert(audio_track_count(session) == 1);
+  assert(first_audio_track(session)->clips().size() == 2);
+  // Music already occupying [8,12) of the first track forces a new track for a clip at [8,12).
+  const auto music = session.processor().import_asset("m.wav", SecondsProbe{60, false});
+  (void)session.processor().add_clip(first_audio_track(session)->id(), music, TimeRange{MediaTime::zero(), secs(4)}, secs(8));
+  const auto m3 = session.processor().import_asset("c.mp4", SecondsProbe{4});
+  const auto v3 = session.processor().add_clip(m3, TimeRange{MediaTime::zero(), secs(4)}, secs(8));
+  session.synchronize_document_state();
+  (void)session.separate_audio(v3);
+  assert(audio_track_count(session) == 2);
+}
+
+void separate_audio_refusals_leave_no_trace() {
+  EditorSession session;
+  const auto with_audio = session.processor().import_asset("a.mp4", SecondsProbe{10});
+  const auto silent = session.processor().import_asset("silent.mp4", CustomAudioProbe{10, std::nullopt});
+  const auto short_audio = session.processor().import_asset("short.mp4", CustomAudioProbe{10, 8});
+  const auto music = session.processor().import_asset("m.wav", SecondsProbe{10, false});
+  const auto v_audio = session.processor().add_clip(with_audio, TimeRange{MediaTime::zero(), secs(10)}, MediaTime::zero());
+  const auto v_silent = session.processor().add_clip(silent, TimeRange{MediaTime::zero(), secs(10)}, secs(10));
+  const auto v_short = session.processor().add_clip(short_audio, TimeRange{MediaTime::zero(), secs(10)}, secs(20));
+  const auto track = session.processor().add_track(domain::TrackKind::Audio);
+  const auto a_clip = session.processor().add_clip(track, music, TimeRange{MediaTime::zero(), secs(10)}, MediaTime::zero());
+  session.processor().set_clip_muted(v_audio, true);
+  session.synchronize_document_state();
+
+  const auto undo_before = session.processor().undo_size();
+  const auto generation = session.document().document_generation();
+  const auto expect = [&](domain::ClipId clip, desktop::SeparateAudioError code) {
+    assert(!session.can_separate_audio(clip));
+    bool refused = false;
+    try { (void)session.separate_audio(clip); }
+    catch (const desktop::SeparateAudioException& e) { refused = e.code() == code; }
+    assert(refused);
+  };
+  expect(v_audio, desktop::SeparateAudioError::AlreadySilenced);
+  expect(v_silent, desktop::SeparateAudioError::NoEmbeddedAudio);
+  expect(v_short, desktop::SeparateAudioError::AudioShorterThanClip);
+  expect(a_clip, desktop::SeparateAudioError::NotAVideoTrackClip);
+  expect(domain::ClipId{999}, desktop::SeparateAudioError::UnknownClip);
+  assert(session.processor().undo_size() == undo_before);
+  assert(session.document().document_generation() == generation);
+}
+
+// Grouped edits: a failure half way leaves nothing behind; history trimming
+// never keeps half a group.
+void grouped_edit_rolls_back_and_trims_whole_groups() {
+  EditorSession session;
+  const auto media = session.processor().import_asset("a.mp4", SecondsProbe{10});
+  const auto undo_before = session.processor().undo_size();
+  bool threw = false;
+  try {
+    session.processor().run_as_one_edit([&] {
+      (void)session.processor().add_clip(media, TimeRange{MediaTime::zero(), secs(5)}, MediaTime::zero());
+      (void)session.processor().add_clip(media, TimeRange{MediaTime::zero(), secs(5)}, secs(1));  // overlaps -> throws
+    });
+  } catch (const std::exception&) { threw = true; }
+  assert(threw);
+  assert(session.processor().undo_size() == undo_before && session.processor().redo_size() == 0);
+  assert(video_clip_count(session) == 0);  // the first add_clip of the group was rolled back
+
+  // Capacity 3: a 2-command group followed by 2 single edits must not leave half the group.
+  application::ProjectDocument document;
+  application::CommandProcessor small{document, 3};
+  const auto m = small.import_asset("a.mp4", SecondsProbe{10});
+  small.run_as_one_edit([&] {
+    (void)small.add_clip(m, TimeRange{MediaTime::zero(), secs(1)}, MediaTime::zero());
+    (void)small.add_clip(m, TimeRange{MediaTime::zero(), secs(1)}, secs(2));
+  });
+  (void)small.add_clip(m, TimeRange{MediaTime::zero(), secs(1)}, secs(4));
+  (void)small.add_clip(m, TimeRange{MediaTime::zero(), secs(1)}, secs(6));
+  // Oldest entries (import + the whole group) were dropped; remaining history is two single edits.
+  assert(small.undo_size() <= 3);
+  while (small.undo()) {}
+  assert(document.timeline().find_track(document.video_track_id())->clips().size() <= 2);
+}
+
 int main() {
   viewport_is_exactly_guarded();
   zoom_and_pan_preserve_editorial_time_mapping();
@@ -990,5 +1325,19 @@ int main() {
   multi_video_project_roundtrips();
   ingest_refuses_unavailable_assets();
   asset_revision_tracks_asset_set_only();
+  snap_aligns_start_to_previous_clip_end_exactly();
+  snap_aligns_end_to_next_clip_start();
+  snap_ignores_edges_outside_tolerance_and_zero_tolerance_disables_it();
+  snap_never_creates_overlap_or_ripple();
+  snap_tolerance_is_constant_in_pixels_across_zoom();
+  trim_snaps_to_neighbour_edges();
+  move_clamps_at_zero();
+  move_stops_flush_at_neighbours();
+  append_is_gapless_for_rational_durations();
+  separate_audio_creates_synced_clip_as_one_undo_step();
+  separate_audio_persists();
+  separate_audio_reuses_or_adds_audio_tracks();
+  separate_audio_refusals_leave_no_trace();
+  grouped_edit_rolls_back_and_trims_whole_groups();
   return 0;
 }

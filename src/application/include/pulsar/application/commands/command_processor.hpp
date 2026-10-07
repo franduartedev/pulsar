@@ -4,6 +4,7 @@
 #include <pulsar/application/project/project_document.hpp>
 
 #include <cstddef>
+#include <cstdint>
 #include <deque>
 #include <filesystem>
 
@@ -49,6 +50,25 @@ public:
   [[nodiscard]] std::size_t undo_size() const noexcept;
   [[nodiscard]] std::size_t redo_size() const noexcept;
 
+  // Several commands that undo/redo as ONE history step. Edits made between
+  // begin_group() and end_group() share a group id; undo()/redo() walk the whole
+  // group. Prefer run_as_one_edit(): it rolls the group back if a command throws.
+  void begin_group() noexcept;
+  void end_group() noexcept;
+  template <typename Fn>
+  void run_as_one_edit(Fn&& edit) {
+    begin_group();
+    const auto group = open_group_;
+    try {
+      edit();
+    } catch (...) {
+      end_group();
+      rollback_group(group);
+      throw;
+    }
+    end_group();
+  }
+
   bool undo();
   bool redo();
 
@@ -58,6 +78,7 @@ private:
     Command inverse;
     HistoryStateId before_state_id;
     HistoryStateId after_state_id;
+    std::uint64_t group{0};  // 0 = standalone; otherwise shared by one grouped edit
   };
 
   enum class ApplyMode { NewEdit, HistoryRestore };
@@ -66,11 +87,16 @@ private:
   [[nodiscard]] static Command build_inverse(const ProjectDocument& document,
                                               const Command& command);
   void trim_undo_to_capacity();
+  bool undo_one();
+  bool redo_one();
+  void rollback_group(std::uint64_t group);
 
   ProjectDocument& document_;
   std::size_t history_capacity_;
   std::deque<ExecutedCommand> undo_stack_;
   std::deque<ExecutedCommand> redo_stack_;
+  std::uint64_t next_group_{1};
+  std::uint64_t open_group_{0};
 };
 
 } // namespace pulsar::application

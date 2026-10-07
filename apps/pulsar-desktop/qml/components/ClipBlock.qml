@@ -2,6 +2,11 @@ import QtQuick
 import Pulsar.Desktop 1.0
 import "../theme/Theme.js" as Theme
 
+// One clip on the timeline. Composition (top to bottom):
+//   name strip -> waveform (audio-only: full height; video: lower zone)
+// Gestures: body = select / move, edge grips (selected only) = trim.
+// Move and trim previews come from the controller so snapping is shown live
+// and the committed result is exactly what was previewed.
 Rectangle {
     id: block
     property string clipKey: ""
@@ -16,15 +21,21 @@ Rectangle {
     property real canonicalStartX: 0
     property real canonicalWidth: 3
     property real timelineWidth: 1
+    // Pixels between the lane's left edge (incl. track header) and timeline time 0.
+    property real timelineOffset: 0
     property real previewOffset: 0
     property real trimWidthDelta: 0
     property real pressTimelineX: 0
     property bool trimDragging: false
     property bool moveDragging: false
+    readonly property real nameStripHeight: 18
     signal activated()
+    // Snap guide x in timeline pixels (excluding the header), or -1.
+    signal snapGuide(real x)
 
+    // Mouse position in timeline pixels, as the controller expects (0..timelineWidth).
     function timelineX(area, mouse) {
-        return area.mapToItem(block.parent, mouse.x, mouse.y).x
+        return area.mapToItem(block.parent, mouse.x, mouse.y).x - block.timelineOffset
     }
 
     x: canonicalStartX + previewOffset
@@ -33,29 +44,44 @@ Rectangle {
          : (selected ? (audioClip ? Theme.clipAudioSelected : Theme.clipVideoSelected)
          : (body.containsMouse ? (audioClip ? Theme.clipAudioHover : Theme.clipVideoHover)
          : (audioClip ? Theme.clipAudio : Theme.clipVideo)))
-    // Selection is the only outline; hover and rest stay borderless.
+    // Selection is the only outline; rest and hover stay borderless.
     border.color: missing ? Theme.error : Theme.accent
     border.width: selected ? 2 : (missing ? 1 : 0)
-    radius: Theme.radiusM
+    radius: Theme.radiusS
     clip: true
-    opacity: muted ? 0.62 : 1.0
+    opacity: muted ? 0.62 : (moveDragging ? 0.92 : 1.0)
 
-    // Dark inset behind the waveform: contrast against any clip colour and a
-    // clear lane for the signal under the name. One flat rect, no effects.
+    // Name strip: a quiet darker band that doubles as the label area.
     Rectangle {
-        visible: waveform.visible
-        x: 3; y: 20
-        width: Math.max(0, parent.width - 6)
-        height: Math.max(0, parent.height - 23)
-        radius: Theme.radiusS
-        color: Theme.waveformWell
+        visible: block.width > 40
+        anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top
+        height: block.nameStripHeight
+        color: "#33000000"
     }
+    Text {
+        visible: block.width > 40
+        anchors.left: parent.left; anchors.leftMargin: 8
+        anchors.right: chips.visible ? chips.left : parent.right; anchors.rightMargin: 6
+        anchors.top: parent.top
+        height: block.nameStripHeight
+        verticalAlignment: Text.AlignVCenter
+        text: block.clipName
+        color: Theme.textPrimary
+        font.pixelSize: Theme.fontSizeXS
+        font.bold: true
+        elide: Text.ElideRight
+    }
+
+    // Waveform lane. Audio-only clips use the whole body; video clips keep the
+    // upper part free (future thumbnails) and place the audio in the lower zone.
     WaveformItem {
         id: waveform
-        x: 5
-        y: 22
-        width: Math.max(0, parent.width - 10)
-        height: Math.max(0, parent.height - 27)
+        readonly property real zoneTop: block.nameStripHeight + 3
+        readonly property real zoneHeight: Math.max(0, block.height - zoneTop - 4)
+        x: 4
+        y: block.audioClip ? zoneTop : zoneTop + zoneHeight * 0.26
+        width: Math.max(0, block.width - 8)
+        height: block.audioClip ? zoneHeight : zoneHeight * 0.74
         clipKey: block.clipKey
         selected: block.selected
         muted: block.muted
@@ -69,39 +95,24 @@ Rectangle {
         Component.onCompleted: controller.attachWaveformItem(block.clipKey, waveform)
         Component.onDestruction: controller.detachWaveformItem(waveform)
     }
-    // One name per clip; hidden when the clip is too narrow to read it.
-    Text {
-        visible: parent.width > 56
-        anchors.left: parent.left; anchors.leftMargin: 8
-        anchors.right: chips.visible ? chips.left : parent.right; anchors.rightMargin: 6
-        anchors.top: parent.top; anchors.topMargin: 5
-        text: block.clipName
-        color: Theme.textPrimary
-        font.pixelSize: Theme.fontSizeXS
-        font.bold: true
-        elide: Text.ElideRight
-    }
-    // State chips: only what is not the default (mute, gain, offline).
+
+    // Only states that are not the default: mute, offline.
     Row {
         id: chips
-        visible: parent.width > 90 && (block.muted || block.missing || Math.abs(block.gainDb) >= 0.05)
+        visible: block.width > 90 && (block.muted || block.missing)
         anchors.right: parent.right; anchors.rightMargin: 6
-        anchors.top: parent.top; anchors.topMargin: 4
+        anchors.top: parent.top; anchors.topMargin: 2
         spacing: 4
-        Rectangle { visible: block.missing; height: 15; width: offlineText.implicitWidth + 10; radius: 3; color: Theme.error
-            Text { id: offlineText; anchors.centerIn: parent; text: "Offline"; color: Theme.textOnAccent; font.pixelSize: 10; font.bold: true } }
-        Rectangle { visible: block.muted; height: 15; width: muteText.implicitWidth + 10; radius: 3; color: Theme.warning
-            Text { id: muteText; anchors.centerIn: parent; text: "Mute"; color: Theme.textOnWarning; font.pixelSize: 10; font.bold: true } }
-        Rectangle { visible: !block.muted && Math.abs(block.gainDb) >= 0.05; height: 15; width: gainText.implicitWidth + 10; radius: 3; color: Theme.chipOverlay
-            Text { id: gainText; anchors.centerIn: parent; text: (block.gainDb > 0 ? "+" : "") + block.gainDb.toFixed(0) + " dB"; color: Theme.textPrimary; font.pixelSize: 10; font.family: Theme.mono } }
+        Rectangle { visible: block.missing; height: 14; width: offlineText.implicitWidth + 10; radius: 3; color: Theme.error
+            Text { id: offlineText; anchors.centerIn: parent; text: "Sin conexión"; color: Theme.textOnAccent; font.pixelSize: 10; font.bold: true } }
+        Rectangle { visible: block.muted; height: 14; width: muteText.implicitWidth + 10; radius: 3; color: Theme.warning
+            Text { id: muteText; anchors.centerIn: parent; text: "Silenciado"; color: Theme.textOnWarning; font.pixelSize: 10; font.bold: true } }
     }
-    // Waveform status stays a whisper, never a headline. Ranges without source
-    // audio are drawn by the waveform itself (flat unavailable baseline).
     Text {
         readonly property string note: waveform.waveformState === WaveformItem.Failed ? "Onda no disponible"
             : (waveform.waveformState === WaveformItem.Missing || waveform.waveformState === WaveformItem.Generating ? "Generando onda…" : "")
         anchors.left: parent.left; anchors.leftMargin: 8
-        anchors.bottom: parent.bottom; anchors.bottomMargin: 5
+        anchors.bottom: parent.bottom; anchors.bottomMargin: 4
         text: note
         color: Theme.textSecondary
         opacity: 0.7
@@ -109,13 +120,15 @@ Rectangle {
         visible: waveform.visible && note.length > 0 && parent.width > 90
     }
 
+    // ---- Trim grips -----------------------------------------------------
+    // Hit width is constant; the drawn grip is visible on hover (hint) and
+    // selection (accent). Only a selected clip can be trimmed.
     Rectangle {
         id: leftHandle
         x: 0; y: 0; width: selected ? 8 : 4; height: parent.height
         color: "transparent"
-        // Visible only on hover (hint) or selection (grip); never idle.
         Rectangle { visible: block.selected || body.containsMouse; anchors.fill: parent; color: block.selected ? Theme.accent : Theme.textSecondary; opacity: block.selected ? 1.0 : 0.45; radius: 1 }
-        Rectangle { visible: block.selected && parent.width >= 8; anchors.centerIn: parent; width: 2; height: Math.min(14, parent.height - 8); radius: 1; color: Theme.textOnAccent; opacity: 0.85 }
+        Rectangle { visible: block.selected && parent.width >= 8; anchors.centerIn: parent; width: 2; height: Math.min(14, parent.height - 8); radius: 1; color: Theme.textOnAccent; opacity: 0.9 }
         MouseArea {
             anchors.fill: parent
             enabled: block.selected
@@ -128,25 +141,25 @@ Rectangle {
                 block.trimWidthDelta = 0
             }
             onPositionChanged: function(mouse) {
-                if (!pressed)
-                    return
-                var currentTimelineX = block.timelineX(parent, mouse)
-            var delta = currentTimelineX - block.pressTimelineX
-                if (Math.abs(delta) >= 4) block.trimDragging = true
+                if (!pressed) return
+                var current = block.timelineX(parent, mouse)
+                if (Math.abs(current - block.pressTimelineX) >= 4) block.trimDragging = true
                 if (block.trimDragging) {
+                    var r = controller.previewTimelineTrim(block.clipKey, true, current, block.timelineWidth)
+                    var delta = r.px - (block.canonicalStartX - block.timelineOffset)
                     block.previewOffset = delta
                     block.trimWidthDelta = -delta
+                    block.snapGuide(r.guide)
                 }
             }
             onReleased: function(mouse) {
-                var currentTimelineX = block.timelineX(parent, mouse)
+                var current = block.timelineX(parent, mouse)
                 if (block.trimDragging)
-                    controller.trimTimelineClipStart(block.clipKey,
-                                                     currentTimelineX,
-                                                     block.timelineWidth)
+                    controller.trimTimelineClipStart(block.clipKey, current, block.timelineWidth)
                 block.previewOffset = 0
                 block.trimWidthDelta = 0
                 block.trimDragging = false
+                block.snapGuide(-1)
             }
         }
     }
@@ -155,7 +168,7 @@ Rectangle {
         anchors.right: parent.right; y: 0; width: selected ? 8 : 4; height: parent.height
         color: "transparent"
         Rectangle { visible: block.selected || body.containsMouse; anchors.fill: parent; color: block.selected ? Theme.accent : Theme.textSecondary; opacity: block.selected ? 1.0 : 0.45; radius: 1 }
-        Rectangle { visible: block.selected && parent.width >= 8; anchors.centerIn: parent; width: 2; height: Math.min(14, parent.height - 8); radius: 1; color: Theme.textOnAccent; opacity: 0.85 }
+        Rectangle { visible: block.selected && parent.width >= 8; anchors.centerIn: parent; width: 2; height: Math.min(14, parent.height - 8); radius: 1; color: Theme.textOnAccent; opacity: 0.9 }
         MouseArea {
             anchors.fill: parent
             enabled: block.selected
@@ -167,24 +180,27 @@ Rectangle {
                 block.trimWidthDelta = 0
             }
             onPositionChanged: function(mouse) {
-                if (!pressed)
-                    return
-                var currentTimelineX = block.timelineX(parent, mouse)
-            var delta = currentTimelineX - block.pressTimelineX
-                if (Math.abs(delta) >= 4) block.trimDragging = true
-                if (block.trimDragging) block.trimWidthDelta = delta
+                if (!pressed) return
+                var current = block.timelineX(parent, mouse)
+                if (Math.abs(current - block.pressTimelineX) >= 4) block.trimDragging = true
+                if (block.trimDragging) {
+                    var r = controller.previewTimelineTrim(block.clipKey, false, current, block.timelineWidth)
+                    block.trimWidthDelta = r.px - (block.canonicalStartX - block.timelineOffset + block.canonicalWidth)
+                    block.snapGuide(r.guide)
+                }
             }
             onReleased: function(mouse) {
-                var currentTimelineX = block.timelineX(parent, mouse)
+                var current = block.timelineX(parent, mouse)
                 if (block.trimDragging)
-                    controller.trimTimelineClipEnd(block.clipKey,
-                                                   currentTimelineX,
-                                                   block.timelineWidth)
+                    controller.trimTimelineClipEnd(block.clipKey, current, block.timelineWidth)
                 block.trimWidthDelta = 0
                 block.trimDragging = false
+                block.snapGuide(-1)
             }
         }
     }
+
+    // ---- Body: select, move ------------------------------------------------
     MouseArea {
         id: body
         anchors.fill: parent
@@ -192,30 +208,32 @@ Rectangle {
         anchors.rightMargin: rightHandle.width
         preventStealing: true
         hoverEnabled: true
+        cursorShape: block.moveDragging ? Qt.ClosedHandCursor : Qt.ArrowCursor
         onPressed: function(mouse) {
             block.pressTimelineX = block.timelineX(parent, mouse)
             block.moveDragging = false
             block.previewOffset = 0
         }
         onPositionChanged: function(mouse) {
-            if (!pressed)
-                return
-            var currentTimelineX = block.timelineX(parent, mouse)
-            var delta = currentTimelineX - block.pressTimelineX
-            if (Math.abs(delta) >= 4) block.moveDragging = true
-            if (block.moveDragging) block.previewOffset = delta
+            if (!pressed) return
+            var current = block.timelineX(parent, mouse)
+            if (Math.abs(current - block.pressTimelineX) >= 4) block.moveDragging = true
+            if (block.moveDragging) {
+                var r = controller.previewTimelineMove(block.clipKey, block.pressTimelineX, current, block.timelineWidth)
+                block.previewOffset = r.offset
+                block.snapGuide(r.guide)
+            }
         }
         onReleased: function(mouse) {
-            var currentTimelineX = block.timelineX(parent, mouse)
+            var current = block.timelineX(parent, mouse)
             if (block.moveDragging) {
-                controller.moveTimelineClip(block.clipKey, block.pressTimelineX,
-                                            currentTimelineX,
-                                            block.timelineWidth)
+                controller.moveTimelineClip(block.clipKey, block.pressTimelineX, current, block.timelineWidth)
             } else {
                 block.activated()
             }
             block.previewOffset = 0
             block.moveDragging = false
+            block.snapGuide(-1)
         }
     }
 }

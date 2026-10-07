@@ -5,12 +5,30 @@
 #include <cmath>
 #include <iomanip>
 #include <limits>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
+#include <string_view>
 #include <utility>
+#include <vector>
 
 namespace pulsar::desktop {
 namespace {
+// Human label for a clip's media: file name, or "Click Soft" for the built-in
+// "pulsar-sound:click_soft" catalogue locators.
+[[nodiscard]] std::string clip_display_name(const std::filesystem::path& locator) {
+  const std::string text = locator.string();
+  constexpr std::string_view prefix = "pulsar-sound:";
+  if (text.rfind(prefix, 0) != 0) return locator.filename().string();
+  std::string name = text.substr(prefix.size());
+  bool word_start = true;
+  for (auto& ch : name) {
+    if (ch == '_' || ch == '-') { ch = ' '; word_start = true; continue; }
+    if (word_start && ch >= 'a' && ch <= 'z') ch = static_cast<char>(ch - 'a' + 'A');
+    word_start = false;
+  }
+  return name;
+}
 
 constexpr std::int64_t display_quantum_denominator = 1'000'000;
 
@@ -203,7 +221,7 @@ void EditorSession::rebuild_read_model() {
       const auto asset = document_.find_asset(clip.media_id());
       TimelineClipView view{clip.id(), track.id(), track.kind(), track_index,
                             std::to_string(clip.id().value()),
-                            asset.has_value() ? asset->source_locator().filename().string() : "Offline",
+                            asset.has_value() ? clip_display_name(asset->source_locator()) : "Offline",
                             time_text(clip.timeline_range().start()),
                             time_text(clip.timeline_range().end()), time_text(clip.duration()),
                             !asset.has_value() || asset->availability() == application::MediaAvailability::Unavailable,
@@ -236,6 +254,125 @@ void EditorSession::seek(domain::MediaTime position) {
 
 domain::MediaTime EditorSession::playback_position() const {
   return coordinator_.timeline_position();
+}
+
+namespace {
+[[nodiscard]] domain::MediaTime abs_diff(domain::MediaTime a, domain::MediaTime b) {
+  return a < b ? b - a : a - b;
+}
+} // namespace
+
+// Snap candidates: every other clip's start/end (any track), the playhead, zero.
+// O(clips) and only evaluated during an editorial gesture.
+static std::vector<domain::MediaTime> snap_edges(const application::ProjectDocument& document,
+                                                 std::optional<domain::ClipId> exclude,
+                                                 domain::MediaTime playhead) {
+  std::vector<domain::MediaTime> edges;
+  edges.push_back(domain::MediaTime::zero());
+  edges.push_back(playhead);
+  for (const auto& track : document.timeline().tracks()) {
+    for (const auto& clip : track.clips()) {
+      if (exclude.has_value() && clip.id() == *exclude) continue;
+      edges.push_back(clip.timeline_range().start());
+      edges.push_back(clip.timeline_range().end());
+    }
+  }
+  return edges;
+}
+
+MoveResolution EditorSession::resolve_move(domain::ClipId clip_id, domain::MediaTime press_time,
+                                           domain::MediaTime current_time,
+                                           domain::MediaTime tolerance) const {
+  const auto& original = require_clip(document_, clip_id);
+  const auto duration = original.timeline_range().end() - original.timeline_range().start();
+  const auto original_start = original.timeline_range().start();
+  const auto original_end = original.timeline_range().end();
+
+  // A clip can never pass through or sit on another one: its start is confined
+  // to [lo, hi], the free span between its immediate neighbours on its own
+  // track (and zero). Exact MediaTime; nothing else is ever moved.
+  const domain::Track* track = nullptr;
+  for (const auto& candidate_track : document_.timeline().tracks()) {
+    if (candidate_track.find_clip(clip_id) != nullptr) { track = &candidate_track; break; }
+  }
+  auto lo = domain::MediaTime::zero();
+  std::optional<domain::MediaTime> hi;
+  if (track != nullptr) {
+    for (const auto& other : track->clips()) {
+      if (other.id() == clip_id) continue;
+      if (other.timeline_range().end() <= original_start) lo = std::max(lo, other.timeline_range().end());
+      else if (other.timeline_range().start() >= original_end) {
+        const auto limit = other.timeline_range().start() - duration;
+        hi = hi.has_value() ? std::min(*hi, limit) : limit;
+      }
+    }
+  }
+  const auto confine = [&](domain::MediaTime start) {
+    if (start < lo) start = lo;
+    if (hi.has_value() && start > *hi) start = *hi;
+    return start;
+  };
+  const auto delta = current_time - press_time;
+  const auto desired = confine(original.timeline_start() + delta);
+  MoveResolution result{desired, false, desired};
+  if (tolerance <= domain::MediaTime::zero()) return result;
+
+  bool found = false;
+  domain::MediaTime best_distance = tolerance;
+  domain::MediaTime best_start = desired;
+  domain::MediaTime best_edge = desired;
+  for (const auto& edge : snap_edges(document_, clip_id, playback_position())) {
+    // Align this clip's start to the edge, or its end to the edge.
+    for (const bool by_end : {false, true}) {
+      const auto moved = by_end ? desired + duration : desired;
+      const auto distance = abs_diff(moved, edge);
+      if (distance > tolerance) continue;
+      if (found && !(distance < best_distance)) continue;
+      const auto candidate = by_end ? edge - duration : edge;
+      if (candidate < lo || (hi.has_value() && candidate > *hi)) continue;  // would overlap a neighbour
+      found = true;
+      best_distance = distance;
+      best_start = candidate;
+      best_edge = edge;
+    }
+  }
+  if (found) result = MoveResolution{best_start, true, best_edge};
+  return result;
+}
+
+EdgeResolution EditorSession::resolve_trim_edge(domain::ClipId clip_id, domain::MediaTime target,
+                                                domain::MediaTime tolerance) const {
+  EdgeResolution result{target, false};
+  if (tolerance <= domain::MediaTime::zero()) return result;
+  bool found = false;
+  domain::MediaTime best = tolerance;
+  for (const auto& edge : snap_edges(document_, clip_id, playback_position())) {
+    const auto distance = abs_diff(target, edge);
+    if (distance > tolerance || (found && !(distance < best))) continue;
+    found = true;
+    best = distance;
+    result = EdgeResolution{edge, true};
+  }
+  return result;
+}
+
+void EditorSession::move_clip(domain::ClipId clip_id, domain::MediaTime press_time,
+                              domain::MediaTime current_time, domain::MediaTime snap_tolerance) {
+  const auto resolution = resolve_move(clip_id, press_time, current_time, snap_tolerance);
+  const auto& original = require_clip(document_, clip_id);
+  // Re-express the resolved start as an exact delta so the existing move path
+  // (and its validation) stays the single place that mutates.
+  move_clip(clip_id, original.timeline_start(), resolution.new_start);
+}
+
+void EditorSession::trim_clip_start(domain::ClipId clip_id, domain::MediaTime target,
+                                    domain::MediaTime snap_tolerance) {
+  trim_clip_start(clip_id, resolve_trim_edge(clip_id, target, snap_tolerance).time);
+}
+
+void EditorSession::trim_clip_end(domain::ClipId clip_id, domain::MediaTime target,
+                                  domain::MediaTime snap_tolerance) {
+  trim_clip_end(clip_id, resolve_trim_edge(clip_id, target, snap_tolerance).time);
 }
 
 void EditorSession::move_clip(domain::ClipId clip_id, double press_pixel, double current_pixel,
@@ -316,6 +453,78 @@ void EditorSession::delete_selected() {
   processor_.remove_clip(*selected_clip_);
   selected_clip_.reset();
   synchronize_document_state();
+}
+
+namespace {
+struct SeparablePlan {
+  const domain::Clip* clip;
+  application::MediaAsset asset;
+};
+}
+
+static SeparablePlan plan_separation(const application::ProjectDocument& document, domain::ClipId clip_id) {
+  const domain::Clip* clip = nullptr;
+  bool on_video_track = false;
+  for (const auto& track : document.timeline().tracks()) {
+    if (const auto* found = track.find_clip(clip_id)) {
+      clip = found;
+      on_video_track = track.kind() == domain::TrackKind::Video;
+      break;
+    }
+  }
+  if (clip == nullptr) throw SeparateAudioException{SeparateAudioError::UnknownClip, "unknown clip"};
+  if (!on_video_track) throw SeparateAudioException{SeparateAudioError::NotAVideoTrackClip, "clip is not on the video track"};
+  const auto asset = document.find_asset(clip->media_id());
+  if (!asset.has_value()) throw SeparateAudioException{SeparateAudioError::UnavailableAsset, "media is unavailable"};
+  if (asset->availability() != application::MediaAvailability::Available) {
+    throw SeparateAudioException{SeparateAudioError::UnavailableAsset, "media is unavailable"};
+  }
+  if (!asset->audio().has_value()) throw SeparateAudioException{SeparateAudioError::NoEmbeddedAudio, "media has no audio"};
+  if (clip->muted()) throw SeparateAudioException{SeparateAudioError::AlreadySilenced, "embedded audio is already silenced"};
+  const auto audio_end = asset->audio()->duration.has_value() ? *asset->audio()->duration : asset->playable_duration();
+  if (clip->source_range().end() > audio_end) {
+    throw SeparateAudioException{SeparateAudioError::AudioShorterThanClip, "the audio stream is shorter than the clip"};
+  }
+  return SeparablePlan{clip, *asset};
+}
+
+bool EditorSession::can_separate_audio(domain::ClipId video_clip) const {
+  try {
+    (void)plan_separation(document_, video_clip);
+    return true;
+  } catch (const SeparateAudioException&) {
+    return false;
+  }
+}
+
+domain::ClipId EditorSession::separate_audio(domain::ClipId video_clip) {
+  // Everything that can be refused is checked before the first command runs.
+  const auto plan = plan_separation(document_, video_clip);
+  const auto media = plan.clip->media_id();
+  const auto source_range = plan.clip->source_range();
+  const auto timeline_range = plan.clip->timeline_range();
+  const auto start = plan.clip->timeline_start();
+  const double gain_db = plan.clip->audio_gain_db();
+
+  std::optional<domain::TrackId> audio_track;
+  for (const auto& track : document_.timeline().tracks()) {
+    if (track.kind() != domain::TrackKind::Audio) continue;
+    const bool free = std::none_of(track.clips().begin(), track.clips().end(), [&](const auto& other) {
+      return timeline_range.overlaps(other.timeline_range());
+    });
+    if (free) { audio_track = track.id(); break; }
+  }
+
+  domain::ClipId audio_clip{1};
+  processor_.run_as_one_edit([&] {
+    if (!audio_track.has_value()) audio_track = processor_.add_track(domain::TrackKind::Audio);
+    audio_clip = processor_.add_clip(*audio_track, media, source_range, start);
+    if (gain_db != 0.0) processor_.set_clip_audio_gain(audio_clip, gain_db);
+    processor_.set_clip_muted(video_clip, true);  // the embedded audio now lives on its own clip
+  });
+  selected_clip_ = audio_clip;
+  synchronize_document_state();
+  return audio_clip;
 }
 
 bool EditorSession::undo() {

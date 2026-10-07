@@ -1,10 +1,16 @@
 import QtQuick
 import "../theme/Theme.js" as Theme
 
+// Timeline: toolbar, ruler (click/drag to seek), track lanes with clips, one
+// playhead overlay and a snap guide shown only while a drag is snapping.
 Panel {
     id: pane
     property real gutterWidth: Math.max(88, Math.min(120, width * 0.095))
-    property real trackLaneHeight: 72
+    readonly property real timelineWidth: Math.max(1, width - gutterWidth)
+    // Lanes use the room they are given (more waveform to read) within sane bounds.
+    property real trackLaneHeight: Math.max(64, Math.min(104, Math.floor(trackArea.height / Math.max(2, controller.timelineTracks.length))))
+    // x (timeline pixels) of the magnetic edge being snapped to, or -1.
+    property real snapGuideX: -1
 
     function trackTitle(label) {
         // "VIDEO 1" -> "Video 1"
@@ -14,7 +20,7 @@ Panel {
     // ---- Toolbar: title, edit actions, view controls ------------------
     Item {
         id: toolbar
-        z: 10
+        z: 30
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.top: parent.top
@@ -26,6 +32,7 @@ Panel {
             spacing: 4
             Text { anchors.verticalCenter: parent.verticalCenter; text: "Timeline"; color: Theme.textPrimary; font.pixelSize: Theme.fontSizeL; font.bold: true; rightPadding: Theme.spaceM }
             ToolButton { glyph: "split"; text: "Cortar"; tip: "Cortar en el cabezal (S)"; enabled: controller.canSplit; onClicked: controller.splitSelectedClip() }
+            ToolButton { glyph: "audio"; text: "Separar audio"; tip: "Separar el audio del clip de video"; enabled: controller.canSeparateAudio; onClicked: controller.separateSelectedAudio() }
             ToolButton { glyph: "trash"; text: "Borrar"; tip: "Borrar clip (Supr)"; enabled: controller.selectedClipKey.length > 0; onClicked: controller.deleteSelectedClip() }
             Rectangle { anchors.verticalCenter: parent.verticalCenter; width: 1; height: 16; color: Theme.borderStrong }
             ToolButton { glyph: "undo"; text: "Deshacer"; tip: "Deshacer (Ctrl+Z)"; enabled: controller.canUndo; onClicked: controller.undoEdit() }
@@ -36,25 +43,29 @@ Panel {
             anchors.rightMargin: Theme.spaceL
             anchors.verticalCenter: parent.verticalCenter
             spacing: 6
+            ToolButton { glyph: "fit"; text: "Ajustar"; tip: "Ver toda la timeline (Shift+Z)"; enabled: controller.hasMedia && controller.timelineZoom > 1.0; onClicked: controller.fitTimeline() }
+            Item { width: Theme.spaceS; height: 1 }
             Text { anchors.verticalCenter: parent.verticalCenter; text: "Zoom"; color: Theme.textSecondary; font.pixelSize: Theme.fontSizeXS }
             PSlider {
                 anchors.verticalCenter: parent.verticalCenter; width: 96
                 value: Math.log(controller.timelineZoom) / Math.LN10 / 7
                 onMoved: function(v) { controller.setTimelineZoom(Math.pow(10, 7 * v)) }
             }
-            Item { width: Theme.spaceS; height: 1 }
-            Text { anchors.verticalCenter: parent.verticalCenter; text: "Pan"; color: controller.timelineZoom > 1.0 ? Theme.textSecondary : Theme.textMuted; font.pixelSize: Theme.fontSizeXS }
+            Item { visible: pane.width > 1100; width: Theme.spaceS; height: 1 }
+            Text { visible: pane.width > 1100; anchors.verticalCenter: parent.verticalCenter; text: "Pan"; color: controller.timelineZoom > 1.0 ? Theme.textSecondary : Theme.textMuted; font.pixelSize: Theme.fontSizeXS }
             PSlider {
+                visible: pane.width > 1100
                 anchors.verticalCenter: parent.verticalCenter; width: 72
                 enabled: controller.timelineZoom > 1.0
                 fill: Theme.textSecondary
                 value: controller.timelineScroll
                 onMoved: function(v) { controller.setTimelineScroll(v) }
             }
-            Item { width: Theme.spaceS; height: 1 }
-            Text { anchors.verticalCenter: parent.verticalCenter; text: "Onda"; color: Theme.textSecondary; font.pixelSize: Theme.fontSizeXS }
+            Item { visible: pane.width > 1100; width: Theme.spaceS; height: 1 }
+            Text { visible: pane.width > 1100; anchors.verticalCenter: parent.verticalCenter; text: "Onda"; color: Theme.textSecondary; font.pixelSize: Theme.fontSizeXS }
             PSlider {
-                anchors.verticalCenter: parent.verticalCenter; width: 64
+                visible: pane.width > 1100
+                anchors.verticalCenter: parent.verticalCenter; width: 56
                 fill: Theme.waveform
                 value: (controller.waveformDensity - 0.5) / 1.5
                 onMoved: function(v) { controller.setWaveformDensity(0.5 + 1.5 * v) }
@@ -62,28 +73,37 @@ Panel {
         }
     }
 
-    // ---- Ruler ---------------------------------------------------------
+    // ---- Ruler: major/minor ticks; press or drag anywhere to seek --------
     Item {
         id: ruler
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.top: toolbar.bottom
-        height: 26
+        height: 28
         clip: true
         Rectangle { anchors.fill: parent; color: Theme.ruler }
+        Rectangle { width: pane.gutterWidth; anchors.top: parent.top; anchors.bottom: parent.bottom; color: Theme.bgElevated }
         Repeater {
             model: controller.hasMedia ? controller.timelineRulerTicks : []
             delegate: Item {
-                x: pane.gutterWidth + modelData.progress * (ruler.width - pane.gutterWidth)
+                x: pane.gutterWidth + modelData.progress * pane.timelineWidth
                 width: 1
                 height: ruler.height
-                Rectangle { anchors.bottom: parent.bottom; width: 1; height: 7; color: Theme.textMuted; opacity: 0.7 }
-                Text { anchors.left: parent.left; anchors.leftMargin: 4; anchors.verticalCenter: parent.verticalCenter; anchors.verticalCenterOffset: -2; text: modelData.label; color: Theme.textSecondary; font.family: Theme.mono; font.pixelSize: Theme.fontSizeXS; visible: index % 2 === 0 }
+                Rectangle { anchors.bottom: parent.bottom; width: 1; height: modelData.major ? 10 : 5; color: Theme.textMuted; opacity: modelData.major ? 0.9 : 0.5 }
+                Text { visible: modelData.major; anchors.left: parent.left; anchors.leftMargin: 8; anchors.top: parent.top; anchors.topMargin: 5; text: modelData.label; color: Theme.textSecondary; font.family: Theme.mono; font.pixelSize: Theme.fontSizeXS }
             }
         }
         Rectangle { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; height: 1; color: Theme.borderSubtle }
+        MouseArea {
+            anchors.fill: parent
+            enabled: controller.hasMedia
+            cursorShape: Qt.PointingHandCursor
+            onPressed: function(mouse) { controller.seekTimelineAt(mouse.x - pane.gutterWidth, pane.timelineWidth) }
+            onPositionChanged: function(mouse) { if (pressed) controller.seekTimelineAt(mouse.x - pane.gutterWidth, pane.timelineWidth) }
+        }
     }
 
+    // ---- Tracks -----------------------------------------------------------
     Item {
         id: trackArea
         anchors.left: parent.left
@@ -121,14 +141,14 @@ Panel {
                 Repeater {
                     model: controller.timelineClips
                     delegate: ClipBlock {
-                        z: 2
+                        z: model.selected ? 3 : 2
                         visible: model.inViewport
                         y: model.trackIndex * pane.trackLaneHeight + 6
-                        canonicalStartX: pane.gutterWidth + model.startProgress * (contentArea.width - pane.gutterWidth)
-                        canonicalWidth: Math.max(3, (model.endProgress - model.startProgress) * (contentArea.width - pane.gutterWidth))
+                        canonicalStartX: pane.gutterWidth + model.startProgress * pane.timelineWidth
+                        canonicalWidth: Math.max(3, (model.endProgress - model.startProgress) * pane.timelineWidth)
                         height: pane.trackLaneHeight - 12
-                        audioClip: model.audioTrack
-                        timelineWidth: contentArea.width - pane.gutterWidth
+                        timelineWidth: pane.timelineWidth
+                        timelineOffset: pane.gutterWidth
                         clipName: model.clipName
                         startText: model.startText
                         endText: model.endText
@@ -136,31 +156,59 @@ Panel {
                         selected: model.selected
                         muted: model.muted
                         gainDb: model.gainDb
+                        audioClip: model.audioTrack
                         clipKey: model.clipKey
                         onActivated: controller.selectTimelineClip(clipKey)
+                        onSnapGuide: function(x) { pane.snapGuideX = x }
                     }
                 }
-            MouseArea {
-                anchors.left: parent.left
-                anchors.right: parent.right
-                anchors.top: parent.top
-                anchors.bottom: parent.bottom
-                z: 1
-                acceptedButtons: Qt.LeftButton
-                onPressed: function(mouse) {
-                    controller.selectTimelineClip("")
-                    controller.seekTimelineAt(mouse.x - pane.gutterWidth, width - pane.gutterWidth)
+                // Empty lane: click selects nothing and seeks; drag scrubs.
+                MouseArea {
+                    anchors.fill: parent
+                    z: 1
+                    acceptedButtons: Qt.LeftButton
+                    onPressed: function(mouse) {
+                        controller.selectTimelineClip("")
+                        controller.seekTimelineAt(mouse.x - pane.gutterWidth, pane.timelineWidth)
+                    }
+                    onPositionChanged: function(mouse) { if (pressed) controller.seekTimelineAt(mouse.x - pane.gutterWidth, pane.timelineWidth) }
                 }
-                onPositionChanged: function(mouse) { if (pressed) controller.seekTimelineAt(mouse.x - pane.gutterWidth, width - pane.gutterWidth) }
-            }
-            Playhead {
-                z: 4
-                progress: controller.timelinePlayheadProgress
-                timelineOffset: pane.gutterWidth
-                x: pane.gutterWidth + progress * (contentArea.width - pane.gutterWidth)
-                height: contentArea.height
-            }
             }
         }
+
+        // One short sentence and nothing else when there is nothing to edit.
+        Text {
+            visible: !controller.hasMedia
+            anchors.left: parent.left; anchors.leftMargin: pane.gutterWidth
+            anchors.right: parent.right; anchors.top: parent.top; anchors.topMargin: 6
+            height: pane.trackLaneHeight - 12
+            horizontalAlignment: Text.AlignHCenter
+            verticalAlignment: Text.AlignVCenter
+            text: "Importá un medio y usá Insertar para empezar a editar"
+            color: Theme.textMuted
+            font.pixelSize: Theme.fontSizeS
+        }
+    }
+
+    // ---- Overlays (never intercept the mouse) ------------------------------
+    Rectangle {
+        // Magnetic snap guide, only while a drag is snapping.
+        visible: pane.snapGuideX >= 0
+        x: pane.gutterWidth + pane.snapGuideX
+        y: ruler.y
+        width: 1
+        height: ruler.height + trackArea.height
+        color: Theme.warning
+        opacity: 0.9
+        z: 15
+        enabled: false
+    }
+    Playhead {
+        z: 20
+        y: ruler.y + 2
+        height: ruler.height + trackArea.height - 2
+        progress: controller.hasMedia ? controller.timelinePlayheadProgress : -1
+        timelineOffset: pane.gutterWidth
+        timelineWidth: pane.timelineWidth
     }
 }

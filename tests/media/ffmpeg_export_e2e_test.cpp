@@ -524,9 +524,56 @@ void export_unaligned_source_range_succeeds() {
   assert(!output.video_streams.empty());
   std::filesystem::remove_all(root);
 }
+// "Separar audio" must not change the exported sound: the same project exported
+// before and after the separation yields the same audio (the embedded track is
+// muted and the independent clip carries identical timeline/source ranges).
+void export_after_separate_audio_matches_original() {
+  const auto root = std::filesystem::temp_directory_path() / "pulsar-separate-audio-e2e";
+  std::filesystem::create_directories(root);
+  const auto source = std::filesystem::path{PULSAR_SOURCE_DIR} / "tests/fixtures/e6_video_a.mp4";
+  media::ffmpeg::FFmpegMediaProbe probe;
+  application::ProjectDocument document;
+  application::CommandProcessor processor{document};
+  const auto media = processor.import_asset(source, probe);
+  // A trimmed clip placed after a gap: the separated audio must follow the clip.
+  const auto clip = processor.add_clip(media, domain::TimeRange{domain::MediaTime{1, domain::Rational{1, 2}}, seconds(3)},
+                                       domain::MediaTime{1, domain::Rational{1, 2}});
+  const auto original_snapshot = document.snapshot();
+  const auto original_path = root / "original.mp4";
+  const auto separated_path = root / "separated.mp4";
+  std::filesystem::remove(original_path);
+  std::filesystem::remove(separated_path);
+  export_snapshot(original_snapshot, original_path);
+
+  // Same operation the editor performs (one grouped edit).
+  processor.run_as_one_edit([&] {
+    const auto audio_track = processor.add_track(domain::TrackKind::Audio);
+    const auto* source_clip = document.timeline().find_clip(clip);
+    (void)processor.add_clip(audio_track, media, source_clip->source_range(), source_clip->timeline_start());
+    processor.set_clip_muted(clip, true);
+  });
+  export_snapshot(document.snapshot(), separated_path);
+
+  assert(std::filesystem::exists(original_path) && std::filesystem::exists(separated_path));
+  media::ffmpeg::FFmpegMediaProbe output_probe;
+  const auto a = output_probe.probe(original_path);
+  const auto b = output_probe.probe(separated_path);
+  assert(!b.audio_streams.empty() && b.audio_streams.front().sample_rate == 48'000);
+  assert(a.duration.has_value() && b.duration.has_value() && *a.duration == *b.duration);
+  for (const auto& [begin, end] : {std::pair{0.60, 1.20}, std::pair{1.50, 2.30}, std::pair{2.60, 3.30}}) {
+    const double before = audio_rms(original_path, begin, end);
+    const double after = audio_rms(separated_path, begin, end);
+    assert(before > 1.0e-3);                              // there is real sound to compare
+    assert(std::abs(before - after) <= before * 1.0e-3);  // and it is the same sound
+  }
+  // The gap before the clip stays silent in both.
+  assert(audio_rms(separated_path, 0.05, 0.40) < 1.0e-4);
+  std::filesystem::remove_all(root);
+}
 } // namespace
 
 int main() {
   export_reference_project_and_inspect();
   export_unaligned_source_range_succeeds();
+  export_after_separate_audio_matches_original();
 }

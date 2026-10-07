@@ -149,6 +149,67 @@ int main(int argc, char** argv) {
   controller.appendAssetToVideoTrack(id_b);
   REQUIRE(29, clips(controller) == clips_with_audio + 1 && controller.projectDirty());
 
+  // Zero-gap append: the appended clip starts exactly where the previous video clip ends.
+  {
+    const auto end_text = [&](int row) { return controller.timelineClips()->index(row, 0).data(TimelineClipListModel::EndRole).toString(); };
+    const auto start_text = [&](int row) { return controller.timelineClips()->index(row, 0).data(TimelineClipListModel::StartRole).toString(); };
+    REQUIRE(30, end_text(0) == start_text(1) && end_text(1) == start_text(2));
+  }
+
+  // Ruler: round major labels, bounded tick count, finer step when zoomed; Ajustar returns to full view.
+  {
+    const auto majors = [&] {
+      QStringList labels;
+      for (const auto& tick : controller.timelineRulerTicks()) {
+        const auto map = tick.toMap();
+        if (map.value("major").toBool()) labels << map.value("label").toString();
+      }
+      return labels;
+    };
+    REQUIRE(31, controller.timelineRulerTicks().size() <= 60 && majors().size() >= 3);
+    REQUIRE(32, majors().first() == QStringLiteral("0:00"));
+    controller.setTimelineZoom(60.0);
+    REQUIRE(33, !majors().isEmpty() && controller.timelineRulerTicks().size() <= 60 && majors().first().contains(QLatin1Char('.')));
+    controller.fitTimeline();
+    REQUIRE(34, controller.timelineZoom() == 1.0 && majors().first() == QStringLiteral("0:00"));
+  }
+
+  // Live move preview: pure (no edit), stays at the origin when the pointer has not moved.
+  {
+    const auto key = controller.timelineClips()->index(1, 0).data(TimelineClipListModel::ClipKeyRole).toString();
+    const int clips_before = clips(controller);
+    const auto preview = controller.previewTimelineMove(key, 500.0, 500.0, 1000.0);
+    REQUIRE(35, std::abs(preview.value("offset").toDouble()) < 0.5 && clips(controller) == clips_before);
+  }
+
+  // Separar audio: one grouped, undoable, persistent operation on the selected video clip.
+  {
+    const auto key = controller.timelineClips()->index(0, 0).data(TimelineClipListModel::ClipKeyRole).toString();
+    controller.selectTimelineClip(key);
+    REQUIRE(36, controller.canSeparateAudio());
+    const int before = clips(controller);
+    controller.separateSelectedAudio();
+    REQUIRE(37, clips(controller) == before + 1 && controller.errorMessage().isEmpty());
+    REQUIRE(38, !controller.canSeparateAudio());          // selection moved to the new audio clip
+    controller.selectTimelineClip(key);
+    REQUIRE(39, !controller.canSeparateAudio());          // the video clip is now silenced
+    controller.separateSelectedAudio();
+    REQUIRE(40, clips(controller) == before + 1 && !controller.errorMessage().isEmpty());
+    controller.undoEdit();                                 // ONE undo reverts the whole separation
+    REQUIRE(41, clips(controller) == before);
+    controller.selectTimelineClip(key);
+    REQUIRE(42, controller.canSeparateAudio());
+    controller.redoEdit();
+    REQUIRE(43, clips(controller) == before + 1);
+    const auto project2 = root / "separated.pulsar";
+    controller.saveProject(QString::fromStdString(project2.string()));
+    REQUIRE(44, !controller.projectDirty());
+    controller.openProject(QString::fromStdString(project2.string()));
+    REQUIRE(45, wait_until([&] { return clips(controller) == before + 1; }));
+    controller.selectTimelineClip(key);
+    REQUIRE(46, !controller.canSeparateAudio());          // persisted: video clip still silenced
+  }
+
   std::filesystem::remove_all(root);
   return 0;
 }

@@ -68,7 +68,14 @@ Panel {
             radius: Theme.radiusM
             color: current ? Theme.bgSelected : (rowMouse.containsMouse ? Theme.bgHover : "transparent")
             opacity: model.available ? 1.0 : 0.6
-            MouseArea { id: rowMouse; anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top; height: 52; hoverEnabled: true; onClicked: controller.selectAsset(model.mediaId) }
+            MouseArea {
+                id: rowMouse
+                anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top; height: 52
+                hoverEnabled: true
+                onClicked: controller.selectAsset(model.mediaId)
+                // Same action as the Insertar button.
+                onDoubleClicked: { controller.selectAsset(model.mediaId); if (assetRow.isVideo && model.available) controller.insertAssetAtPlayhead(model.mediaId) }
+            }
             Rectangle { visible: assetRow.current; anchors.left: parent.left; anchors.top: parent.top; anchors.topMargin: 10; width: 2; height: 32; radius: 1; color: Theme.accent }
             Rectangle {
                 id: iconBox

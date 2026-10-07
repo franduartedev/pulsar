@@ -1,28 +1,20 @@
 import QtQuick
 import "../theme/Theme.js" as Theme
 
-// Single accent line with a small head. Dragging seeks (behaviour unchanged).
+// Visual only: one accent line spanning ruler and tracks plus a small head.
+// It never intercepts the mouse (a clip edge under it stays trimmable);
+// seeking is done by pressing/dragging the ruler or the empty lane.
 Item {
     id: head
-    property real progress: 0
+    property real progress: 0   // 0..1 across the timeline area, <0 hides
     property real timelineOffset: 0
-    property bool dragging: false
+    property real timelineWidth: 1
     visible: progress >= 0
-    width: 12
-    x: Math.max(0, Math.min(parent.width - width, progress * parent.width - width / 2))
-    Rectangle { anchors.horizontalCenter: parent.horizontalCenter; width: 2; height: parent.height; color: Theme.accent }
-    // Half-clipped diamond reads as a downward pointer at the top edge.
-    Rectangle { anchors.top: parent.top; anchors.topMargin: -5; anchors.horizontalCenter: parent.horizontalCenter; width: 10; height: 10; color: Theme.accent; rotation: 45 }
-    MouseArea {
-        id: hit
-        anchors.fill: parent
-        drag.target: null
-        onPressed: function(mouse) { head.dragging = true; seekAt(mouse) }
-        onReleased: head.dragging = false
-        onPositionChanged: function(mouse) { if (pressed) seekAt(mouse) }
-        function seekAt(point) {
-            var p = hit.mapToItem(head.parent, point.x, point.y)
-            controller.seekTimelineAt(p.x - head.timelineOffset, head.parent.width - head.timelineOffset)
-        }
-    }
+    width: 14
+    x: timelineOffset + progress * timelineWidth - width / 2
+    enabled: false
+    Rectangle { anchors.horizontalCenter: parent.horizontalCenter; y: 10; width: 2; height: parent.height - 10; color: Theme.accent }
+    // Head: rounded flag, wider than the line so it reads as a grab handle.
+    Rectangle { anchors.top: parent.top; anchors.horizontalCenter: parent.horizontalCenter; width: 14; height: 12; radius: 3; color: Theme.accent }
+    Rectangle { anchors.top: parent.top; anchors.topMargin: 8; anchors.horizontalCenter: parent.horizontalCenter; width: 8; height: 8; rotation: 45; color: Theme.accent }
 }

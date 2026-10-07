@@ -70,14 +70,17 @@ Panel {
     property string summary: mediaSummary(controller.metadata)
     property var rows: detailRows(controller.metadata)
 
-    // Mirror the selected clip's name/range from the timeline model.
+    // Mirror the selected clip's name/range from the timeline model, and keep
+    // it fresh while trims/moves change the range of the same selection.
     Repeater {
         model: controller.timelineClips
         delegate: Item {
             visible: false
             property bool sel: model.selected
-            function push() { if (sel) { inspector.selName = model.clipName; inspector.selRange = model.startText + "  →  " + model.endText } }
+            property string range: model.startText + "  →  " + model.endText
+            function push() { if (sel) { inspector.selName = model.clipName; inspector.selRange = range } }
             onSelChanged: push()
+            onRangeChanged: push()
             Component.onCompleted: push()
         }
     }
@@ -184,11 +187,11 @@ Panel {
                 // The controller only describes the active source; hide it when
                 // the selected clip belongs to a different media.
                 visible: inspector.summary.length > 0
-                         && (controller.selectedClipKey.length === 0 || inspector.selName === controller.mediaName)
                 width: parent.width
                 spacing: 6
                 SectionLabel { text: "MEDIO" }
-                Text { width: parent.width; text: controller.mediaName; color: Theme.textSecondary; font.pixelSize: Theme.fontSizeS; elide: Text.ElideMiddle }
+                // The clip above already names its media; avoid saying it twice.
+                Text { visible: controller.selectedClipKey.length === 0 || inspector.selName !== controller.mediaName; width: parent.width; text: controller.mediaName; color: Theme.textSecondary; font.pixelSize: Theme.fontSizeS; elide: Text.ElideMiddle }
                 Text { width: parent.width; text: inspector.summary; color: Theme.textSecondary; font.pixelSize: Theme.fontSizeS; wrapMode: Text.WordWrap }
             }
 

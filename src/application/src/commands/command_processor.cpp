@@ -38,7 +38,7 @@ void CommandProcessor::execute(Command command) {
   document_.ensure_new_edit_possible();
   const HistoryStateId before = document_.history_state_id();
   const HistoryStateId after = document_.next_history_state_id();
-  ExecutedCommand executed{command, build_inverse(document_, command), before, after};
+  ExecutedCommand executed{command, build_inverse(document_, command), before, after, open_group_};
 
   if (history_capacity_ != 0) {
     undo_stack_.push_back(executed);
@@ -134,7 +134,33 @@ std::size_t CommandProcessor::undo_size() const noexcept { return undo_stack_.si
 
 std::size_t CommandProcessor::redo_size() const noexcept { return redo_stack_.size(); }
 
+void CommandProcessor::begin_group() noexcept {
+  if (open_group_ == 0) open_group_ = next_group_++;
+}
+
+void CommandProcessor::end_group() noexcept { open_group_ = 0; }
+
 bool CommandProcessor::undo() {
+  if (undo_stack_.empty()) return false;
+  const auto group = undo_stack_.back().group;
+  if (!undo_one()) return false;
+  while (group != 0 && !undo_stack_.empty() && undo_stack_.back().group == group) {
+    if (!undo_one()) break;
+  }
+  return true;
+}
+
+bool CommandProcessor::redo() {
+  if (redo_stack_.empty()) return false;
+  const auto group = redo_stack_.back().group;
+  if (!redo_one()) return false;
+  while (group != 0 && !redo_stack_.empty() && redo_stack_.back().group == group) {
+    if (!redo_one()) break;
+  }
+  return true;
+}
+
+bool CommandProcessor::undo_one() {
   if (undo_stack_.empty()) {
     return false;
   }
@@ -152,7 +178,7 @@ bool CommandProcessor::undo() {
   return true;
 }
 
-bool CommandProcessor::redo() {
+bool CommandProcessor::redo_one() {
   if (redo_stack_.empty()) {
     return false;
   }
@@ -169,6 +195,15 @@ bool CommandProcessor::redo() {
   redo_stack_.pop_back();
   trim_undo_to_capacity();
   return true;
+}
+
+// A grouped edit that failed half way leaves nothing behind: its commands are
+// undone and dropped from both stacks (the group was the newest history).
+void CommandProcessor::rollback_group(std::uint64_t group) {
+  while (!undo_stack_.empty() && undo_stack_.back().group == group) {
+    if (!undo_one()) break;
+  }
+  while (!redo_stack_.empty() && redo_stack_.back().group == group) redo_stack_.pop_back();
 }
 
 void CommandProcessor::apply(ProjectDocument& document, const Command& command, ApplyMode mode) {
@@ -299,7 +334,12 @@ Command CommandProcessor::build_inverse(const ProjectDocument& document, const C
 
 void CommandProcessor::trim_undo_to_capacity() {
   while (undo_stack_.size() > history_capacity_) {
+    // Never keep half a grouped edit: drop the whole oldest group.
+    const auto group = undo_stack_.front().group;
     undo_stack_.pop_front();
+    while (group != 0 && !undo_stack_.empty() && undo_stack_.front().group == group) {
+      undo_stack_.pop_front();
+    }
   }
 }
 

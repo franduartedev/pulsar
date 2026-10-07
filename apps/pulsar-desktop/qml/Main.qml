@@ -34,6 +34,7 @@ Window {
     Shortcut { sequence: "Delete"; onActivated: controller.deleteSelectedClip() }
     Shortcut { sequence: "Ctrl+Z"; onActivated: controller.undoEdit() }
     Shortcut { sequence: "Ctrl+Shift+Z"; onActivated: controller.redoEdit() }
+    Shortcut { sequence: "Shift+Z"; onActivated: controller.fitTimeline() }
 
     FileDialog {
         id: fileDialog
@@ -87,7 +88,7 @@ Window {
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.top: parent.top
-        height: 52
+        height: 48
         onOpenProjectRequested: openProjectDialog.open()
         onSaveProjectRequested: controller.activeProjectPath.length > 0 ? controller.saveProject(controller.activeProjectPath) : saveProjectDialog.open()
         onSaveProjectAsRequested: saveProjectDialog.open()
@@ -99,10 +100,10 @@ Window {
         id: mediaPanel
         anchors.left: parent.left
         anchors.top: header.bottom
-        anchors.bottom: scrubber.top
+        anchors.bottom: timelinePane.top
         anchors.leftMargin: root.gap
         anchors.topMargin: root.gap
-        anchors.bottomMargin: 2
+        anchors.bottomMargin: root.gap
         width: root.mediaWidth
         onImportRequested: fileDialog.open()
     }
@@ -111,10 +112,10 @@ Window {
         id: inspector
         anchors.right: parent.right
         anchors.top: header.bottom
-        anchors.bottom: scrubber.top
+        anchors.bottom: timelinePane.top
         anchors.rightMargin: root.gap
         anchors.topMargin: root.gap
-        anchors.bottomMargin: 2
+        anchors.bottomMargin: root.gap
         width: root.inspectorWidth
     }
 
@@ -124,11 +125,11 @@ Window {
         anchors.left: mediaPanel.right
         anchors.right: inspector.left
         anchors.top: header.bottom
-        anchors.bottom: scrubber.top
+        anchors.bottom: timelinePane.top
         anchors.leftMargin: root.gap
         anchors.rightMargin: root.gap
         anchors.topMargin: root.gap
-        anchors.bottomMargin: 2
+        anchors.bottomMargin: root.gap
         color: Theme.bgPanel
         radius: Theme.radiusL
         Column {
@@ -136,21 +137,13 @@ Window {
             spacing: 0
             ViewerPane {
                 width: parent.width
-                height: Math.max(150, parent.height - transportBar.height)
+                height: Math.max(150, parent.height - scrubber.height - transportBar.height)
                 onImportRequested: fileDialog.open()
             }
-            TransportBar { id: transportBar; width: parent.width; height: compactWorkspace ? 48 : 56 }
+            // Program seek line, attached to the monitor it controls.
+            SourceScrubber { id: scrubber; width: parent.width; height: 20 }
+            TransportBar { id: transportBar; width: parent.width; height: compactWorkspace ? 44 : 52 }
         }
-    }
-
-    SourceScrubber {
-        id: scrubber
-        anchors.left: parent.left
-        anchors.right: parent.right
-        anchors.bottom: timelinePane.top
-        anchors.leftMargin: root.gap
-        anchors.rightMargin: root.gap
-        height: 20
     }
 
     TimelinePane {
@@ -161,7 +154,8 @@ Window {
         anchors.leftMargin: root.gap
         anchors.rightMargin: root.gap
         anchors.bottomMargin: 2
-        height: compactWorkspace ? 188 : Math.max(214, Math.min(290, root.height * 0.34))
+        // The timeline is where editing happens: it gets a third of the window.
+        height: compactWorkspace ? 200 : Math.max(236, Math.min(360, Math.round(root.height * 0.36)))
     }
 
     StatusBar {

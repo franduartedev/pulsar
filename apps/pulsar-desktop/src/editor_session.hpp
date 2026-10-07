@@ -83,6 +83,39 @@ private:
   VideoIngestError code_;
 };
 
+// Magnetic snapping. All values are exact MediaTime; only the tolerance (a few
+// screen pixels converted by the caller) is approximate, and it is used only
+// to decide *whether* to snap, never as the resulting time.
+struct MoveResolution {
+  domain::MediaTime new_start;
+  bool snapped{false};
+  domain::MediaTime guide;  // the edge snapped to (valid when snapped)
+};
+struct EdgeResolution {
+  domain::MediaTime time;
+  bool snapped{false};
+};
+
+// Why "Separar audio" was refused. The document is never mutated.
+enum class SeparateAudioError {
+  UnknownClip,
+  NotAVideoTrackClip,
+  UnavailableAsset,
+  NoEmbeddedAudio,
+  AlreadySilenced,       // embedded audio is muted (also what a previous separation leaves)
+  AudioShorterThanClip,  // the source's audio stream does not cover the clip's source range
+};
+
+class SeparateAudioException final : public std::invalid_argument {
+public:
+  SeparateAudioException(SeparateAudioError code, const char* message)
+      : std::invalid_argument{message}, code_{code} {}
+  [[nodiscard]] SeparateAudioError code() const noexcept { return code_; }
+
+private:
+  SeparateAudioError code_;
+};
+
 class EditorSession final {
 public:
   EditorSession();
@@ -123,6 +156,18 @@ public:
   void move_clip(domain::ClipId clip, double press_pixel, double current_pixel, double width);
   void move_clip(domain::ClipId clip, domain::MediaTime press_time,
                  domain::MediaTime current_time);
+  // Where a drag would land, with magnetic snapping to other clips' edges, the
+  // playhead and zero. Never produces an overlap on the clip's own track and
+  // never moves anything else. Pure: does not mutate the document.
+  [[nodiscard]] MoveResolution resolve_move(domain::ClipId clip, domain::MediaTime press_time,
+                                            domain::MediaTime current_time,
+                                            domain::MediaTime tolerance) const;
+  [[nodiscard]] EdgeResolution resolve_trim_edge(domain::ClipId clip, domain::MediaTime target,
+                                                 domain::MediaTime tolerance) const;
+  void move_clip(domain::ClipId clip, domain::MediaTime press_time,
+                 domain::MediaTime current_time, domain::MediaTime snap_tolerance);
+  void trim_clip_start(domain::ClipId clip, domain::MediaTime target, domain::MediaTime snap_tolerance);
+  void trim_clip_end(domain::ClipId clip, domain::MediaTime target, domain::MediaTime snap_tolerance);
   void trim_clip_start(domain::ClipId clip, double pixel, double width);
   void trim_clip_start(domain::ClipId clip, domain::MediaTime timeline_start);
   void trim_clip_end(domain::ClipId clip, double pixel, double width);
@@ -132,6 +177,12 @@ public:
   [[nodiscard]] bool can_split() const;
   [[nodiscard]] domain::ClipId split_selected_at_playhead();
   void delete_selected();
+  // "Separar audio": the embedded audio of a VIDEO 1 clip becomes an ordinary
+  // audio clip with exactly the same timeline start and source range (same
+  // media, so sample-for-sample the same sound), and the video clip's embedded
+  // audio is muted. Gain and mute state move with the audio. One undo/redo step.
+  [[nodiscard]] bool can_separate_audio(domain::ClipId video_clip) const;
+  [[nodiscard]] domain::ClipId separate_audio(domain::ClipId video_clip);
   // Ingest an already imported video asset into VIDEO 1 with its full playable
   // range. No ripple, overwrite or split: a request that would overlap an
   // existing clip throws VideoIngestException{NoSpace} and changes nothing.

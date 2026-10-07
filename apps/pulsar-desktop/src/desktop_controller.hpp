@@ -72,6 +72,7 @@ class DesktopController final : public QObject {
   Q_PROPERTY(double selectedClipGainDb READ selectedClipGainDb NOTIFY timelineChanged)
   Q_PROPERTY(bool selectedClipMuted READ selectedClipMuted NOTIFY timelineChanged)
   Q_PROPERTY(bool canSplit READ canSplit NOTIFY editActionStateChanged)
+  Q_PROPERTY(bool canSeparateAudio READ canSeparateAudio NOTIFY editActionStateChanged)
   Q_PROPERTY(bool canUndo READ canUndo NOTIFY timelineChanged)
   Q_PROPERTY(bool canRedo READ canRedo NOTIFY timelineChanged)
   Q_PROPERTY(QVariantList soundLibrary READ soundLibrary NOTIFY soundLibraryChanged)
@@ -126,6 +127,10 @@ public:
   [[nodiscard]] double selectedClipGainDb() const;
   [[nodiscard]] bool selectedClipMuted() const;
   [[nodiscard]] bool canSplit() const { return active_session_ && active_session_->can_split(); }
+  [[nodiscard]] bool canSeparateAudio() const {
+    return active_session_ && active_session_->selected_clip().has_value() &&
+           active_session_->can_separate_audio(*active_session_->selected_clip());
+  }
   [[nodiscard]] bool canUndo() const { return active_session_ && active_session_->can_undo(); }
   [[nodiscard]] bool canRedo() const { return active_session_ && active_session_->can_redo(); }
   [[nodiscard]] QVariantList soundLibrary() const { return sound_library_; }
@@ -142,6 +147,13 @@ public:
   Q_INVOKABLE void selectTimelineClip(const QString& clip_key);
   Q_INVOKABLE void seekTimelineAt(double pixel, double width);
   Q_INVOKABLE void setTimelineZoom(double zoom);
+  // Show the whole program: logical viewport only, clips are untouched.
+  Q_INVOKABLE void fitTimeline();
+  // Live feedback for a drag, including magnetic snapping. {offset: px to
+  // shift the clip by, guide: px of the snapped edge or -1}. Pure: no edit.
+  Q_INVOKABLE QVariantMap previewTimelineMove(const QString& clip_key, double press, double current, double width);
+  // {px: where the dragged edge should be drawn, guide: snapped edge px or -1}.
+  Q_INVOKABLE QVariantMap previewTimelineTrim(const QString& clip_key, bool start_edge, double pixel, double width);
   Q_INVOKABLE void setTimelineScroll(double scroll);
   Q_INVOKABLE void setWaveformDensity(double density);
   Q_INVOKABLE void moveTimelineClip(const QString&, double, double, double);
@@ -149,6 +161,8 @@ public:
   Q_INVOKABLE void trimTimelineClipEnd(const QString&, double, double);
   Q_INVOKABLE void splitSelectedClip();
   Q_INVOKABLE void deleteSelectedClip();
+  // Embedded audio of the selected video clip -> its own synced audio clip (one undo step).
+  Q_INVOKABLE void separateSelectedAudio();
   Q_INVOKABLE void setSelectedClipGainDb(double gain_db);
   Q_INVOKABLE void toggleSelectedClipMute();
   Q_INVOKABLE void undoEdit();
@@ -215,6 +229,9 @@ private:
   [[nodiscard]] double timelinePixelAt(pulsar::domain::MediaTime time, double width) const;
   void publishProjectDirty();
   void refreshAssetsIfChanged();
+  void rebuildRulerTicks();
+  [[nodiscard]] static QString rulerLabel(double seconds, double step);
+  [[nodiscard]] std::optional<pulsar::domain::MediaTime> snapToleranceAt(double width) const;
   void applyAssetSelection(const QString& media_id);
   void ingestVideoAsset(const QString& media_id, bool append);
   void refreshWaveformItems();
@@ -233,6 +250,7 @@ private:
   PreviewImageProvider& image_provider_;
   QTimer tick_timer_;
   QTimer waveform_timer_;
+  QTimer error_timer_;  // editorial/UI errors fade after a few seconds
   std::shared_ptr<pulsar::media::ffmpeg::FFmpegPlaybackVisualMailbox> visual_mailbox_;
   pulsar::application::WaveformCacheManager waveform_cache_manager_{1};
   WaveformSourceCreator waveform_source_creator_;

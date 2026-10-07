@@ -3,7 +3,7 @@ import "../theme/Theme.js" as Theme
 
 // Static vector glyph painted once on a Canvas (no icon assets to package).
 // Kinds: transport "home" | "play" | "pause" | "end";
-//        edit "split" | "trash" | "undo" | "redo";
+//        edit "split" | "trash" | "undo" | "redo" | "fit";
 //        media "video" | "audio".
 Item {
     id: glyph
@@ -77,6 +77,12 @@ Item {
                 ctx.lineTo(px(0.36), h * 0.56)
                 ctx.closePath()
                 ctx.fill()
+            } else if (glyph.kind === "fit") {
+                // Two bars with arrows pointing inward: fit everything in view.
+                ctx.fillRect(w * 0.12, h * 0.22, w * 0.08, h * 0.56)
+                ctx.fillRect(w * 0.80, h * 0.22, w * 0.08, h * 0.56)
+                tri(0.26, 0.34, 0.26, 0.66, 0.46, 0.50)
+                tri(0.74, 0.34, 0.74, 0.66, 0.54, 0.50)
             } else if (glyph.kind === "video") {
                 ctx.strokeRect(w * 0.12, h * 0.24, w * 0.76, h * 0.52)
                 tri(0.43, 0.38, 0.43, 0.62, 0.63, 0.50)

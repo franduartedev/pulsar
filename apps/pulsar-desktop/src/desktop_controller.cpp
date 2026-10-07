@@ -230,6 +230,9 @@ DesktopController::DesktopController(PreviewImageProvider& image_provider,
   waveform_timer_.setInterval(100);
   connect(&waveform_timer_, &QTimer::timeout, this, &DesktopController::refreshWaveformItems);
   waveform_timer_.start();
+  error_timer_.setSingleShot(true);
+  error_timer_.setInterval(7000);
+  connect(&error_timer_, &QTimer::timeout, this, &DesktopController::clearError);
   worker_ = std::thread{&DesktopController::workerLoop, this};
 }
 void DesktopController::loadSoundLibrary() {
@@ -328,17 +331,7 @@ void DesktopController::publishTimeline() {
   }
   timeline_duration_text_ = formatTime(duration);
   duration_text_ = formatTime(duration);
-  timeline_ruler_ticks_.clear();
-  constexpr int ruler_tick_count = 7;
-  for (int index = 0; index < ruler_tick_count; ++index) {
-    const double progress = static_cast<double>(index) / static_cast<double>(ruler_tick_count - 1);
-    const auto tick_time = timelineTimeAt(progress, 1.0);
-    if (!tick_time) continue;
-    QVariantMap tick;
-    tick.insert("progress", progress);
-    tick.insert("label", formatTime(*tick_time));
-    timeline_ruler_ticks_.push_back(tick);
-  }
+  rebuildRulerTicks();
   const auto playhead = active_session_->playback_position();
   timeline_playhead_progress_ = playhead >= *timeline_view_start_ &&
                                        playhead <= *timeline_view_start_ + *timeline_view_duration_
@@ -398,6 +391,105 @@ double DesktopController::timelinePixelAt(MediaTime time, double width) const {
   if (!timeline_view_start_.has_value() || !timeline_view_duration_.has_value()) return 0.0;
   return pulsar::desktop::TimelineViewport{*timeline_view_start_, *timeline_view_duration_}
       .pixel_at(time, width);
+}
+
+// Ruler: "nice" steps (1/2/5 x 10^k) so labels land on round times at any zoom,
+// with minor subdivisions. Rebuilt only when the viewport/program changes.
+void DesktopController::rebuildRulerTicks() {
+  timeline_ruler_ticks_.clear();
+  if (!timeline_view_start_ || !timeline_view_duration_ || *timeline_view_duration_ <= MediaTime::zero()) return;
+  const double view_seconds = secondsAsDouble(*timeline_view_duration_);
+  const double start_seconds = secondsAsDouble(*timeline_view_start_);
+  if (!(view_seconds > 0.0)) return;
+  // Aim for ~7 major labels across the view.
+  const double raw = view_seconds / 7.0;
+  const double magnitude = std::pow(10.0, std::floor(std::log10(raw)));
+  const double mantissa = raw / magnitude;
+  const double nice = mantissa <= 1.0 ? 1.0 : (mantissa <= 2.0 ? 2.0 : (mantissa <= 5.0 ? 5.0 : 10.0));
+  const double major_step = std::max(nice * magnitude, 1e-6);
+  const int subdivisions = nice == 2.0 ? 4 : 5;
+  const double minor_step = major_step / subdivisions;
+  const auto first_index = static_cast<long long>(std::ceil(start_seconds / minor_step - 1e-9));
+  const auto last_index = static_cast<long long>(std::floor((start_seconds + view_seconds) / minor_step + 1e-9));
+  if (last_index - first_index > 400) return;  // pathological zoom: draw nothing rather than flood
+  for (long long index = first_index; index <= last_index; ++index) {
+    const bool major = index % subdivisions == 0;
+    const double seconds = static_cast<double>(index) * minor_step;
+    const double progress = (seconds - start_seconds) / view_seconds;
+    if (progress < -1e-9 || progress > 1.0 + 1e-9) continue;
+    QVariantMap tick;
+    tick.insert("progress", std::clamp(progress, 0.0, 1.0));
+    tick.insert("major", major);
+    tick.insert("label", major ? rulerLabel(seconds, major_step) : QString{});
+    timeline_ruler_ticks_.push_back(tick);
+  }
+}
+
+QString DesktopController::rulerLabel(double seconds, double step) {
+  const auto total_ms = static_cast<long long>(std::llround(std::max(0.0, seconds) * 1000.0));
+  const long long hours = total_ms / 3'600'000;
+  const long long minutes = (total_ms / 60'000) % 60;
+  const long long secs = (total_ms / 1000) % 60;
+  const long long millis = total_ms % 1000;
+  QString text = hours > 0 ? QStringLiteral("%1:%2:%3").arg(hours).arg(minutes, 2, 10, QLatin1Char('0')).arg(secs, 2, 10, QLatin1Char('0'))
+                           : QStringLiteral("%1:%2").arg(minutes).arg(secs, 2, 10, QLatin1Char('0'));
+  if (step < 1.0) {  // sub-second steps need decimals: 0.5 -> .5, 0.05 -> .05, 0.001 -> .001
+    const int digits = step >= 0.1 ? 1 : (step >= 0.01 ? 2 : 3);
+    text += QStringLiteral(".") + QStringLiteral("%1").arg(millis, 3, 10, QLatin1Char('0')).left(digits);
+  }
+  return text;
+}
+
+// Snap distance is fixed on screen (pixels), whatever the zoom: converted to
+// time with the current viewport only to decide whether an edge is "near".
+std::optional<MediaTime> DesktopController::snapToleranceAt(double width) const {
+  constexpr double kSnapPixels = 8.0;
+  const auto far = timelineTimeAt(kSnapPixels, width);
+  const auto origin = timelineTimeAt(0.0, width);
+  if (!far || !origin) return std::nullopt;
+  return *far - *origin;
+}
+
+void DesktopController::fitTimeline() { timeline_scroll_ = 0.0; setTimelineZoom(1.0); }
+
+QVariantMap DesktopController::previewTimelineMove(const QString& key, double press, double current, double width) {
+  QVariantMap result{{"offset", 0.0}, {"guide", -1.0}};
+  if (!active_session_ || !timeline_view_start_) return result;
+  bool ok = false;
+  const auto value = key.toULongLong(&ok);
+  const auto press_time = timelineTimeAt(press, width);
+  const auto current_time = timelineTimeAt(current, width);
+  const auto tolerance = snapToleranceAt(width);
+  if (!ok || !value || !press_time || !current_time || !tolerance) return result;
+  try {
+    const pulsar::domain::ClipId clip{value};
+    const auto* original = active_session_->document().timeline().find_clip(clip);
+    if (original == nullptr) return result;
+    const auto resolution = active_session_->resolve_move(clip, *press_time, *current_time, *tolerance);
+    const pulsar::desktop::TimelineViewport viewport{*timeline_view_start_, *timeline_view_duration_};
+    result["offset"] = viewport.pixel_at_unclamped(resolution.new_start, width) -
+                       viewport.pixel_at_unclamped(original->timeline_start(), width);
+    if (resolution.snapped) result["guide"] = viewport.pixel_at_unclamped(resolution.guide, width);
+  } catch (...) {}
+  return result;
+}
+
+QVariantMap DesktopController::previewTimelineTrim(const QString& key, bool, double pixel, double width) {
+  QVariantMap result{{"px", pixel}, {"guide", -1.0}};
+  if (!active_session_ || !timeline_view_start_) return result;
+  bool ok = false;
+  const auto value = key.toULongLong(&ok);
+  const auto target = timelineTimeAt(pixel, width);
+  const auto tolerance = snapToleranceAt(width);
+  if (!ok || !value || !target || !tolerance) return result;
+  try {
+    const auto resolution = active_session_->resolve_trim_edge(pulsar::domain::ClipId{value}, *target, *tolerance);
+    if (resolution.snapped) {
+      const pulsar::desktop::TimelineViewport viewport{*timeline_view_start_, *timeline_view_duration_};
+      result["px"] = result["guide"] = viewport.pixel_at_unclamped(resolution.time, width);
+    }
+  } catch (...) {}
+  return result;
 }
 
 void DesktopController::setTimelineZoom(double zoom) {
@@ -827,6 +919,37 @@ void DesktopController::ingestVideoAsset(const QString& media_id, bool append) {
   publishTimeline();
 }
 
+void DesktopController::separateSelectedAudio() {
+  if (!active_session_ || !active_session_->selected_clip()) {
+    setError(QStringLiteral("Seleccioná un clip de video."));
+    return;
+  }
+  try {
+    (void)active_session_->separate_audio(*active_session_->selected_clip());
+  } catch (const pulsar::desktop::SeparateAudioException& error) {
+    switch (error.code()) {
+      case pulsar::desktop::SeparateAudioError::AlreadySilenced:
+        setError(QStringLiteral("El audio de este clip ya está silenciado o separado.")); break;
+      case pulsar::desktop::SeparateAudioError::NoEmbeddedAudio:
+        setError(QStringLiteral("Este clip no tiene audio.")); break;
+      case pulsar::desktop::SeparateAudioError::AudioShorterThanClip:
+        setError(QStringLiteral("El audio del medio es más corto que el clip; no se puede separar.")); break;
+      case pulsar::desktop::SeparateAudioError::UnavailableAsset:
+        setError(QStringLiteral("El medio no está disponible.")); break;
+      case pulsar::desktop::SeparateAudioError::NotAVideoTrackClip:
+      case pulsar::desktop::SeparateAudioError::UnknownClip:
+        setError(QStringLiteral("Solo se puede separar el audio de un clip de video.")); break;
+    }
+    return;
+  } catch (const std::exception&) {
+    setError(QStringLiteral("No se pudo separar el audio."));
+    return;
+  }
+  clearError();
+  clearProgram("loading");
+  publishTimeline();
+}
+
 void DesktopController::selectTimelineClip(const QString& key) { if (!active_session_) return; if (key.isEmpty()) active_session_->select_clip(std::nullopt); else { bool ok=false; auto value=key.toULongLong(&ok); if (ok && value) active_session_->select_clip(pulsar::domain::ClipId{value}); } publishTimeline(); }
 double DesktopController::selectedClipGainDb() const {
   if (!active_session_ || !active_session_->selected_clip()) return 0.0;
@@ -839,9 +962,9 @@ bool DesktopController::selectedClipMuted() const {
   return clip != nullptr && clip->muted();
 }
 void DesktopController::seekTimelineAt(double pixel, double width) { if (!active_session_) return; const auto target=timelineTimeAt(pixel,width); if (!target) return; active_session_->seek(*target); clearProgram(has_video_media_ ? "loading" : "empty"); updatePositionProperties(); }
-void DesktopController::moveTimelineClip(const QString& key,double press,double current,double width) { if (!active_session_) return; bool ok=false; auto value=key.toULongLong(&ok);if(!ok||!value)return;const auto press_time=timelineTimeAt(press,width);const auto current_time=timelineTimeAt(current,width);if(!press_time||!current_time)return;try{active_session_->move_clip(pulsar::domain::ClipId{value},*press_time,*current_time);clearError();clearProgram(has_video_media_ ? "loading" : "empty");publishTimeline();}catch(...){setError("El movimiento no es válido.");publishTimeline();} }
-void DesktopController::trimTimelineClipStart(const QString& key,double pixel,double width) { if(!active_session_)return;bool ok=false;auto value=key.toULongLong(&ok);if(!ok||!value)return;const auto target=timelineTimeAt(pixel,width);if(!target)return;try{active_session_->trim_clip_start(pulsar::domain::ClipId{value},*target);clearError();clearProgram(has_video_media_ ? "loading" : "empty");publishTimeline();}catch(...){setError("El recorte no es válido.");publishTimeline();} }
-void DesktopController::trimTimelineClipEnd(const QString& key,double pixel,double width) { if(!active_session_)return;bool ok=false;auto value=key.toULongLong(&ok);if(!ok||!value)return;const auto target=timelineTimeAt(pixel,width);if(!target)return;try{active_session_->trim_clip_end(pulsar::domain::ClipId{value},*target);clearError();clearProgram(has_video_media_ ? "loading" : "empty");publishTimeline();}catch(...){setError("El recorte no es válido.");publishTimeline();} }
+void DesktopController::moveTimelineClip(const QString& key,double press,double current,double width) { if (!active_session_) return; bool ok=false; auto value=key.toULongLong(&ok);if(!ok||!value)return;const auto press_time=timelineTimeAt(press,width);const auto current_time=timelineTimeAt(current,width);if(!press_time||!current_time)return;try{active_session_->move_clip(pulsar::domain::ClipId{value},*press_time,*current_time,snapToleranceAt(width).value_or(MediaTime::zero()));clearError();clearProgram(has_video_media_ ? "loading" : "empty");publishTimeline();}catch(...){setError("El movimiento no es válido.");publishTimeline();} }
+void DesktopController::trimTimelineClipStart(const QString& key,double pixel,double width) { if(!active_session_)return;bool ok=false;auto value=key.toULongLong(&ok);if(!ok||!value)return;const auto target=timelineTimeAt(pixel,width);if(!target)return;try{active_session_->trim_clip_start(pulsar::domain::ClipId{value},*target,snapToleranceAt(width).value_or(MediaTime::zero()));clearError();clearProgram(has_video_media_ ? "loading" : "empty");publishTimeline();}catch(...){setError("El recorte no es válido.");publishTimeline();} }
+void DesktopController::trimTimelineClipEnd(const QString& key,double pixel,double width) { if(!active_session_)return;bool ok=false;auto value=key.toULongLong(&ok);if(!ok||!value)return;const auto target=timelineTimeAt(pixel,width);if(!target)return;try{active_session_->trim_clip_end(pulsar::domain::ClipId{value},*target,snapToleranceAt(width).value_or(MediaTime::zero()));clearError();clearProgram(has_video_media_ ? "loading" : "empty");publishTimeline();}catch(...){setError("El recorte no es válido.");publishTimeline();} }
 void DesktopController::splitSelectedClip(){if(!active_session_)return;try{(void)active_session_->split_selected_at_playhead();clearError();clearProgram(has_video_media_ ? "loading" : "empty");publishTimeline();}catch(...){setError("El punto de corte debe estar dentro del clip.");}}
 void DesktopController::deleteSelectedClip(){if(!active_session_)return;try{active_session_->delete_selected();clearError();clearProgram(has_video_media_ ? "loading" : "empty");publishTimeline();}catch(...){} }
 void DesktopController::insertBuiltinSound(const QString& sound_id) {
@@ -1292,7 +1415,7 @@ QString DesktopController::performanceSnapshot() const {
   }
   return lines.join(QLatin1Char('\n'));
 }
-void DesktopController::setBusy(bool value){if(busy_==value)return;busy_=value;emit busyChanged();}void DesktopController::setStatus(QString value){if(status_==value)return;status_=std::move(value);emit statusChanged();}void DesktopController::setTechnicalStatus(QString value){if(technical_status_==value)return;technical_status_=std::move(value);emit technicalStatusChanged();}void DesktopController::setPreviewLate(bool value){if(preview_late_==value)return;preview_late_=value;emit technicalStatusChanged();}void DesktopController::setExportStatus(QString value){if(export_status_==value)return;export_status_=std::move(value);emit exportStatusChanged();}void DesktopController::setError(QString value){error_message_=std::move(value);emit errorChanged();}void DesktopController::clearError(){if(error_message_.isEmpty())return;error_message_.clear();emit errorChanged();}
+void DesktopController::setBusy(bool value){if(busy_==value)return;busy_=value;emit busyChanged();}void DesktopController::setStatus(QString value){if(status_==value)return;status_=std::move(value);emit statusChanged();}void DesktopController::setTechnicalStatus(QString value){if(technical_status_==value)return;technical_status_=std::move(value);emit technicalStatusChanged();}void DesktopController::setPreviewLate(bool value){if(preview_late_==value)return;preview_late_=value;emit technicalStatusChanged();}void DesktopController::setExportStatus(QString value){if(export_status_==value)return;export_status_=std::move(value);emit exportStatusChanged();}void DesktopController::setError(QString value){error_message_=std::move(value);emit errorChanged();if(!error_message_.isEmpty())error_timer_.start();else error_timer_.stop();}void DesktopController::clearError(){if(error_message_.isEmpty())return;error_message_.clear();emit errorChanged();}
 QString DesktopController::formatTime(MediaTime time){auto sec=time.seconds();auto whole=sec.numerator()/sec.denominator();auto rem=sec.numerator()%sec.denominator();auto ms=static_cast<std::int64_t>(std::llround(static_cast<long double>(rem)*1000.0L/static_cast<long double>(sec.denominator())));if(ms>=1000){++whole;ms=0;}return QString("%1:%2:%3.%4").arg(whole/3600,2,10,QChar('0')).arg((whole/60)%60,2,10,QChar('0')).arg(whole%60,2,10,QChar('0')).arg(ms,3,10,QChar('0'));}
 MediaTime DesktopController::mediaTimeFromSeconds(double seconds){if(!std::isfinite(seconds)||seconds<=0)return MediaTime::zero();const auto q=std::llround(seconds*1'000'000.0);return MediaTime{q,Rational{1,1'000'000}};}
 double DesktopController::secondsAsDouble(MediaTime time){const auto sec=time.seconds();return static_cast<double>(sec.numerator())/static_cast<double>(sec.denominator());}

@@ -191,7 +191,7 @@ QSGNode* WaveformQuickItem::updatePaintNode(QSGNode* old_node, UpdatePaintNodeDa
   // per-column extrema. Muted drops saturation instead of only fading.
   QColor edge_color = selected_ ? selected_color_ : normal_color_;
   QColor fill_color = edge_color;
-  fill_color.setAlphaF(selected_ ? 0.82 : 0.66);
+  fill_color.setAlphaF(selected_ ? 0.88 : 0.74);
   QColor axis_color = baseline_color_;
   axis_color.setAlphaF(axis_color.alphaF() * 0.5);
   if (muted_) {
