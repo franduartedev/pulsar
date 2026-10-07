@@ -496,8 +496,37 @@ void export_reference_project_and_inspect() {
   std::filesystem::remove(project_path);
   std::filesystem::remove_all(root);
 }
+// Full ExportJob (H.264/AAC/MP4) over a 44.1 kHz source whose clip starts at
+// 0.127 s, off the physical sample grid. Regression for RenderFailed with
+// "audio sample request escaped source range".
+void export_unaligned_source_range_succeeds() {
+  const auto root = std::filesystem::temp_directory_path() / "pulsar-e7-unaligned-audio";
+  std::filesystem::create_directories(root);
+  const auto destination = root / "unaligned.mp4";
+  std::filesystem::remove(destination);
+  const auto fixture =
+      std::filesystem::path{PULSAR_SOURCE_DIR} / "tests/fixtures/audio_decode_fixture.mp4";
+
+  media::ffmpeg::FFmpegMediaProbe probe;
+  application::ProjectDocument document;
+  application::CommandProcessor processor{document};
+  const auto media = processor.import_asset(fixture, probe);
+  (void)processor.add_clip(
+      media, domain::TimeRange{domain::MediaTime{127, domain::Rational{1, 1000}},
+                               domain::MediaTime{377, domain::Rational{1, 1000}}},
+      domain::MediaTime::zero());
+  export_snapshot(document.snapshot(), destination);
+
+  assert(std::filesystem::exists(destination));
+  assert(codec_profile(destination, AVMEDIA_TYPE_AUDIO) == FF_PROFILE_AAC_LOW);
+  const auto output = probe.probe(destination);
+  assert(!output.audio_streams.empty() && output.audio_streams.front().sample_rate == 48'000);
+  assert(!output.video_streams.empty());
+  std::filesystem::remove_all(root);
+}
 } // namespace
 
 int main() {
   export_reference_project_and_inspect();
+  export_unaligned_source_range_succeeds();
 }

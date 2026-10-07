@@ -110,12 +110,16 @@ private:
   [[nodiscard]] ContributorState& state_for(const AudioContributor& contributor);
   void load_until(ContributorState& state, domain::MediaTime relative_time);
   [[nodiscard]] float sample_at_channel(ContributorState& state,
-                                        domain::MediaTime relative_time, int channel,
-                                        bool allow_outside_source_range);
+                                        domain::MediaTime relative_time, int channel);
   [[nodiscard]] std::array<float, 2> contributor_sample(ContributorState& state,
                                                          domain::MediaTime timeline_time);
   [[nodiscard]] static float channel_sample(const SourceBlock& block, std::int64_t index,
                                             int channel);
+  [[nodiscard]] static std::string render_context(const ContributorState& state,
+                                                   domain::MediaTime timeline_time,
+                                                   domain::MediaTime source_time,
+                                                   domain::MediaTime source_grid_time,
+                                                   domain::MediaTime next_grid_time);
   void update_buffer_metrics() noexcept;
   void prune_inactive_states(const std::vector<AudioContributor>& active);
 

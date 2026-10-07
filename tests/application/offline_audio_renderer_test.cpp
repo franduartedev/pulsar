@@ -11,6 +11,7 @@
 #include <filesystem>
 #include <memory>
 #include <optional>
+#include <string>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -184,6 +185,23 @@ void source_ends_early_as_error() {
   assert(failed);
 }
 
+void errors_carry_render_context() {
+  auto factory = Factory{constant_source(48'000, 1, 1.0F, 100)};
+  const auto plan = exporting::ExportPlan::build(snapshot_with_clip());
+  exporting::OfflineAudioRenderer renderer{plan, factory, 4096};
+  std::string message;
+  try {
+    while (renderer.render_next_block()) {}
+  } catch (const exporting::OfflineAudioRenderError& error) {
+    message = error.what();
+  }
+  for (const char* key : {"clip_id=", "media_id=", "stream_index=", "sample_rate=",
+                          "timeline_time=", "source_time=", "source_grid_time=",
+                          "next_grid_time=", "source_range="}) {
+    assert(message.find(key) != std::string::npos);
+  }
+}
+
 void source_timestamp_gaps_and_overlaps_are_explicit() {
   const auto snapshot = snapshot_with_clip();
   auto first_samples = std::vector<float>(24'000, 0.25F);
@@ -240,6 +258,108 @@ void long_renders_keep_bounded_source_state() {
   }
 }
 
+// Non-aligned source range: a 44.1 kHz source whose clip starts at 2.127 s,
+// which is not on the physical sample grid (2.127 * 44100 = 93800.7).
+// The interpolation predecessor (floor) lies before source_range.start and the
+// successor can lie past source_range.end; neither may escape the clip.
+application::ProjectSnapshot snapshot_with_source_range(domain::MediaTime source_start,
+                                                         domain::MediaTime duration) {
+  application::ProjectDocument document;
+  application::CommandProcessor processor{document};
+  const auto media = processor.import_asset("logical-audio", Probe{domain::MediaTime{10, {1, 1}}});
+  (void)processor.add_clip(media, domain::TimeRange{source_start, source_start + duration},
+                           domain::MediaTime::zero());
+  return document.snapshot();
+}
+
+// Ramp source: sample i has value i / total, so any clamp is observable.
+SourceSpec ramp_source(int rate, std::size_t frames, std::size_t chunk = 0) {
+  if (chunk == 0) chunk = frames;
+  std::vector<exporting::OfflineAudioSourceBlock> blocks;
+  for (std::size_t first = 0; first < frames; first += chunk) {
+    const auto count = std::min(chunk, frames - first);
+    std::vector<float> samples(count);
+    for (std::size_t i = 0; i < count; ++i) {
+      samples[i] = static_cast<float>(first + i) / static_cast<float>(frames);
+    }
+    blocks.push_back({rate, 1, count, std::move(samples),
+                      domain::MediaTime{static_cast<std::int64_t>(first), {1, rate}}});
+  }
+  return SourceSpec{rate, 1, domain::MediaTime::zero(), std::move(blocks)};
+}
+
+void unaligned_source_start_is_clamped_not_an_error() {
+  const domain::MediaTime start{2127, {1, 1000}};
+  const domain::MediaTime duration{1, {1, 1}};
+  const auto snapshot = snapshot_with_source_range(start, duration);
+  auto factory = Factory{ramp_source(44'100, 441'000)};
+  exporting::OfflineAudioRenderMetrics metrics;
+  const auto pcm = render_all(snapshot, 1024, factory, &metrics);
+  assert(pcm.size() == 96'000);
+  for (const auto sample : pcm) assert(std::isfinite(sample));
+  // First output sample sits at 2.127 s, i.e. source index 93800.7. The
+  // predecessor (93800) is before the clip, so the clamp yields sample 93801.
+  const float expected = 93'801.0F / 441'000.0F;
+  assert(std::abs(pcm[0] - expected) < 1.0e-6F);
+  assert(std::abs(pcm[1] - expected) < 1.0e-6F);
+  assert(metrics.inserted_source_gap_silence == 0);
+  assert(metrics.source_opens == 1);
+}
+
+void unaligned_source_end_is_clamped_not_an_error() {
+  // Clip end 3.127 s -> index 137906.7: the successor tap (137907) lies at/after end.
+  const domain::MediaTime start{2127, {1, 1000}};
+  const domain::MediaTime duration{1, {1, 1}};
+  const auto snapshot = snapshot_with_source_range(start, duration);
+  auto factory = Factory{ramp_source(44'100, 441'000)};
+  const auto pcm = render_all(snapshot, 4096, factory);
+  const float last = pcm[pcm.size() - 2];
+  assert(std::isfinite(last));
+  // Never interpolates toward silence: the tail stays at the last in-clip level.
+  assert(last > 137'000.0F / 441'000.0F);
+  assert(last <= 137'907.0F / 441'000.0F + 1.0e-6F);
+}
+
+void unaligned_range_is_block_size_invariant() {
+  const domain::MediaTime start{2127, {1, 1000}};
+  const auto snapshot = snapshot_with_source_range(start, domain::MediaTime{1, {1, 1}});
+  auto a = Factory{ramp_source(44'100, 441'000, 4096)};
+  auto b = Factory{ramp_source(44'100, 441'000, 1000)};
+  auto c = Factory{ramp_source(44'100, 441'000)};
+  const auto first = render_all(snapshot, 257, a);
+  const auto second = render_all(snapshot, 4096, b);
+  const auto third = render_all(snapshot, 1, c);
+  assert(first == second);
+  assert(first == third);
+}
+
+void aligned_48k_range_is_unchanged_by_boundary_clamp() {
+  const domain::MediaTime start{2, {1, 1}};
+  const auto snapshot = snapshot_with_source_range(start, domain::MediaTime{1, {1, 1}});
+  auto factory = Factory{ramp_source(48'000, 480'000)};
+  const auto pcm = render_all(snapshot, 1024, factory);
+  assert(pcm.size() == 96'000);
+  assert(pcm[0] == 96'000.0F / 480'000.0F);
+  assert(std::abs(pcm[2 * 47'999] - 143'999.0F / 480'000.0F) < 1.0e-6F);
+}
+
+void unaligned_source_range_with_blocks_not_covering_start_still_fails_explicitly() {
+  // The clamp only forgives the interpolation neighbourhood; a source that
+  // ends before the promised range is still a hard error.
+  const domain::MediaTime start{2127, {1, 1000}};
+  const auto snapshot = snapshot_with_source_range(start, domain::MediaTime{1, {1, 1}});
+  auto factory = Factory{ramp_source(44'100, 100'000)};
+  const auto plan = exporting::ExportPlan::build(snapshot);
+  exporting::OfflineAudioRenderer renderer{plan, factory, 4096};
+  bool failed = false;
+  try {
+    while (renderer.render_next_block()) {}
+  } catch (const exporting::OfflineAudioRenderError& error) {
+    failed = error.code() == exporting::OfflineAudioRenderErrorCode::SourceEndedEarly;
+  }
+  assert(failed);
+}
+
 } // namespace
 
 int main() {
@@ -247,7 +367,13 @@ int main() {
   mono_is_rematrixed_and_mute_is_silence();
   resampling_is_rational_and_source_origin_is_normalized();
   source_ends_early_as_error();
+  errors_carry_render_context();
   source_timestamp_gaps_and_overlaps_are_explicit();
   missing_timestamp_is_not_silence();
   long_renders_keep_bounded_source_state();
+  unaligned_source_start_is_clamped_not_an_error();
+  unaligned_source_end_is_clamped_not_an_error();
+  unaligned_range_is_block_size_invariant();
+  aligned_48k_range_is_unchanged_by_boundary_clamp();
+  unaligned_source_range_with_blocks_not_covering_start_still_fails_explicitly();
 }

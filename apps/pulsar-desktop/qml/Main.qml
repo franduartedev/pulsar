@@ -68,7 +68,6 @@ Window {
         fileMode: FileDialog.SaveFile
         nameFilters: ["Vídeo MP4 (*.mp4)"]
         defaultSuffix: "mp4"
-        currentFile: "pulsar-export.mp4"
         onAccepted: controller.exportProject(decodeURIComponent(selectedFile.toString().replace(/^file:\/\//, "")))
     }
 

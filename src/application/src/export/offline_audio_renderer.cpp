@@ -5,6 +5,8 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <sstream>
+#include <string>
 #include <type_traits>
 #include <utility>
 
@@ -38,6 +40,15 @@ namespace {
          static_cast<long double>(seconds.denominator()) * static_cast<long double>(sample_rate);
 }
 
+[[nodiscard]] std::string describe_time(domain::MediaTime time) {
+  const auto seconds = time.seconds();
+  std::ostringstream out;
+  out << seconds.numerator() << '/' << seconds.denominator() << "s("
+      << static_cast<double>(seconds.numerator()) / static_cast<double>(seconds.denominator())
+      << ')';
+  return out.str();
+}
+
 } // namespace
 
 struct OfflineAudioRenderer::SourceBlock {
@@ -56,6 +67,11 @@ struct OfflineAudioRenderer::ContributorState {
   bool eof{false};
   std::optional<domain::MediaTime> previous_end;
   ClipGain gain;
+  // Physical sample indices (stream-origin-relative) that lie inside the
+  // half-open editorial source range: first = ceil(start), last = ceil(end) - 1.
+  // Interpolation taps are clamped to [first_valid_index, last_valid_index].
+  std::int64_t first_valid_index{0};
+  std::int64_t last_valid_index{-1};
 };
 
 OfflineAudioRenderer::OfflineAudioRenderer(const ExportPlan& plan,
@@ -101,6 +117,13 @@ OfflineAudioRenderer::ContributorState& OfflineAudioRenderer::state_for(
   auto state = std::make_unique<ContributorState>(ContributorState{
       contributor, std::move(source), origin, {}, false, std::nullopt,
       ClipGain::from_decibels(contributor.gain_db, contributor.muted)});
+  {
+    const domain::FrameRate source_grid{state->source->sample_rate(), 1};
+    state->first_valid_index = domain::frame_at(contributor.source_range.start(), source_grid,
+                                                domain::RoundingMode::Ceil).value();
+    state->last_valid_index = domain::frame_at(contributor.source_range.end(), source_grid,
+                                               domain::RoundingMode::Ceil).value() - 1;
+  }
   const auto raw_source_start = contributor_source_position(
       contributor, contributor.timeline_range.start(), state->stream_origin);
   try {
@@ -206,11 +229,9 @@ float OfflineAudioRenderer::channel_sample(const SourceBlock& block, std::int64_
 }
 
 float OfflineAudioRenderer::sample_at_channel(ContributorState& state,
-                                              domain::MediaTime relative_time, int channel,
-                                              bool allow_outside_source_range) {
+                                              domain::MediaTime relative_time, int channel) {
   if (relative_time < state.contributor.source_range.start() ||
       relative_time >= state.contributor.source_range.end()) {
-    if (allow_outside_source_range) return 0.0F;
     throw OfflineAudioRenderError{OfflineAudioRenderErrorCode::InternalInvariant,
                                   "audio sample request escaped source range"};
   }
@@ -244,16 +265,60 @@ std::array<float, 2> OfflineAudioRenderer::contributor_sample(
   const auto fraction = interpolation_fraction(source_time, source_grid_time, source_rate);
   if (state.gain.muted) return {0.0F, 0.0F};
   const auto next_grid_time = source_grid_time + source_sample_time(1, source_rate);
+  // Boundary-safe interpolation. The editorial target is inside the source
+  // range, but its physical neighbours (floor / floor + 1) need not be: at the
+  // start the predecessor can precede source_range.start, at the end the
+  // successor can reach source_range.end. Clamp each tap to the nearest
+  // physical sample that belongs to the clip. No audio outside the clip is
+  // read and no artificial silence is introduced.
+  if (state.first_valid_index > state.last_valid_index) {
+    throw OfflineAudioRenderError{
+        OfflineAudioRenderErrorCode::InternalInvariant,
+        "audio source range contains no physical sample" + render_context(
+            state, timeline_time, source_time, source_grid_time, next_grid_time)};
+  }
+  const auto first_tap = std::clamp(source_index, state.first_valid_index, state.last_valid_index);
+  const auto second_tap = std::clamp(source_index + 1, state.first_valid_index,
+                                     state.last_valid_index);
+  const auto first_tap_time = source_sample_time(first_tap, source_rate);
+  const auto second_tap_time = source_sample_time(second_tap, source_rate);
   std::array<float, 2> result{};
-  for (int channel = 0; channel < 2; ++channel) {
-    const auto first = sample_at_channel(state, source_grid_time, channel, false);
-    const auto second = sample_at_channel(
-        state, next_grid_time, channel, next_grid_time >= state.contributor.source_range.end());
-    result[static_cast<std::size_t>(channel)] = static_cast<float>(
-        (static_cast<long double>(first) * (1.0L - fraction) +
-         static_cast<long double>(second) * fraction) * state.gain.linear);
+  try {
+    for (int channel = 0; channel < 2; ++channel) {
+      const auto first = sample_at_channel(state, first_tap_time, channel);
+      const auto second = sample_at_channel(state, second_tap_time, channel);
+      result[static_cast<std::size_t>(channel)] = static_cast<float>(
+          (static_cast<long double>(first) * (1.0L - fraction) +
+           static_cast<long double>(second) * fraction) * state.gain.linear);
+    }
+  } catch (const OfflineAudioRenderError& error) {
+    // Context is built only on the failure path; nothing is formatted per sample.
+    throw OfflineAudioRenderError{
+        error.code(), std::string{error.what()} + render_context(
+                          state, timeline_time, source_time, source_grid_time, next_grid_time)};
   }
   return result;
+}
+
+std::string OfflineAudioRenderer::render_context(const ContributorState& state,
+                                                 domain::MediaTime timeline_time,
+                                                 domain::MediaTime source_time,
+                                                 domain::MediaTime source_grid_time,
+                                                 domain::MediaTime next_grid_time) {
+  std::ostringstream out;
+  out << " [clip_id=" << state.contributor.clip_id.value()
+      << " media_id=" << state.contributor.media_id.value()
+      << " stream_index=" << state.contributor.stream_index
+      << " sample_rate=" << state.source->sample_rate()
+      << " timeline_time=" << describe_time(timeline_time)
+      << " source_time=" << describe_time(source_time)
+      << " source_grid_time=" << describe_time(source_grid_time)
+      << " next_grid_time=" << describe_time(next_grid_time)
+      << " source_range=[" << describe_time(state.contributor.source_range.start()) << ", "
+      << describe_time(state.contributor.source_range.end()) << ")"
+      << " valid_sample_indices=[" << state.first_valid_index << ", " << state.last_valid_index
+      << "]]";
+  return out.str();
 }
 
 void OfflineAudioRenderer::update_buffer_metrics() noexcept {

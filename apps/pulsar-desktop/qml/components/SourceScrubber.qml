@@ -64,8 +64,8 @@ Panel {
             anchors.fill: parent
             hoverEnabled: true
             enabled: track.interactive
-            onPressed: seek(mouse.x)
-            onPositionChanged: if (pressed) seek(mouse.x)
+            onPressed: function(mouse) { seek(mouse.x) }
+            onPositionChanged: function(mouse) { if (pressed) seek(mouse.x) }
             function seek(px) {
                 controller.seekNormalized(Math.max(0, Math.min(1, px / Math.max(1, track.width))))
             }

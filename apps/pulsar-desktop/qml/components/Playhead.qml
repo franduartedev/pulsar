@@ -15,9 +15,9 @@ Item {
         id: hit
         anchors.fill: parent
         drag.target: null
-        onPressed: { head.dragging = true; seekAt(mouse) }
+        onPressed: function(mouse) { head.dragging = true; seekAt(mouse) }
         onReleased: head.dragging = false
-        onPositionChanged: if (pressed) seekAt(mouse)
+        onPositionChanged: function(mouse) { if (pressed) seekAt(mouse) }
         function seekAt(point) {
             var p = hit.mapToItem(head.parent, point.x, point.y)
             controller.seekTimelineAt(p.x - head.timelineOffset, head.parent.width - head.timelineOffset)
