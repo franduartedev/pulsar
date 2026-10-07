@@ -18,6 +18,8 @@ qt_add_executable(pulsar_desktop
   src/editor_session.hpp
   src/preview_image_provider.cpp
   src/preview_image_provider.hpp
+  src/thumbnail_service.cpp
+  src/thumbnail_service.hpp
 )
 
 qt_add_resources(pulsar_desktop pulsar_desktop_qml
@@ -120,6 +122,8 @@ add_executable(pulsar_desktop_export_tests
   src/editor_session.hpp
   src/preview_image_provider.cpp
   src/preview_image_provider.hpp
+  src/thumbnail_service.cpp
+  src/thumbnail_service.hpp
   src/builtin_sound_catalog.hpp
 )
 set_target_properties(pulsar_desktop_export_tests PROPERTIES AUTOMOC ON)
@@ -164,6 +168,8 @@ add_executable(pulsar_desktop_ingest_tests
   src/editor_session.hpp
   src/preview_image_provider.cpp
   src/preview_image_provider.hpp
+  src/thumbnail_service.cpp
+  src/thumbnail_service.hpp
   src/builtin_sound_catalog.hpp
 )
 set_target_properties(pulsar_desktop_ingest_tests PROPERTIES AUTOMOC ON)
@@ -214,6 +220,8 @@ foreach(pair "safety|pulsar.desktop.safety" "shutdown|pulsar.desktop.shutdown")
     src/editor_session.hpp
     src/preview_image_provider.cpp
     src/preview_image_provider.hpp
+    src/thumbnail_service.cpp
+    src/thumbnail_service.hpp
     src/builtin_sound_catalog.hpp
   )
   set_target_properties(${target} PROPERTIES AUTOMOC ON)

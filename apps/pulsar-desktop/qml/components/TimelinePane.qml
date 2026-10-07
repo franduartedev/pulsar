@@ -195,6 +195,7 @@ Panel {
                             gainDb: model.gainDb
                             audioClip: model.audioTrack
                             hasAudio: model.hasAudio
+                            thumbSource: model.thumbSource
                             clipKey: model.clipKey
                             onActivated: controller.selectTimelineClip(clipKey)
                             onMuteToggled: { controller.selectTimelineClip(clipKey); controller.toggleSelectedClipMute() }

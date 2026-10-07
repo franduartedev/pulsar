@@ -255,6 +255,13 @@ DesktopController::DesktopController(PreviewImageProvider& image_provider,
   waveform_timer_.setInterval(100);
   connect(&waveform_timer_, &QTimer::timeout, this, &DesktopController::refreshWaveformItems);
   waveform_timer_.start();
+  thumb_refresh_timer_.setSingleShot(true);
+  thumb_refresh_timer_.setInterval(60);   // batches bursts of finished thumbnails into one model refresh
+  connect(&thumb_refresh_timer_, &QTimer::timeout, this, [this] {
+    if (!active_session_ || !timeline_view_start_ || !timeline_view_duration_) return;
+    timeline_model_.refresh(*active_session_, *timeline_view_start_, *timeline_view_duration_, thumbnailLookup());
+  });
+  connect(&thumb_service_, &ThumbnailService::finished, this, &DesktopController::onThumbnailFinished);
   error_timer_.setSingleShot(true);
   error_timer_.setInterval(7000);
   connect(&error_timer_, &QTimer::timeout, this, &DesktopController::clearError);
@@ -291,6 +298,8 @@ void DesktopController::loadSoundLibrary() {
   emit soundLibraryChanged();
 }
 DesktopController::~DesktopController() {
+  thumb_refresh_timer_.stop();
+  thumb_service_.shutdown();   // cancel + join before anything else goes away
   tick_timer_.stop();
   waveform_timer_.stop();
   export_cancel_requested_.store(true, std::memory_order_release);
@@ -327,12 +336,61 @@ void DesktopController::closeMedia() {
   waveform_clip_identities_.clear();
   waveform_requests_.clear();
   waveform_item_stamps_.clear();
-  ++editor_session_epoch_; selected_asset_id_.clear();
+  ++editor_session_epoch_; selected_asset_id_.clear(); resetThumbnails();
   visual_mailbox_->clear();
   has_media_ = false; media_name_.clear(); metadata_.clear(); duration_text_ = "--:--:--.---";
   progress_ = 0.0; position_text_ = "00:00:00.000";
   clearProgram("empty"); publishTimeline();
   setBusy(false); setStatus("Vacío"); emit mediaChanged(); emit playbackChanged(); emit positionChanged();
+}
+
+// ---- Thumbnails ------------------------------------------------------------
+// Identity: session epoch + persisted media id + representative source time. The path is only
+// looked up on a miss, so a refresh never copies assets for clips that already have a picture.
+std::string DesktopController::thumbnailKey(const pulsar::domain::Clip& clip) const {
+  const auto at = clip.source_range().start().seconds();
+  return std::to_string(editor_session_epoch_) + "-" + std::to_string(clip.media_id().value()) + "-" +
+         std::to_string(at.numerator()) + "-" + std::to_string(at.denominator());
+}
+
+TimelineClipListModel::ThumbnailLookup DesktopController::thumbnailLookup() const {
+  return [this](const pulsar::domain::Clip& clip) {
+    const auto key = thumbnailKey(clip);
+    return thumb_cache_->contains(key) ? QString::fromStdString(key) : QString{};
+  };
+}
+
+void DesktopController::requestThumbnails() {
+  if (!active_session_) return;
+  const auto* video_track = active_session_->document().timeline().find_track(active_session_->document().video_track_id());
+  if (video_track == nullptr) return;
+  for (const auto& clip : video_track->clips()) {
+    const auto key = thumbnailKey(clip);
+    if (thumb_cache_->contains(key) || thumb_pending_.count(key) != 0 || thumb_failed_.count(key) != 0) continue;
+    const auto asset = active_session_->document().find_asset(clip.media_id());
+    if (!asset.has_value() || !asset->has_video() ||
+        asset->availability() != pulsar::application::MediaAvailability::Available) {
+      thumb_failed_.insert(key);   // offline / no picture: the clip simply stays plain
+      continue;
+    }
+    ThumbnailRequest request{key, desktop_runtime_media_path(active_project_file_, asset->source_locator()),
+                             asset->video_stream_index(), clip.source_range().start()};
+    if (thumb_service_.request(std::move(request))) thumb_pending_.insert(key);
+  }
+}
+
+void DesktopController::resetThumbnails() {
+  thumb_service_.cancelPending();
+  thumb_pending_.clear();
+  thumb_failed_.clear();
+  thumb_cache_->clear();
+}
+
+void DesktopController::onThumbnailFinished(const QString& key, bool ok) {
+  const auto id = key.toStdString();
+  thumb_pending_.erase(id);
+  if (!ok) thumb_failed_.insert(id);
+  if (!thumb_refresh_timer_.isActive()) thumb_refresh_timer_.start();
 }
 
 void DesktopController::publishTimeline() {
@@ -342,7 +400,8 @@ void DesktopController::publishTimeline() {
   refreshAssetsIfChanged();
   recomputeTimelineViewport();
   selected_clip_key_ = active_session_->selected_clip() ? QString::number(active_session_->selected_clip()->value()) : QString{};
-  timeline_model_.refresh(*active_session_, *timeline_view_start_, *timeline_view_duration_);
+  timeline_model_.refresh(*active_session_, *timeline_view_start_, *timeline_view_duration_, thumbnailLookup());
+  requestThumbnails();
   timeline_tracks_.clear();
   for (const auto& track : active_session_->track_views()) {
     QVariantMap value;
@@ -1087,6 +1146,57 @@ void DesktopController::toggleSelectedClipMute() {
     setError(QStringLiteral("No se pudo aplicar el cambio."));
   }
 }
+void DesktopController::rippleDeleteSelectedClip() {
+  if (!active_session_ || !active_session_->selected_clip()) return;
+  try {
+    active_session_->ripple_delete_selected();
+    clearError();
+    clearProgram(has_video_media_ ? "loading" : "empty");
+    publishTimeline();
+  } catch (const pulsar::desktop::RippleDeleteException& error) {
+    if (error.code() == pulsar::desktop::RippleDeleteError::WouldOverlap)
+      setError(QStringLiteral("No se puede cerrar el hueco: un clip posterior se solaparía con otro."));
+    publishTimeline();
+  } catch (const std::exception& error) {
+    logCause("ripple delete failed", error);
+    setError(QStringLiteral("No se pudo aplicar el cambio."));
+    publishTimeline();
+  }
+}
+
+void DesktopController::trimSelectedToPlayhead(bool trim_start) {
+  if (!active_session_) return;
+  try {
+    if (!active_session_->trim_selected_to_playhead(trim_start)) return;  // not applicable: nothing to say
+    clearError();
+    clearProgram(has_video_media_ ? "loading" : "empty");
+    publishTimeline();
+  } catch (const std::exception& error) {
+    logCause("trim to playhead failed", error);
+    publishTimeline();
+  }
+}
+
+void DesktopController::selectAdjacentClip(bool next) {
+  if (!active_session_ || !active_session_->select_adjacent_clip(next)) return;
+  // Reveal only: when zoomed in and the clip lies outside the view, scroll it in. The
+  // playhead and the zoom level are untouched (this is not follow-playhead).
+  if (timeline_zoom_ > 1.0 && timeline_view_start_ && timeline_view_duration_ && active_session_->selected_clip()) {
+    if (const auto start = active_session_->clip_timeline_start(*active_session_->selected_clip())) {
+      const auto total = secondsAsDouble(active_session_->timeline_duration());
+      const double view_start = secondsAsDouble(*timeline_view_start_);
+      const double view_duration = secondsAsDouble(*timeline_view_duration_);
+      const double clip_start = secondsAsDouble(*start);
+      if (total > view_duration && (clip_start < view_start || clip_start >= view_start + view_duration)) {
+        const double wanted = std::clamp(clip_start - 0.1 * view_duration, 0.0, total - view_duration);
+        timeline_scroll_ = wanted / (total - view_duration);
+        emit timelineViewChanged();
+      }
+    }
+  }
+  publishTimeline();
+}
+
 void DesktopController::undoEdit(){if(active_session_&&active_session_->undo()){clearProgram(has_video_media_ ? "loading" : "empty");publishTimeline();}}
 void DesktopController::redoEdit(){if(active_session_&&active_session_->redo()){clearProgram(has_video_media_ ? "loading" : "empty");publishTimeline();}}
 bool DesktopController::saveProject(const QString& path) {
@@ -1154,7 +1264,7 @@ bool DesktopController::openProject(const QString& path) {
     waveform_clip_identities_.clear();
     waveform_requests_.clear();
     waveform_item_stamps_.clear();
-    ++editor_session_epoch_; selected_asset_id_.clear();
+    ++editor_session_epoch_; selected_asset_id_.clear(); resetThumbnails();
   } catch (const std::exception& error) {
     // Candidate-first: the current session, mailbox and workers were never touched.
     logCause("open project failed", error);

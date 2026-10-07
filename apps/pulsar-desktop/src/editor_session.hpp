@@ -117,6 +117,22 @@ private:
   SeparateAudioError code_;
 };
 
+// Why "Eliminar y cerrar hueco" was refused. The document is never mutated.
+enum class RippleDeleteError {
+  NothingSelected,
+  WouldOverlap,  // closing the gap would put a later clip on top of one that stays
+};
+
+class RippleDeleteException final : public std::invalid_argument {
+public:
+  RippleDeleteException(RippleDeleteError code, const char* message)
+      : std::invalid_argument{message}, code_{code} {}
+  [[nodiscard]] RippleDeleteError code() const noexcept { return code_; }
+
+private:
+  RippleDeleteError code_;
+};
+
 class EditorSession final {
 public:
   EditorSession();
@@ -178,6 +194,23 @@ public:
   [[nodiscard]] bool can_split() const;
   [[nodiscard]] domain::ClipId split_selected_at_playhead();
   void delete_selected();
+  // "Eliminar y cerrar hueco": removes the selected clip (t0..t1) and moves EVERY clip of
+  // any track that starts at or after t1 earlier by exactly t1 - t0. Clips that start
+  // before t1 stay, nothing is trimmed, nothing may overlap afterwards (otherwise
+  // RippleDeleteException{WouldOverlap}, nothing changes). One undo/redo step, however
+  // many clips move. Everything goes through ordinary commands.
+  [[nodiscard]] bool can_ripple_delete() const;
+  void ripple_delete_selected();
+  // Q / W: cut the selected clip's start / end back to the playhead. Returns false (and
+  // changes nothing) unless the playhead is strictly inside the selected clip.
+  [[nodiscard]] bool can_trim_to_playhead() const { return can_split(); }
+  bool trim_selected_to_playhead(bool trim_start);
+  // Alt+Left / Alt+Right: selection order is timeline start, then track order, then id.
+  // With no selection "next" picks the first clip and "previous" the last. Returns
+  // whether the selection changed; never moves the playhead.
+  bool select_adjacent_clip(bool next);
+  // Start of a clip on the timeline (for revealing it in a zoomed view).
+  [[nodiscard]] std::optional<domain::MediaTime> clip_timeline_start(domain::ClipId clip) const;
   // "Separar audio": the embedded audio of a VIDEO 1 clip becomes an ordinary
   // audio clip with exactly the same timeline start and source range (same
   // media, so sample-for-sample the same sound), and the video clip's embedded

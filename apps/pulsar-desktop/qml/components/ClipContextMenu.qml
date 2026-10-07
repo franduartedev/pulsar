@@ -18,6 +18,7 @@ Item {
             list.push({ id: "mute", label: controller.selectedClipMuted ? "Activar audio" : "Silenciar audio", hint: "M" })
         if (controller.canSeparateAudio) list.push({ id: "separate", label: "Separar audio", hint: "" })
         if (controller.selectedClipKey.length > 0) list.push({ id: "delete", label: "Eliminar", hint: "Supr" })
+        if (controller.canRippleDelete()) list.push({ id: "ripple", label: "Eliminar y cerrar hueco", hint: "⇧Supr" })
         if (list.length === 0) return
         entries = list
         card.x = Math.max(4, Math.min(sx, menu.width - card.width - 4))
@@ -31,6 +32,7 @@ Item {
         else if (id === "mute") controller.toggleSelectedClipMute()
         else if (id === "separate") controller.separateSelectedAudio()
         else if (id === "delete") controller.deleteSelectedClip()
+        else if (id === "ripple") controller.rippleDeleteSelectedClip()
     }
 
     // Click anywhere else (or Esc) dismisses it.
@@ -44,7 +46,7 @@ Item {
 
     Rectangle {
         id: card
-        width: 196
+        width: 230
         height: list.height + 8
         radius: Theme.radiusM
         color: Theme.bgElevated
@@ -59,7 +61,7 @@ Item {
                     width: list.width; height: 28
                     radius: Theme.radiusS
                     color: itemMouse.containsMouse ? Theme.bgHover : "transparent"
-                    Text { anchors.left: parent.left; anchors.leftMargin: 10; anchors.verticalCenter: parent.verticalCenter; text: modelData.label; color: modelData.id === "delete" ? Theme.error : Theme.textPrimary; font.pixelSize: Theme.fontSizeS }
+                    Text { anchors.left: parent.left; anchors.leftMargin: 10; anchors.verticalCenter: parent.verticalCenter; text: modelData.label; color: (modelData.id === "delete" || modelData.id === "ripple") ? Theme.error : Theme.textPrimary; font.pixelSize: Theme.fontSizeS }
                     Text { anchors.right: parent.right; anchors.rightMargin: 10; anchors.verticalCenter: parent.verticalCenter; text: modelData.hint; color: Theme.textMuted; font.pixelSize: Theme.fontSizeXS }
                     MouseArea { id: itemMouse; anchors.fill: parent; hoverEnabled: true; onClicked: menu.run(modelData.id) }
                 }

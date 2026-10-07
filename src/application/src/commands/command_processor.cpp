@@ -56,7 +56,9 @@ void CommandProcessor::execute(Command command) {
   if (history_capacity_ == 0) {
     redo_stack_.clear();
   } else {
-    trim_undo_to_capacity();
+    // Inside a grouped edit nothing is trimmed: the group would otherwise evict its own
+    // earlier members (or older history needed by a rollback). end_group() trims.
+    if (open_group_ == 0) trim_undo_to_capacity();
     redo_stack_.clear();
   }
 }
@@ -138,7 +140,10 @@ void CommandProcessor::begin_group() noexcept {
   if (open_group_ == 0) open_group_ = next_group_++;
 }
 
-void CommandProcessor::end_group() noexcept { open_group_ = 0; }
+void CommandProcessor::end_group() noexcept {
+  open_group_ = 0;
+  if (history_capacity_ != 0) trim_undo_to_capacity();
+}
 
 bool CommandProcessor::undo() {
   if (undo_stack_.empty()) return false;
@@ -334,8 +339,11 @@ Command CommandProcessor::build_inverse(const ProjectDocument& document, const C
 
 void CommandProcessor::trim_undo_to_capacity() {
   while (undo_stack_.size() > history_capacity_) {
-    // Never keep half a grouped edit: drop the whole oldest group.
+    // Never keep half a grouped edit: drop the whole oldest group. The newest group is
+    // never dropped, even when it alone exceeds the capacity (a big ripple edit): the
+    // capacity bounds history *between* edits, and one edit is always undoable whole.
     const auto group = undo_stack_.front().group;
+    if (group != 0 && group == undo_stack_.back().group) break;
     undo_stack_.pop_front();
     while (group != 0 && !undo_stack_.empty() && undo_stack_.front().group == group) {
       undo_stack_.pop_front();

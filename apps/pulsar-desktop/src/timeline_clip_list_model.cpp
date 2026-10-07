@@ -30,6 +30,7 @@ QVariant TimelineClipListModel::data(const QModelIndex& index, int role) const {
   case TrackIndexRole: return row.track_index;
   case AudioTrackRole: return row.audio_track;
   case HasAudioRole: return row.has_audio;
+  case ThumbSourceRole: return row.thumb_source;
   default: return {};
   }
 }
@@ -40,12 +41,13 @@ QHash<int, QByteArray> TimelineClipListModel::roleNames() const {
           {SelectedRole, "selected"}, {MutedRole, "muted"}, {GainDbRole, "gainDb"},
           {StartProgressRole, "startProgress"}, {EndProgressRole, "endProgress"},
           {InViewportRole, "inViewport"}, {TrackIndexRole, "trackIndex"},
-          {AudioTrackRole, "audioTrack"}, {HasAudioRole, "hasAudio"}};
+          {AudioTrackRole, "audioTrack"}, {HasAudioRole, "hasAudio"}, {ThumbSourceRole, "thumbSource"}};
 }
 
 void TimelineClipListModel::refresh(const pulsar::desktop::EditorSession& session,
                                     pulsar::domain::MediaTime view_start,
-                                    pulsar::domain::MediaTime view_duration) {
+                                    pulsar::domain::MediaTime view_duration,
+                                    const ThumbnailLookup& thumbnails) {
   std::vector<Row> desired;
   desired.reserve(session.timeline_views().size());
   const pulsar::desktop::TimelineViewport viewport{view_start, view_duration};
@@ -71,6 +73,7 @@ void TimelineClipListModel::refresh(const pulsar::desktop::EditorSession& sessio
     row.track_index = static_cast<int>(view.track_index);
     row.audio_track = view.track_kind == pulsar::domain::TrackKind::Audio;
     row.has_audio = view.has_audio;
+    if (thumbnails && view.track_kind == pulsar::domain::TrackKind::Video && !view.missing) row.thumb_source = thumbnails(*clip);
     desired.push_back(std::move(row));
   }
 
@@ -87,7 +90,7 @@ void TimelineClipListModel::refresh(const pulsar::desktop::EditorSession& sessio
   constexpr int roles[] = {ClipKeyRole, NameRole, StartRole, EndRole, DurationRole,
                            MissingRole, SelectedRole, MutedRole, GainDbRole,
                            StartProgressRole, EndProgressRole, InViewportRole};
-  constexpr int track_roles[] = {TrackIndexRole, AudioTrackRole, HasAudioRole};
+  constexpr int track_roles[] = {TrackIndexRole, AudioTrackRole, HasAudioRole, ThumbSourceRole};
   for (std::size_t row_index = 0; row_index < rows_.size(); ++row_index) {
     auto& row = rows_[row_index];
     const Row& next = desired[row_index];
@@ -114,7 +117,8 @@ void TimelineClipListModel::refresh(const pulsar::desktop::EditorSession& sessio
     for (const int role : track_roles) {
       const bool role_changed = role == TrackIndexRole ? row.track_index != next.track_index
                               : role == AudioTrackRole ? row.audio_track != next.audio_track
-                                                       : row.has_audio != next.has_audio;
+                              : role == HasAudioRole ? row.has_audio != next.has_audio
+                                                     : row.thumb_source != next.thumb_source;
       changed = changed || role_changed;
     }
     if (changed) {

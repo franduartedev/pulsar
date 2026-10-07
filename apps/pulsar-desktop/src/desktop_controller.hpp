@@ -16,6 +16,8 @@
 #include <QPointer>
 #include <QObject>
 #include <QTimer>
+
+#include "thumbnail_service.hpp"
 #include <QUrl>
 #include <QVariantList>
 
@@ -29,6 +31,7 @@
 #include <optional>
 #include <string>
 #include <thread>
+#include <unordered_set>
 #include <unordered_map>
 #include <vector>
 
@@ -145,6 +148,7 @@ public:
   [[nodiscard]] bool canRedo() const { return active_session_ && active_session_->can_redo(); }
   [[nodiscard]] QVariantList soundLibrary() const { return sound_library_; }
   [[nodiscard]] QString appVersion() const;
+  [[nodiscard]] std::shared_ptr<ThumbnailCache> thumbnailCache() const { return thumb_cache_; }
   [[nodiscard]] bool soundPackAvailable() const { return !sound_library_.isEmpty(); }
   Q_INVOKABLE void openPath(const QString& path);
   Q_INVOKABLE void openUrl(const QUrl& url);
@@ -179,6 +183,15 @@ public:
   Q_INVOKABLE void separateSelectedAudio();
   Q_INVOKABLE void setSelectedClipGainDb(double gain_db);
   Q_INVOKABLE void toggleSelectedClipMute();
+  // "Eliminar y cerrar hueco" (see EditorSession::ripple_delete_selected) and its menu gate.
+  Q_INVOKABLE void rippleDeleteSelectedClip();
+  Q_INVOKABLE bool canRippleDelete() const { return active_session_ && active_session_->can_ripple_delete(); }
+  // Q / W: silent no-ops unless the playhead is strictly inside the selected clip.
+  Q_INVOKABLE void trimSelectedStartToPlayhead() { trimSelectedToPlayhead(true); }
+  Q_INVOKABLE void trimSelectedEndToPlayhead() { trimSelectedToPlayhead(false); }
+  // Alt+Right / Alt+Left: moves the selection; reveals the clip if a zoomed view hides it.
+  Q_INVOKABLE void selectNextClip() { selectAdjacentClip(true); }
+  Q_INVOKABLE void selectPreviousClip() { selectAdjacentClip(false); }
   Q_INVOKABLE void undoEdit();
   Q_INVOKABLE void redoEdit();
   Q_INVOKABLE void insertBuiltinSound(const QString& sound_id);
@@ -277,6 +290,13 @@ private:
   WaveformSourceCreator waveform_source_creator_;
   std::unordered_map<std::string, std::shared_ptr<pulsar::application::WaveformCacheRequest>> waveform_requests_;
   std::vector<QPointer<QObject>> waveform_items_;
+  [[nodiscard]] std::string thumbnailKey(const pulsar::domain::Clip& clip) const;
+  [[nodiscard]] TimelineClipListModel::ThumbnailLookup thumbnailLookup() const;
+  void requestThumbnails();
+  void resetThumbnails();
+  void onThumbnailFinished(const QString& key, bool ok);
+  void trimSelectedToPlayhead(bool trim_start);
+  void selectAdjacentClip(bool next);
   bool snap_enabled_{true};
   QVariantList sound_library_;
   struct BuiltinSound { std::string id; std::string name; std::string category; std::int64_t duration_frames; };
@@ -294,6 +314,12 @@ private:
   std::uint64_t export_generation_{0};
   QString status_{"Vacío"}; QString technical_status_{"Preview CPU"}; QString media_name_; QString metadata_; QString error_message_; QString preview_source_; QString viewer_state_{"empty"}; QString position_text_{"00:00:00.000"}; QString duration_text_{"--:--:--.---"}; QString debug_metrics_; QVariantList timeline_ruler_ticks_; QVariantList timeline_tracks_; QString timeline_duration_text_{"00:00:00.000"}; QString selected_clip_key_;
   TimelineClipListModel timeline_model_;
+  // Clip thumbnails (decoration): one bounded cache + one worker; see thumbnail_service.hpp.
+  std::shared_ptr<ThumbnailCache> thumb_cache_{std::make_shared<ThumbnailCache>()};
+  ThumbnailService thumb_service_{thumb_cache_};
+  std::unordered_set<std::string> thumb_pending_;
+  std::unordered_set<std::string> thumb_failed_;
+  QTimer thumb_refresh_timer_;
   MediaAssetListModel asset_model_;
   QString selected_asset_id_;
   std::uint64_t asset_model_epoch_{0};

@@ -1,6 +1,7 @@
 #include "desktop_controller.hpp"
 #include "builtin_sound_catalog.hpp"
 #include "preview_image_provider.hpp"
+#include "thumbnail_service.hpp"
 #include "waveform_quick_item.hpp"
 
 #include <pulsar/domain/build_info.hpp>
@@ -57,6 +58,7 @@ int main(int argc, char** argv) {
 
   engine.addImportPath(QStringLiteral("qrc:/pulsar/imports"));
   engine.addImageProvider(QStringLiteral("pulsar-preview"), image_provider);
+  engine.addImageProvider(QStringLiteral("pulsar-thumb"), new ThumbnailImageProvider{controller.thumbnailCache()});
   engine.rootContext()->setContextProperty(QStringLiteral("controller"), &controller);
 
   QObject::connect(&engine, &QQmlApplicationEngine::objectCreationFailed, &app, [] {

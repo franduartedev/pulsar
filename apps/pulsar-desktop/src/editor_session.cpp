@@ -457,6 +457,114 @@ void EditorSession::delete_selected() {
 }
 
 namespace {
+struct RippleMove {
+  domain::ClipId clip;
+  domain::TrackId track;
+  domain::MediaTime new_start;
+};
+struct RipplePlan {
+  domain::ClipId removed;
+  std::vector<RippleMove> moves;  // ascending timeline start within each track
+};
+}
+
+static RipplePlan plan_ripple(const application::ProjectDocument& document, domain::ClipId removed_id) {
+  const domain::Clip* removed = document.timeline().find_clip(removed_id);
+  if (removed == nullptr) throw RippleDeleteException{RippleDeleteError::NothingSelected, "no clip selected"};
+  const auto t1 = removed->timeline_range().end();
+  const auto duration = t1 - removed->timeline_start();
+  RipplePlan plan{removed_id, {}};
+  for (const auto& track : document.timeline().tracks()) {
+    struct Span { domain::MediaTime start; domain::MediaTime end; };
+    std::vector<Span> final_layout;
+    std::vector<RippleMove> track_moves;
+    for (const auto& clip : track.clips()) {
+      if (clip.id() == removed_id) continue;
+      if (clip.timeline_start() >= t1) {
+        const auto start = clip.timeline_start() - duration;
+        track_moves.push_back(RippleMove{clip.id(), track.id(), start});
+        final_layout.push_back(Span{start, clip.timeline_range().end() - duration});
+      } else {
+        final_layout.push_back(Span{clip.timeline_start(), clip.timeline_range().end()});
+      }
+    }
+    std::sort(final_layout.begin(), final_layout.end(), [](const Span& a, const Span& b) { return a.start < b.start; });
+    for (std::size_t i = 1; i < final_layout.size(); ++i) {
+      if (final_layout[i].start < final_layout[i - 1].end) {
+        throw RippleDeleteException{RippleDeleteError::WouldOverlap, "closing the gap would overlap a clip"};
+      }
+    }
+    std::sort(track_moves.begin(), track_moves.end(),
+              [](const RippleMove& a, const RippleMove& b) { return a.new_start < b.new_start; });
+    plan.moves.insert(plan.moves.end(), track_moves.begin(), track_moves.end());
+  }
+  return plan;
+}
+
+bool EditorSession::can_ripple_delete() const {
+  if (!selected_clip_.has_value()) return false;
+  try {
+    (void)plan_ripple(document_, *selected_clip_);
+    return true;
+  } catch (const RippleDeleteException&) {
+    return false;
+  }
+}
+
+void EditorSession::ripple_delete_selected() {
+  if (!selected_clip_.has_value()) throw RippleDeleteException{RippleDeleteError::NothingSelected, "no clip selected"};
+  // Everything that can be refused is checked before the first command runs. Moves go in
+  // ascending order per track, so each clip only ever moves into space already vacated.
+  const auto plan = plan_ripple(document_, *selected_clip_);
+  processor_.run_as_one_edit([&] {
+    processor_.remove_clip(plan.removed);
+    for (const auto& move : plan.moves) processor_.move_clip(move.clip, move.track, move.new_start);
+  });
+  selected_clip_.reset();
+  synchronize_document_state();
+}
+
+bool EditorSession::trim_selected_to_playhead(bool trim_start) {
+  if (!can_split()) return false;  // selected clip with the playhead strictly inside
+  const auto id = *selected_clip_;
+  const auto position = playback_position();
+  if (trim_start) trim_clip_start(id, position); else trim_clip_end(id, position);
+  return true;
+}
+
+bool EditorSession::select_adjacent_clip(bool next) {
+  struct Entry { domain::MediaTime start; std::size_t track; domain::ClipId id; };
+  std::vector<Entry> order;
+  const auto& tracks = document_.timeline().tracks();
+  for (std::size_t index = 0; index < tracks.size(); ++index) {
+    for (const auto& clip : tracks[index].clips()) order.push_back(Entry{clip.timeline_start(), index, clip.id()});
+  }
+  if (order.empty()) return false;
+  std::sort(order.begin(), order.end(), [](const Entry& a, const Entry& b) {
+    if (a.start != b.start) return a.start < b.start;
+    if (a.track != b.track) return a.track < b.track;
+    return a.id.value() < b.id.value();
+  });
+  std::size_t target = next ? 0 : order.size() - 1;
+  if (selected_clip_.has_value()) {
+    const auto current = std::find_if(order.begin(), order.end(), [&](const Entry& e) { return e.id == *selected_clip_; });
+    if (current != order.end()) {
+      const auto index = static_cast<std::size_t>(current - order.begin());
+      if (next) { if (index + 1 >= order.size()) return false; target = index + 1; }
+      else { if (index == 0) return false; target = index - 1; }
+    }
+  }
+  select_clip(order[target].id);
+  return true;
+}
+
+std::optional<domain::MediaTime> EditorSession::clip_timeline_start(domain::ClipId clip) const {
+  const auto* found = document_.timeline().find_clip(clip);
+  if (found == nullptr) return std::nullopt;
+  return found->timeline_start();
+}
+
+namespace {
 struct SeparablePlan {
   const domain::Clip* clip;
   application::MediaAsset asset;

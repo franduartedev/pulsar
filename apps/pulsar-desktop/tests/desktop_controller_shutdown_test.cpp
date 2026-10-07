@@ -108,6 +108,31 @@ bool scenario_open_project(Context& c) {
   return true;
 }
 
+// Thumbnails: the worker may be decoding (or have results queued) when the controller dies.
+bool scenario_thumbnails_in_flight(Context& c) {
+  DesktopController controller{c.provider, {}};
+  if (!controller.openProject(q(c.project))) return false;   // requests thumbnails, then we die at once
+  return true;
+}
+bool scenario_thumbnails_many_clips(Context& c) {
+  DesktopController controller{c.provider, {}};
+  controller.openPath(q(c.video_a));
+  if (!wait_until([&] { return controller.hasVideoMedia(); })) return false;
+  const auto id = controller.mediaAssets()->index(0, 0).data(MediaAssetListModel::MediaIdRole).toString();
+  for (int i = 0; i < 12; ++i) controller.appendAssetToVideoTrack(id);   // 12 distinct source positions are not needed:
+  spin(30);                                                              // same key, so one decode serves them all
+  return true;
+}
+bool scenario_thumbnails_done_then_destroy(Context& c) {
+  DesktopController controller{c.provider, {}};
+  if (!controller.openProject(q(c.project))) return false;
+  const bool got = wait_until([&] {
+    return controller.timelineClips()->rowCount() > 0 &&
+           !controller.timelineClips()->index(0, 0).data(TimelineClipListModel::ThumbSourceRole).toString().isEmpty();
+  });
+  return got;
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -137,6 +162,9 @@ int main(int argc, char** argv) {
       {"export-running", scenario_export_running},
       {"export-cancelled", scenario_export_cancelled},
       {"open-project", scenario_open_project},
+      {"thumbnails-in-flight", scenario_thumbnails_in_flight},
+      {"thumbnails-many-clips", scenario_thumbnails_many_clips},
+      {"thumbnails-done", scenario_thumbnails_done_then_destroy},
   };
   int baseline = -1;
   for (int round = 0; round < 3; ++round) {

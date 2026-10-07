@@ -1325,6 +1325,254 @@ void wheel_zoom_keeps_the_anchor_time_under_the_cursor() {
   assert(desktop::anchored_zoom(total, ZoomView{2.0, 0.3}, std::nan(""), 0.5).zoom == 2.0);
 }
 
+// ---- Beta editing power: ripple delete, trim to playhead, selection order --------
+
+std::string layout_signature(const EditorSession& session) {
+  std::string out;
+  std::size_t track_index = 0;
+  for (const auto& track : session.document().timeline().tracks()) {
+    for (const auto& clip : track.clips()) {
+      const auto start = clip.timeline_range().start().seconds();
+      const auto end = clip.timeline_range().end().seconds();
+      out += std::to_string(track_index) + ":" + std::to_string(clip.id().value()) + "@" +
+             std::to_string(start.numerator()) + "/" + std::to_string(start.denominator()) + "-" +
+             std::to_string(end.numerator()) + "/" + std::to_string(end.denominator()) + ";";
+    }
+    ++track_index;
+  }
+  return out;
+}
+
+MediaTime third(std::int64_t thirds) { return MediaTime{thirds, Rational{1, 3}}; }
+
+domain::MediaTime start_of(const EditorSession& session, domain::ClipId id) {
+  return session.document().timeline().find_clip(id)->timeline_start();
+}
+
+void ripple_delete_closes_the_gap_across_all_tracks_and_keeps_sync() {
+  EditorSession session;
+  const auto media = session.processor().import_asset("v.mp4", SecondsProbe{30});
+  const auto music_media = session.processor().import_asset("m.wav", SecondsProbe{60, false});
+  // Video 1: A 0..10, B 10..(10 + 7/3), C right after B (exact rational boundaries), D with a gap.
+  const auto a = session.processor().add_clip(media, TimeRange{MediaTime::zero(), secs(10)}, MediaTime::zero());
+  const auto b_start = secs(10);
+  const auto b = session.processor().add_clip(media, TimeRange{third(1), third(8)}, b_start);
+  const auto b_end = session.document().timeline().find_clip(b)->timeline_range().end();
+  const auto c = session.processor().add_clip(media, TimeRange{MediaTime::zero(), secs(4)}, b_end);
+  const auto d = session.processor().add_clip(media, TimeRange{MediaTime::zero(), secs(2)}, b_end + secs(4) + secs(5));
+  const auto audio1 = session.processor().add_track(domain::TrackKind::Audio);
+  const auto audio2 = session.processor().add_track(domain::TrackKind::Audio);
+  const auto audio3 = session.processor().add_track(domain::TrackKind::Audio);
+  // Music straddles the cut and must stay; the effect inside the cut starts before t1 and stays.
+  const auto music = session.processor().add_clip(audio1, music_media, TimeRange{MediaTime::zero(), secs(60)}, MediaTime::zero());
+  const auto inside = session.processor().add_clip(audio3, media, TimeRange{MediaTime::zero(), secs(1)}, secs(11));
+  // C's audio detached by the user earlier: same start as C, must keep that relationship.
+  const auto c_audio = session.processor().add_clip(audio2, media, TimeRange{MediaTime::zero(), secs(4)}, b_end);
+  session.synchronize_document_state();
+  const auto before = layout_signature(session);
+  const auto history_before = session.document().history_state_id();
+  const auto undo_before = session.processor().undo_size();
+  const auto duration = b_end - b_start;  // 7/3 s
+
+  session.select_clip(b);
+  assert(session.can_ripple_delete());
+  session.ripple_delete_selected();
+  assert(session.document().timeline().find_clip(b) == nullptr);
+  assert(start_of(session, a) == MediaTime::zero());
+  assert(start_of(session, c) == b_start);                       // exactly closes the gap
+  assert(start_of(session, d) == b_end + secs(9) - duration);
+  assert(start_of(session, c_audio) == start_of(session, c));    // sync preserved
+  assert(start_of(session, music) == MediaTime::zero());         // straddling clip stays
+  assert(start_of(session, inside) == secs(11));                 // starts before t1: stays
+  assert(!session.selected_clip().has_value());
+  const auto after = layout_signature(session);
+  assert(after != before);
+  assert(session.processor().undo_size() == undo_before + 1 + 3);  // remove + C, C audio, D
+
+  assert(session.undo());                                         // ONE step restores everything
+  assert(layout_signature(session) == before);
+  assert(session.document().history_state_id() == history_before);
+  assert(session.processor().undo_size() == undo_before);
+  assert(session.redo());
+  assert(layout_signature(session) == after);
+  assert(!session.redo());
+}
+
+void ripple_delete_edges_first_last_and_lone_clip() {
+  EditorSession session;
+  const auto media = session.processor().import_asset("v.mp4", SecondsProbe{10});
+  const auto a = session.processor().add_clip(media, TimeRange{MediaTime::zero(), secs(4)}, MediaTime::zero());
+  const auto b = session.processor().add_clip(media, TimeRange{MediaTime::zero(), secs(4)}, secs(4));
+  const auto c = session.processor().add_clip(media, TimeRange{MediaTime::zero(), secs(4)}, secs(8));
+  session.synchronize_document_state();
+  session.select_clip(a);
+  session.ripple_delete_selected();                              // first: everything moves back by 4
+  assert((video_layout(session) == Layout{{0, 4}, {4, 8}}));
+  assert(start_of(session, b) == MediaTime::zero() && start_of(session, c) == secs(4));
+  session.select_clip(c);
+  const auto moves_before = session.processor().undo_size();
+  session.ripple_delete_selected();                              // last: only the removal
+  assert((video_layout(session) == Layout{{0, 4}}));
+  assert(session.processor().undo_size() == moves_before + 1);
+  session.select_clip(b);
+  session.ripple_delete_selected();                              // lone clip
+  assert(video_clip_count(session) == 0);
+  assert(session.undo() && video_clip_count(session) == 1);
+}
+
+void ripple_delete_refuses_overlap_without_trace() {
+  EditorSession session;
+  const auto media = session.processor().import_asset("v.mp4", SecondsProbe{60});
+  const auto b = session.processor().add_clip(media, TimeRange{MediaTime::zero(), secs(3)}, secs(10));
+  const auto audio = session.processor().add_track(domain::TrackKind::Audio);
+  // Music ends at 20 and stays (starts before t1 = 13); the next audio clip at 21 would land on 18.
+  (void)session.processor().add_clip(audio, media, TimeRange{MediaTime::zero(), secs(20)}, MediaTime::zero());
+  (void)session.processor().add_clip(audio, media, TimeRange{MediaTime::zero(), secs(2)}, secs(21));
+  session.synchronize_document_state();
+  session.select_clip(b);
+  const auto before = layout_signature(session);
+  const auto history = session.document().history_state_id();
+  const auto undo_before = session.processor().undo_size();
+  assert(!session.can_ripple_delete());
+  bool refused = false;
+  try { session.ripple_delete_selected(); }
+  catch (const desktop::RippleDeleteException& error) { refused = error.code() == desktop::RippleDeleteError::WouldOverlap; }
+  assert(refused);
+  assert(layout_signature(session) == before);
+  assert(session.document().history_state_id() == history && session.processor().undo_size() == undo_before);
+  assert(session.selected_clip() == std::optional<domain::ClipId>{b});
+  // Plain delete still works there, and without a selection ripple is refused.
+  session.delete_selected();
+  assert(video_clip_count(session) == 0);
+  bool nothing = false;
+  try { session.ripple_delete_selected(); }
+  catch (const desktop::RippleDeleteException& error) { nothing = error.code() == desktop::RippleDeleteError::NothingSelected; }
+  assert(nothing);
+}
+
+// A ripple that moves more clips than the history capacity is still ONE whole step.
+void ripple_delete_beyond_history_capacity_stays_one_step() {
+  EditorSession session;
+  constexpr int count = 300;
+  const auto media = session.processor().import_asset("v.mp4", SecondsProbe{1});
+  std::vector<domain::ClipId> ids;
+  for (int i = 0; i < count; ++i) {
+    ids.push_back(session.processor().add_clip(media, TimeRange{MediaTime::zero(), secs(1)}, secs(i)));
+  }
+  session.synchronize_document_state();
+  const auto before = layout_signature(session);
+  session.select_clip(ids.front());
+  session.ripple_delete_selected();
+  const auto after = layout_signature(session);
+  assert(video_clip_count(session) == count - 1);
+  assert(start_of(session, ids[1]) == MediaTime::zero() && start_of(session, ids.back()) == secs(count - 2));
+  assert(session.processor().undo_size() >= static_cast<std::size_t>(count));  // whole group kept
+  assert(session.undo());
+  assert(layout_signature(session) == before);                    // not "half a ripple"
+  assert(session.redo());
+  assert(layout_signature(session) == after);
+
+  // A later edit may evict the whole ripple from history (never half of it).
+  session.select_clip(ids[1]);
+  session.set_clip_muted(ids[1], true);
+  assert(session.processor().undo_size() <= 256);
+  while (session.undo()) {}
+  assert(layout_signature(session) == after);                      // either fully undone or untouched
+}
+
+// A grouped edit that fails half way leaves nothing behind, even when it is bigger than the
+// capacity, and does not cost the older history.
+void failed_oversize_group_rolls_back_completely() {
+  application::ProjectDocument document;
+  application::CommandProcessor processor{document, 8};
+  const auto media = processor.import_asset("v.mp4", SecondsProbe{1});
+  std::vector<domain::ClipId> ids;
+  for (int i = 0; i < 5; ++i) ids.push_back(processor.add_clip(media, TimeRange{MediaTime::zero(), secs(1)}, secs(i * 2)));
+  const auto undo_before = processor.undo_size();
+  const auto track = document.video_track_id();
+  const auto start_before = document.timeline().find_clip(ids[4])->timeline_start();
+  bool threw = false;
+  try {
+    processor.run_as_one_edit([&] {
+      for (int round = 0; round < 12; ++round) {                    // 12 commands > capacity 8
+        processor.move_clip(ids[4], track, secs(20 + round));
+      }
+      processor.move_clip(ids[0], track, secs(2));                  // collides with ids[1]: throws
+    });
+  } catch (const std::exception&) { threw = true; }
+  assert(threw);
+  assert(document.timeline().find_clip(ids[4])->timeline_start() == start_before);
+  assert(processor.undo_size() == undo_before && processor.redo_size() == 0);
+}
+
+void trim_to_playhead_q_and_w() {
+  EditorSession session;
+  const auto media = session.processor().import_asset("v.mp4", SecondsProbe{20});
+  const auto clip = session.processor().add_clip(media, TimeRange{secs(2), secs(12)}, secs(5));  // timeline 5..15
+  session.synchronize_document_state();
+  assert(!session.trim_selected_to_playhead(true));                 // no selection
+  session.select_clip(clip);
+  session.seek(secs(5));
+  assert(!session.can_trim_to_playhead() && !session.trim_selected_to_playhead(true));   // on the start edge
+  session.seek(secs(15));
+  assert(!session.trim_selected_to_playhead(false));                // on the end edge
+  session.seek(secs(2));
+  assert(!session.trim_selected_to_playhead(true));                 // before the clip
+  session.seek(secs(20));
+  assert(!session.trim_selected_to_playhead(false));                // after the clip
+  assert(start_of(session, clip) == secs(5));
+
+  session.seek(secs(8));
+  const auto undo_before = session.processor().undo_size();
+  assert(session.trim_selected_to_playhead(true));                   // Q
+  const auto* trimmed = session.document().timeline().find_clip(clip);
+  assert(trimmed->timeline_range().start() == secs(8) && trimmed->timeline_range().end() == secs(15));
+  assert(trimmed->source_range().start() == secs(5) && trimmed->source_range().end() == secs(12));
+  session.seek(secs(12));
+  assert(session.trim_selected_to_playhead(false));                  // W
+  trimmed = session.document().timeline().find_clip(clip);
+  assert(trimmed->timeline_range().start() == secs(8) && trimmed->timeline_range().end() == secs(12));
+  assert(session.processor().undo_size() == undo_before + 2);
+  assert(session.undo() && session.undo());
+  assert(session.document().timeline().find_clip(clip)->timeline_range().start() == secs(5));
+  assert(session.document().timeline().find_clip(clip)->timeline_range().end() == secs(15));
+  assert(session.redo() && session.redo());
+
+  // An audio-only clip trims the same way.
+  const auto audio_track = session.processor().add_track(domain::TrackKind::Audio);
+  const auto audio = session.processor().add_clip(audio_track, media, TimeRange{MediaTime::zero(), secs(6)}, secs(1));
+  session.synchronize_document_state();
+  session.select_clip(audio);
+  session.seek(secs(3));
+  assert(session.trim_selected_to_playhead(true));
+  assert(start_of(session, audio) == secs(3));
+}
+
+void select_adjacent_clip_follows_editorial_order() {
+  EditorSession session;
+  assert(!session.select_adjacent_clip(true) && !session.select_adjacent_clip(false));  // empty timeline
+  const auto media = session.processor().import_asset("v.mp4", SecondsProbe{30});
+  const auto v1 = session.processor().add_clip(media, TimeRange{MediaTime::zero(), secs(4)}, MediaTime::zero());
+  const auto v2 = session.processor().add_clip(media, TimeRange{MediaTime::zero(), secs(4)}, secs(6));
+  const auto t1 = session.processor().add_track(domain::TrackKind::Audio);
+  const auto t2 = session.processor().add_track(domain::TrackKind::Audio);
+  const auto a2 = session.processor().add_clip(t2, media, TimeRange{MediaTime::zero(), secs(2)}, MediaTime::zero());  // ties with v1 at 0
+  const auto a1 = session.processor().add_clip(t1, media, TimeRange{MediaTime::zero(), secs(2)}, secs(3));
+  session.synchronize_document_state();
+  // Order: start 0 -> video track before audio tracks (v1, a2); then 3 (a1); then 6 (v2).
+  assert(session.select_adjacent_clip(true) && session.selected_clip() == std::optional<domain::ClipId>{v1});  // no selection: first
+  assert(session.select_adjacent_clip(true) && session.selected_clip() == std::optional<domain::ClipId>{a2});
+  assert(session.select_adjacent_clip(true) && session.selected_clip() == std::optional<domain::ClipId>{a1});
+  assert(session.select_adjacent_clip(true) && session.selected_clip() == std::optional<domain::ClipId>{v2});
+  assert(!session.select_adjacent_clip(true) && session.selected_clip() == std::optional<domain::ClipId>{v2});  // stays at the end
+  assert(session.select_adjacent_clip(false) && session.selected_clip() == std::optional<domain::ClipId>{a1});
+  session.select_clip(std::nullopt);
+  assert(session.select_adjacent_clip(false) && session.selected_clip() == std::optional<domain::ClipId>{v2});  // no selection: last
+  session.select_clip(v1);
+  assert(session.select_adjacent_clip(false) == false && session.selected_clip() == std::optional<domain::ClipId>{v1});
+  assert(session.processor().undo_size() > 0);   // selection never enters history
+}
+
 int main() {
   viewport_is_exactly_guarded();
   zoom_and_pan_preserve_editorial_time_mapping();
@@ -1369,5 +1617,12 @@ int main() {
   separate_audio_refusals_leave_no_trace();
   grouped_edit_rolls_back_and_trims_whole_groups();
   wheel_zoom_keeps_the_anchor_time_under_the_cursor();
+  ripple_delete_closes_the_gap_across_all_tracks_and_keeps_sync();
+  ripple_delete_edges_first_last_and_lone_clip();
+  ripple_delete_refuses_overlap_without_trace();
+  ripple_delete_beyond_history_capacity_stays_one_step();
+  failed_oversize_group_rolls_back_completely();
+  trim_to_playhead_q_and_w();
+  select_adjacent_clip_follows_editorial_order();
   return 0;
 }

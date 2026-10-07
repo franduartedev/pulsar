@@ -93,6 +93,11 @@ Window {
     readonly property bool typing: !!root.activeFocusItem && typeof root.activeFocusItem.cursorPosition !== "undefined"
     readonly property bool shortcutsBlocked: typing || pathPrompt.visible || unsavedDialog.visible
     Shortcut { sequence: "M"; enabled: !root.shortcutsBlocked; onActivated: controller.toggleSelectedClipMute() }
+    Shortcut { sequence: "Shift+Delete"; enabled: !root.shortcutsBlocked; onActivated: controller.rippleDeleteSelectedClip() }
+    Shortcut { sequence: "Q"; enabled: !root.shortcutsBlocked; onActivated: controller.trimSelectedStartToPlayhead() }
+    Shortcut { sequence: "W"; enabled: !root.shortcutsBlocked; onActivated: controller.trimSelectedEndToPlayhead() }
+    Shortcut { sequence: "Alt+Right"; enabled: !root.shortcutsBlocked; onActivated: controller.selectNextClip() }
+    Shortcut { sequence: "Alt+Left"; enabled: !root.shortcutsBlocked; onActivated: controller.selectPreviousClip() }
     Shortcut { sequence: "N"; enabled: !root.shortcutsBlocked; onActivated: controller.snapEnabled = !controller.snapEnabled }
 
     FileDialog {

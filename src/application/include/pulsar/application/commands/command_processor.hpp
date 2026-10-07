@@ -62,8 +62,10 @@ public:
     try {
       edit();
     } catch (...) {
+      // Roll back while the group is still open so older history is not trimmed away
+      // to make room for the entries that are about to be discarded anyway.
+      try { rollback_group(group); } catch (...) {}
       end_group();
-      rollback_group(group);
       throw;
     }
     end_group();

@@ -19,6 +19,13 @@ Rectangle {
     property real gainDb: 0
     property bool audioClip: false
     property bool hasAudio: false
+    property string thumbSource: ""
+    // One picture per video clip, at the left, only when the clip is wide/tall enough to
+    // keep the name and waveform readable. Decoration: absent thumbnail = plain clip.
+    readonly property real thumbH: Math.max(0, height - 6)
+    readonly property real thumbW: Math.round(thumbH * 16 / 9)
+    readonly property bool showThumb: !audioClip && !missing && thumbSource.length > 0 && thumbH >= 24 && width > thumbW + 110
+    readonly property real contentX: showThumb ? thumbW + 6 : 0
     property real canonicalStartX: 0
     property real canonicalWidth: 3
     property real timelineWidth: 1
@@ -58,13 +65,24 @@ Rectangle {
     // Name strip: a quiet darker band that doubles as the label area.
     Rectangle {
         visible: block.width > 40
-        anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top
+        anchors.left: parent.left; anchors.leftMargin: block.contentX
+        anchors.right: parent.right; anchors.top: parent.top
         height: block.nameStripHeight
         color: "#33000000"
     }
+    Image {
+        visible: block.showThumb
+        x: 3; y: 3
+        width: block.thumbW; height: block.thumbH
+        source: block.showThumb ? "image://pulsar-thumb/" + block.thumbSource : ""
+        asynchronous: true
+        cache: true
+        fillMode: Image.PreserveAspectCrop
+        sourceSize.width: 160; sourceSize.height: 90
+    }
     Text {
         visible: block.width > 40
-        anchors.left: parent.left; anchors.leftMargin: 8
+        anchors.left: parent.left; anchors.leftMargin: 8 + block.contentX
         anchors.right: chips.visible ? chips.left : (speaker.visible ? speaker.left : parent.right); anchors.rightMargin: 6
         anchors.top: parent.top
         height: block.nameStripHeight
@@ -82,9 +100,9 @@ Rectangle {
         id: waveform
         readonly property real zoneTop: block.nameStripHeight + 3
         readonly property real zoneHeight: Math.max(0, block.height - zoneTop - 4)
-        x: 4
+        x: 4 + block.contentX
         y: block.audioClip ? zoneTop : zoneTop + zoneHeight * 0.26
-        width: Math.max(0, block.width - 8)
+        width: Math.max(0, block.width - 8 - block.contentX)
         height: block.audioClip ? zoneHeight : zoneHeight * 0.74
         clipKey: block.clipKey
         selected: block.selected

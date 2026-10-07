@@ -3,8 +3,10 @@
 #include <QAbstractListModel>
 
 #include <pulsar/domain/ids/ids.hpp>
+#include <pulsar/domain/timeline/clip.hpp>
 #include <pulsar/domain/time/media_time.hpp>
 
+#include <functional>
 #include <optional>
 #include <vector>
 
@@ -29,15 +31,19 @@ public:
     TrackIndexRole,
     AudioTrackRole,
     HasAudioRole,
+    ThumbSourceRole,
   };
 
   explicit TimelineClipListModel(QObject* parent = nullptr);
   [[nodiscard]] int rowCount(const QModelIndex& parent = {}) const override;
   [[nodiscard]] QVariant data(const QModelIndex& index, int role) const override;
   [[nodiscard]] QHash<int, QByteArray> roleNames() const override;
+  // Id of a ready thumbnail for a VIDEO-track clip ("" when there is none yet / ever).
+  using ThumbnailLookup = std::function<QString(const pulsar::domain::Clip&)>;
   void refresh(const pulsar::desktop::EditorSession& session,
                pulsar::domain::MediaTime view_start,
-               pulsar::domain::MediaTime view_duration);
+               pulsar::domain::MediaTime view_duration,
+               const ThumbnailLookup& thumbnails = {});
 
 private:
   struct Row {
@@ -57,6 +63,7 @@ private:
     int track_index{0};
     bool audio_track{false};
     bool has_audio{false};
+    QString thumb_source;
   };
   std::vector<Row> rows_;
 };
