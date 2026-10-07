@@ -40,12 +40,22 @@ Rectangle {
     clip: true
     opacity: muted ? 0.62 : 1.0
 
+    // Dark inset behind the waveform: contrast against any clip colour and a
+    // clear lane for the signal under the name. One flat rect, no effects.
+    Rectangle {
+        visible: waveform.visible
+        x: 3; y: 20
+        width: Math.max(0, parent.width - 6)
+        height: Math.max(0, parent.height - 23)
+        radius: Theme.radiusS
+        color: Theme.waveformWell
+    }
     WaveformItem {
         id: waveform
-        x: 4
+        x: 5
         y: 22
-        width: Math.max(0, parent.width - 8)
-        height: Math.max(0, parent.height - 26)
+        width: Math.max(0, parent.width - 10)
+        height: Math.max(0, parent.height - 27)
         clipKey: block.clipKey
         selected: block.selected
         muted: block.muted

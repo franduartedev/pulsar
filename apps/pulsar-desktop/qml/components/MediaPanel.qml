@@ -39,6 +39,7 @@ Panel {
         var rate = metaValue("Audio sample rate")
         return rate.length > 0 ? "Audio · " + rate : "Medio"
     }
+    readonly property bool assetIsVideo: assetInfo.indexOf("Video") === 0
     property bool soundsTab: false
 
     Text { id: title; anchors.left: parent.left; anchors.top: parent.top; anchors.leftMargin: Theme.spaceL; anchors.topMargin: Theme.spaceL; text: "Biblioteca"; color: Theme.textPrimary; font.pixelSize: Theme.fontSizeL; font.bold: true }
@@ -93,7 +94,7 @@ Panel {
                 id: iconBox
                 anchors.left: parent.left; anchors.leftMargin: 12; anchors.verticalCenter: parent.verticalCenter
                 width: 32; height: 32; radius: Theme.radiusM; color: Theme.bgElevated
-                TGlyph { anchors.centerIn: parent; width: 18; height: 18; kind: controller.hasVideoMedia ? "video" : "audio"; ink: controller.hasVideoMedia ? Theme.waveform : Theme.waveformAudio }
+                TGlyph { anchors.centerIn: parent; width: 18; height: 18; kind: mediaPanel.assetIsVideo ? "video" : "audio"; ink: mediaPanel.assetIsVideo ? Theme.waveform : Theme.waveformAudio }
             }
             Column {
                 anchors.left: iconBox.right; anchors.leftMargin: 10; anchors.right: parent.right; anchors.rightMargin: 10

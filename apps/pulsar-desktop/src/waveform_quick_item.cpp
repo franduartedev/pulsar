@@ -11,11 +11,20 @@
 
 namespace {
 
+// Child layout (draw order): 0 body fill, 1 envelope edges, 2 centre axis,
+// 3 pending hatch, 4 unavailable hatch.
+constexpr int kBodyNode = 0;
+constexpr int kEdgeNode = 1;
+constexpr int kAxisNode = 2;
+constexpr int kPendingNode = 3;
+constexpr int kUnavailableNode = 4;
+
 QSGGeometryNode* child_node(QSGNode* root, int child_index) {
   while (root->childCount() <= child_index) {
     auto* node = new QSGGeometryNode;
     auto* geometry = new QSGGeometry{QSGGeometry::defaultAttributes_Point2D(), 0};
-    geometry->setDrawingMode(QSGGeometry::DrawLines);
+    geometry->setDrawingMode(root->childCount() == kBodyNode ? QSGGeometry::DrawTriangles
+                                                             : QSGGeometry::DrawLines);
     geometry->setLineWidth(1.0f);
     node->setGeometry(geometry);
     node->setFlag(QSGNode::OwnsGeometry);
@@ -39,6 +48,77 @@ void set_lines(QSGGeometryNode* node, const std::vector<QPointF>& points, QColor
   auto* material = static_cast<QSGFlatColorMaterial*>(node->material());
   material->setColor(color);
   node->markDirty(QSGNode::DirtyGeometry | QSGNode::DirtyMaterial);
+}
+
+// Envelope control point in item pixels (x at pixel centre).
+struct EnvelopePoint {
+  qreal x;
+  qreal top;
+  qreal bottom;
+};
+
+// A long flat run (e.g. digital silence) keeps its plateau; shorter runs are
+// the per-bucket steps that appear when zoomed in, and are collapsed to their
+// centre so the envelope interpolates between buckets instead of stair-stepping.
+constexpr int kMaxCollapsedPlateauColumns = 24;
+// Quiet audio still reads as a line: never thinner than this.
+constexpr qreal kMinBodyThickness = 1.6;
+
+QColor blend(QColor from, const QColor& to, qreal amount) {
+  from.setRgbF(from.redF() + (to.redF() - from.redF()) * amount,
+               from.greenF() + (to.greenF() - from.greenF()) * amount,
+               from.blueF() + (to.blueF() - from.blueF()) * amount, from.alphaF());
+  return from;
+}
+
+// Turns the engine's per-column extrema (never modified) into contiguous runs
+// of control points. A run breaks at missing columns and at channel changes.
+void build_envelope_runs(const std::vector<pulsar::application::WaveformSegment>& segments,
+                         qreal height, std::vector<EnvelopePoint>& points,
+                         std::vector<std::size_t>& run_starts) {
+  const auto thicken = [height](qreal top, qreal bottom) {
+    if (bottom - top < kMinBodyThickness) {
+      const qreal mid = (top + bottom) / 2.0;
+      top = mid - kMinBodyThickness / 2.0;
+      bottom = mid + kMinBodyThickness / 2.0;
+      if (top < 0.0) { bottom -= top; top = 0.0; }
+      if (bottom > height) { top -= bottom - height; bottom = height; }
+    }
+    return std::pair<qreal, qreal>{std::max(0.0, top), std::min(height, bottom)};
+  };
+  const auto same = [](const pulsar::application::WaveformSegment& a,
+                       const pulsar::application::WaveformSegment& b) {
+    return std::abs(a.top - b.top) < 0.01 && std::abs(a.bottom - b.bottom) < 0.01;
+  };
+  std::size_t i = 0;
+  const std::size_t count = segments.size();
+  while (i < count) {
+    // Extent of this contiguous run of columns.
+    std::size_t run_end = i + 1;
+    while (run_end < count && segments[run_end].column == segments[run_end - 1].column + 1U) ++run_end;
+    run_starts.push_back(points.size());
+    const auto add_point = [&](qreal x, const pulsar::application::WaveformSegment& seg) {
+      const auto [top, bottom] = thicken(seg.top, seg.bottom);
+      points.push_back({x, top, bottom});
+    };
+    add_point(static_cast<qreal>(segments[i].column), segments[i]);  // left edge, flat lead-in
+    std::size_t group = i;
+    while (group < run_end) {
+      std::size_t group_end = group + 1;
+      while (group_end < run_end && same(segments[group], segments[group_end])) ++group_end;
+      const auto length = static_cast<int>(group_end - group);
+      const qreal first_x = static_cast<qreal>(segments[group].column) + 0.5;
+      if (length <= kMaxCollapsedPlateauColumns) {
+        add_point(first_x + (length - 1) / 2.0, segments[group]);
+      } else {
+        add_point(first_x, segments[group]);
+        add_point(first_x + (length - 1), segments[group]);
+      }
+      group = group_end;
+    }
+    add_point(static_cast<qreal>(segments[run_end - 1].column) + 1.0, segments[run_end - 1]);  // right edge
+    i = run_end;
+  }
 }
 
 } // namespace
@@ -107,26 +187,48 @@ void WaveformQuickItem::setPreparedGeometry(
 QSGNode* WaveformQuickItem::updatePaintNode(QSGNode* old_node, UpdatePaintNodeData*) {
   if (width() <= 0.0 || height() <= 0.0 || !geometry_) return old_node;
   auto* root = old_node == nullptr ? new QSGNode : old_node;
-  std::vector<QPointF> peaks;
-  peaks.reserve(geometry_->segments.size() * 2U);
-  for (const auto& segment : geometry_->segments) {
-    const qreal x = std::min(static_cast<qreal>(segment.column) + 0.5, width() - 0.5);
-    peaks.emplace_back(x, std::clamp(static_cast<qreal>(segment.top), 0.5,
-                                     std::max(0.5, height() - 0.5)));
-    peaks.emplace_back(x, std::clamp(static_cast<qreal>(segment.bottom), 0.5,
-                                     std::max(0.5, height() - 0.5)));
+  // Envelope: filled body + crisp top/bottom edges, built from the engine's
+  // per-column extrema. Muted drops saturation instead of only fading.
+  QColor edge_color = selected_ ? selected_color_ : normal_color_;
+  QColor fill_color = edge_color;
+  fill_color.setAlphaF(selected_ ? 0.82 : 0.66);
+  QColor axis_color = baseline_color_;
+  axis_color.setAlphaF(axis_color.alphaF() * 0.5);
+  if (muted_) {
+    edge_color = blend(edge_color, QColor{0x8a, 0x93, 0xa0}, 0.8);
+    edge_color.setAlphaF(edge_color.alphaF() * 0.6);
+    fill_color = blend(fill_color, QColor{0x8a, 0x93, 0xa0}, 0.8);
+    fill_color.setAlphaF(fill_color.alphaF() * 0.35);
+    axis_color.setAlphaF(axis_color.alphaF() * 0.6);
   }
-  QColor waveform_color = selected_ ? selected_color_ : normal_color_;
-  if (muted_) waveform_color.setAlphaF(waveform_color.alphaF() * 0.45);
-  set_lines(child_node(root, 0), peaks, waveform_color);
+
+  std::vector<EnvelopePoint> envelope;
+  std::vector<std::size_t> run_starts;
+  envelope.reserve(geometry_->segments.size() + 8U);
+  build_envelope_runs(geometry_->segments, height(), envelope, run_starts);
+  run_starts.push_back(envelope.size());
+  std::vector<QPointF> body;
+  std::vector<QPointF> edges;
+  body.reserve(envelope.size() * 6U);
+  edges.reserve(envelope.size() * 4U);
+  for (std::size_t run = 0; run + 1 < run_starts.size(); ++run) {
+    for (std::size_t k = run_starts[run]; k + 1 < run_starts[run + 1]; ++k) {
+      const auto& p = envelope[k];
+      const auto& q = envelope[k + 1];
+      body.emplace_back(p.x, p.top);    body.emplace_back(p.x, p.bottom);  body.emplace_back(q.x, q.top);
+      body.emplace_back(q.x, q.top);    body.emplace_back(p.x, p.bottom);  body.emplace_back(q.x, q.bottom);
+      edges.emplace_back(p.x, p.top);   edges.emplace_back(q.x, q.top);
+      edges.emplace_back(p.x, p.bottom); edges.emplace_back(q.x, q.bottom);
+    }
+  }
+  set_lines(child_node(root, kBodyNode), body, fill_color);
+  set_lines(child_node(root, kEdgeNode), edges, edge_color);
 
   std::vector<QPointF> baseline;
   if (has_available_waveform_ && !geometry_->segments.empty()) {
     baseline = {QPointF{0.0, height() / 2.0}, QPointF{width(), height() / 2.0}};
   }
-  QColor baseline_color = baseline_color_;
-  if (muted_) baseline_color.setAlphaF(baseline_color.alphaF() * 0.45);
-  set_lines(child_node(root, 1), baseline, baseline_color);
+  set_lines(child_node(root, kAxisNode), baseline, axis_color);
 
   std::vector<QPointF> pending;
   pending.reserve(geometry_->pending_columns.size() / 4U * 2U);
@@ -140,7 +242,7 @@ QSGNode* WaveformQuickItem::updatePaintNode(QSGNode* old_node, UpdatePaintNodeDa
     pending.emplace_back(std::clamp(x - 1.5, left_edge, right_edge), state_top);
     pending.emplace_back(std::clamp(x + 1.5, left_edge, right_edge), state_bottom);
   }
-  set_lines(child_node(root, 2), pending, pending_color_);
+  set_lines(child_node(root, kPendingNode), pending, pending_color_);
 
   std::vector<QPointF> unavailable;
   unavailable.reserve(geometry_->unavailable_columns.size() / 4U * 2U);
@@ -150,6 +252,6 @@ QSGNode* WaveformQuickItem::updatePaintNode(QSGNode* old_node, UpdatePaintNodeDa
     unavailable.emplace_back(std::clamp(x - 1.5, left_edge, right_edge), state_top);
     unavailable.emplace_back(std::clamp(x + 1.5, left_edge, right_edge), state_bottom);
   }
-  set_lines(child_node(root, 3), unavailable, unavailable_color_);
+  set_lines(child_node(root, kUnavailableNode), unavailable, unavailable_color_);
   return root;
 }

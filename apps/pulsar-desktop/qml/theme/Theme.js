@@ -52,10 +52,11 @@ var laneAudio = "#0c0f13"
 var ruler     = "#0d1015"
 var track     = "#252c37"       // slider rails
 
-var waveform            = "#7fb0ff"
-var waveformSelected    = "#cfe0ff"
-var waveformAudio       = "#6fd3b4"
-var waveformAudioSelected = "#d2f5ea"
+var waveform            = "#8dbbff"   // video clip (embedded audio)
+var waveformSelected    = "#d9e8ff"
+var waveformAudio       = "#6fe0bd"   // audio-only clip
+var waveformAudioSelected = "#d6fbef"
+var waveformWell        = "#59000000" // dark inset behind waveforms
 var waveformPending     = "#d3a85d"
 var waveformBaseline    = "#56667b"
 var waveformUnavailable = "#69717c"
