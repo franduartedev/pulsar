@@ -28,6 +28,7 @@ public:
     InViewportRole,
     TrackIndexRole,
     AudioTrackRole,
+    HasAudioRole,
   };
 
   explicit TimelineClipListModel(QObject* parent = nullptr);
@@ -55,6 +56,7 @@ private:
     bool in_viewport{false};
     int track_index{0};
     bool audio_track{false};
+    bool has_audio{false};
   };
   std::vector<Row> rows_;
 };

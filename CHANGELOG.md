@@ -8,6 +8,9 @@ the version is defined once, in the root `CMakeLists.txt`.
 First public beta (Linux x86_64). History before this release is not itemised.
 
 ### Added
+- Silencing a clip's audio is now obvious: a speaker icon on every clip with audio, an *Silenciar audio / Activar audio* button in the Inspector, key *M*, and a right-click clip menu (Cut, Mute, Detach audio, Delete).
+- **Snap** magnet toggle in the timeline toolbar (key *N*); overlap protection stays on when snapping is off.
+- Ctrl + mouse wheel zooms the timeline around the pointer; Shift + wheel pans.
 - Multi-video timeline on a single video track: import, Insert at playhead, Add to end (exact, gapless).
 - Split, trim and move with magnetic snapping (8 px, exact result) and collision stop.
 - Undo / redo, including grouped edits (e.g. Detach audio is one step).
@@ -20,6 +23,7 @@ First public beta (Linux x86_64). History before this release is not itemised.
 - `--version`, application metadata, `.desktop` entry and icon, portable Linux bundle.
 
 ### Fixed
+- Clips starting before a zoomed view no longer paint over the track headers; four or more tracks stay reachable (compact lanes, scroll indicator).
 - Export of audio whose source range is not aligned to the sample grid.
 - Trim gestures used pointer coordinates offset by the track-header width.
 - Audio import failed when the playhead was past the length of a short audio file.

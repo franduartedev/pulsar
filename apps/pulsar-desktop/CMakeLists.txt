@@ -46,6 +46,7 @@ qt_add_resources(pulsar_desktop pulsar_desktop_qml
     qml/components/Playhead.qml
     qml/components/ToolButton.qml
     qml/components/UnsavedChangesDialog.qml
+    qml/components/ClipContextMenu.qml
     qml/components/PathPromptDialog.qml
     qml/components/PSlider.qml
 )

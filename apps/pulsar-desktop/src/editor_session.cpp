@@ -225,7 +225,8 @@ void EditorSession::rebuild_read_model() {
                             time_text(clip.timeline_range().start()),
                             time_text(clip.timeline_range().end()), time_text(clip.duration()),
                             !asset.has_value() || asset->availability() == application::MediaAvailability::Unavailable,
-                            selected_clip_.has_value() && selected_clip_.value() == clip.id()};
+                            selected_clip_.has_value() && selected_clip_.value() == clip.id(),
+                            asset.has_value() && asset->audio().has_value()};
       views_.push_back(std::move(view));
     }
   }
@@ -486,6 +487,11 @@ static SeparablePlan plan_separation(const application::ProjectDocument& documen
     throw SeparateAudioException{SeparateAudioError::AudioShorterThanClip, "the audio stream is shorter than the clip"};
   }
   return SeparablePlan{clip, *asset};
+}
+
+bool EditorSession::clip_has_audio(domain::ClipId clip) const {
+  const auto found = std::find_if(views_.begin(), views_.end(), [&](const auto& view) { return view.id == clip; });
+  return found != views_.end() && found->has_audio;
 }
 
 bool EditorSession::can_separate_audio(domain::ClipId video_clip) const {

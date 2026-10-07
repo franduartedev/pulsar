@@ -32,6 +32,7 @@ struct TimelineClipView {
   std::string duration;
   bool missing{false};
   bool selected{false};
+  bool has_audio{false};  // the clip's media carries an audio stream (so mute means something)
 };
 
 struct TimelineTrackView {
@@ -182,6 +183,7 @@ public:
   // media, so sample-for-sample the same sound), and the video clip's embedded
   // audio is muted. Gain and mute state move with the audio. One undo/redo step.
   [[nodiscard]] bool can_separate_audio(domain::ClipId video_clip) const;
+  [[nodiscard]] bool clip_has_audio(domain::ClipId clip) const;
   [[nodiscard]] domain::ClipId separate_audio(domain::ClipId video_clip);
   // Ingest an already imported video asset into VIDEO 1 with its full playable
   // range. No ripple, overwrite or split: a request that would overlap an

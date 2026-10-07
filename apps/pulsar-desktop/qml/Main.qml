@@ -89,6 +89,11 @@ Window {
     Shortcut { sequence: "Ctrl+Z"; onActivated: controller.undoEdit() }
     Shortcut { sequence: "Ctrl+Shift+Z"; onActivated: controller.redoEdit() }
     Shortcut { sequence: "Shift+Z"; onActivated: controller.fitTimeline() }
+    // Single-key editing shortcuts never fire while typing in a field or inside a dialog.
+    readonly property bool typing: !!root.activeFocusItem && typeof root.activeFocusItem.cursorPosition !== "undefined"
+    readonly property bool shortcutsBlocked: typing || pathPrompt.visible || unsavedDialog.visible
+    Shortcut { sequence: "M"; enabled: !root.shortcutsBlocked; onActivated: controller.toggleSelectedClipMute() }
+    Shortcut { sequence: "N"; enabled: !root.shortcutsBlocked; onActivated: controller.snapEnabled = !controller.snapEnabled }
 
     FileDialog {
         id: fileDialog
@@ -192,6 +197,7 @@ Window {
         anchors.bottomMargin: 2
         // The timeline is where editing happens: it gets a third of the window.
         height: compactWorkspace ? 200 : Math.max(236, Math.min(360, Math.round(root.height * 0.36)))
+        onClipContextRequested: function(sx, sy) { clipMenu.openAt(sx, sy) }
     }
 
     StatusBar {
@@ -201,6 +207,8 @@ Window {
         anchors.bottom: parent.bottom
         height: 26
     }
+
+    ClipContextMenu { id: clipMenu }
 
     UnsavedChangesDialog {
         id: unsavedDialog

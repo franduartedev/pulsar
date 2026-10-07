@@ -8,9 +8,19 @@ Panel {
     property real gutterWidth: Math.max(88, Math.min(120, width * 0.095))
     readonly property real timelineWidth: Math.max(1, width - gutterWidth)
     // Lanes use the room they are given (more waveform to read) within sane bounds.
-    property real trackLaneHeight: Math.max(64, Math.min(104, Math.floor(trackArea.height / Math.max(2, controller.timelineTracks.length))))
+    property real trackLaneHeight: Math.max(52, Math.min(104, Math.floor(trackArea.height / Math.max(2, controller.timelineTracks.length))))
     // x (timeline pixels) of the magnetic edge being snapped to, or -1.
     property real snapGuideX: -1
+    // Right click on a clip: window coordinates for the context menu (hosted by Main).
+    signal clipContextRequested(real sx, real sy)
+
+    // Ctrl + wheel zooms around the pointer; Shift + wheel pans while zoomed in.
+    function wheelZoom(x, delta) {
+        controller.zoomTimelineAt(x - gutterWidth, timelineWidth, Math.pow(1.2, delta / 120))
+    }
+    function wheelPan(delta) {
+        if (controller.timelineZoom > 1.0) controller.setTimelineScroll(controller.timelineScroll - delta / 120 * 0.05 / Math.max(1, Math.sqrt(controller.timelineZoom)))
+    }
 
     function trackTitle(label) {
         // "VIDEO 1" -> "Video 1"
@@ -34,6 +44,8 @@ Panel {
             ToolButton { glyph: "split"; text: "Cortar"; tip: "Cortar en el cabezal (S)"; enabled: controller.canSplit; onClicked: controller.splitSelectedClip() }
             ToolButton { glyph: "audio"; text: "Separar audio"; tip: "Separar el audio del clip de video"; enabled: controller.canSeparateAudio; onClicked: controller.separateSelectedAudio() }
             ToolButton { glyph: "trash"; text: "Borrar"; tip: "Borrar clip (Supr)"; enabled: controller.selectedClipKey.length > 0; onClicked: controller.deleteSelectedClip() }
+            Rectangle { anchors.verticalCenter: parent.verticalCenter; width: 1; height: 16; color: Theme.borderStrong }
+            ToolButton { glyph: "magnet"; text: "Snap"; toggle: true; tip: controller.snapEnabled ? "Imán activado: se ajusta a bordes y cabezal (N)" : "Imán desactivado (N)"; checked: controller.snapEnabled; onClicked: controller.snapEnabled = !controller.snapEnabled }
             Rectangle { anchors.verticalCenter: parent.verticalCenter; width: 1; height: 16; color: Theme.borderStrong }
             ToolButton { glyph: "undo"; text: "Deshacer"; tip: "Deshacer (Ctrl+Z)"; enabled: controller.canUndo; onClicked: controller.undoEdit() }
             ToolButton { glyph: "redo"; text: "Rehacer"; tip: "Rehacer (Ctrl+Shift+Z)"; enabled: controller.canRedo; onClicked: controller.redoEdit() }
@@ -94,6 +106,14 @@ Panel {
             }
         }
         Rectangle { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; height: 1; color: Theme.borderSubtle }
+        WheelHandler {
+            acceptedModifiers: Qt.ControlModifier
+            onWheel: function(event) { pane.wheelZoom(point.position.x, event.angleDelta.y) }
+        }
+        WheelHandler {
+            acceptedModifiers: Qt.ShiftModifier
+            onWheel: function(event) { pane.wheelPan(event.angleDelta.y !== 0 ? event.angleDelta.y : event.angleDelta.x) }
+        }
         MouseArea {
             anchors.fill: parent
             enabled: controller.hasMedia
@@ -124,6 +144,14 @@ Panel {
                 width: trackScroll.width
                 height: trackScroll.contentHeight
                 Rectangle { anchors.fill: parent; color: Theme.laneAudio }
+                WheelHandler {
+                    acceptedModifiers: Qt.ControlModifier
+                    onWheel: function(event) { pane.wheelZoom(point.position.x, event.angleDelta.y) }
+                }
+                WheelHandler {
+                    acceptedModifiers: Qt.ShiftModifier
+                    onWheel: function(event) { pane.wheelPan(event.angleDelta.y !== 0 ? event.angleDelta.y : event.angleDelta.x) }
+                }
                 Repeater {
                     model: controller.timelineTracks
                     delegate: Item {
@@ -138,28 +166,41 @@ Panel {
                         Rectangle { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; height: 1; color: Theme.bgRoot }
                     }
                 }
-                Repeater {
-                    model: controller.timelineClips
-                    delegate: ClipBlock {
-                        z: model.selected ? 3 : 2
-                        visible: model.inViewport
-                        y: model.trackIndex * pane.trackLaneHeight + 6
-                        canonicalStartX: pane.gutterWidth + model.startProgress * pane.timelineWidth
-                        canonicalWidth: Math.max(3, (model.endProgress - model.startProgress) * pane.timelineWidth)
-                        height: pane.trackLaneHeight - 12
-                        timelineWidth: pane.timelineWidth
-                        timelineOffset: pane.gutterWidth
-                        clipName: model.clipName
-                        startText: model.startText
-                        endText: model.endText
-                        missing: model.missing
-                        selected: model.selected
-                        muted: model.muted
-                        gainDb: model.gainDb
-                        audioClip: model.audioTrack
-                        clipKey: model.clipKey
-                        onActivated: controller.selectTimelineClip(clipKey)
-                        onSnapGuide: function(x) { pane.snapGuideX = x }
+                // Clips live in their own layer, cut off at the track-header edge so a clip that
+                // starts before the zoomed view never paints over the headers.
+                Item {
+                    id: clipLayer
+                    z: 2
+                    x: pane.gutterWidth
+                    width: pane.timelineWidth
+                    height: contentArea.height
+                    clip: true
+                    Repeater {
+                        model: controller.timelineClips
+                        delegate: ClipBlock {
+                            z: model.selected ? 3 : 2
+                            visible: model.inViewport
+                            y: model.trackIndex * pane.trackLaneHeight + 6
+                            canonicalStartX: model.startProgress * pane.timelineWidth
+                            canonicalWidth: Math.max(3, (model.endProgress - model.startProgress) * pane.timelineWidth)
+                            height: pane.trackLaneHeight - 12
+                            timelineWidth: pane.timelineWidth
+                            timelineOffset: 0
+                            clipName: model.clipName
+                            startText: model.startText
+                            endText: model.endText
+                            missing: model.missing
+                            selected: model.selected
+                            muted: model.muted
+                            gainDb: model.gainDb
+                            audioClip: model.audioTrack
+                            hasAudio: model.hasAudio
+                            clipKey: model.clipKey
+                            onActivated: controller.selectTimelineClip(clipKey)
+                            onMuteToggled: { controller.selectTimelineClip(clipKey); controller.toggleSelectedClipMute() }
+                            onContextRequested: function(sx, sy) { controller.selectTimelineClip(clipKey); pane.clipContextRequested(sx, sy) }
+                            onSnapGuide: function(x) { pane.snapGuideX = x }
+                        }
                     }
                 }
                 // Empty lane: click selects nothing and seeks; drag scrubs.
@@ -174,6 +215,19 @@ Panel {
                     onPositionChanged: function(mouse) { if (pressed) controller.seekTimelineAt(mouse.x - pane.gutterWidth, pane.timelineWidth) }
                 }
             }
+        }
+
+        // Thin position indicator when the tracks do not all fit (wheel scrolls them).
+        Rectangle {
+            visible: trackScroll.contentHeight > trackScroll.height + 1
+            z: 25
+            enabled: false
+            anchors.right: parent.right; anchors.rightMargin: 2
+            width: 4; radius: 2
+            color: Theme.textSecondary
+            opacity: 0.55
+            height: Math.max(20, trackArea.height * trackScroll.height / trackScroll.contentHeight)
+            y: trackScroll.contentHeight > trackScroll.height ? (trackArea.height - height) * trackScroll.contentY / (trackScroll.contentHeight - trackScroll.height) : 0
         }
 
         // One short sentence and nothing else when there is nothing to edit.

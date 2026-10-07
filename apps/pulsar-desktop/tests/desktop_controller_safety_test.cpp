@@ -8,6 +8,7 @@
 #include <QGuiApplication>
 #include <QTimer>
 
+#include <cmath>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -197,6 +198,53 @@ int main(int argc, char** argv) {
   controller.exportProject(q(sound_export));
   REQUIRE(40, wait_until([&] { return !controller.exportRunning(); }));
   REQUIRE(41, controller.exportStatus() == QStringLiteral("Exportación completada") && fs::exists(sound_export));
+
+  // ---- Beta+ usability: one mute state, reachable from clip/inspector/menu/M ----------
+  REQUIRE(42, controller.openProject(q(second)));
+  const auto clip_key = [&](int row) { return controller.timelineClips()->index(row, 0).data(TimelineClipListModel::ClipKeyRole).toString(); };
+  const auto clip_muted = [&](int row) { return controller.timelineClips()->index(row, 0).data(TimelineClipListModel::MutedRole).toBool(); };
+  const auto clip_has_audio = [&](int row) { return controller.timelineClips()->index(row, 0).data(TimelineClipListModel::HasAudioRole).toBool(); };
+  controller.selectTimelineClip(QString{});
+  controller.toggleSelectedClipMute();                                   // nothing selected: no-op
+  REQUIRE(43, !clip_muted(0) && !clip_muted(1) && !controller.selectedClipHasAudio());
+  controller.selectTimelineClip(clip_key(1));
+  REQUIRE(44, clip_has_audio(1) && controller.selectedClipHasAudio() && !controller.selectedClipMuted());
+  controller.toggleSelectedClipMute();
+  REQUIRE(45, controller.selectedClipMuted() && clip_muted(1) && !clip_muted(0));   // only that clip
+  REQUIRE(46, controller.canUndo());
+  controller.toggleSelectedClipMute();
+  REQUIRE(47, !controller.selectedClipMuted() && !clip_muted(1));
+  controller.toggleSelectedClipMute();                                   // mute again, then undo/redo it
+  controller.undoEdit();
+  REQUIRE(48, !clip_muted(1));
+  controller.redoEdit();
+  REQUIRE(49, clip_muted(1));
+  controller.toggleSelectedClipMute();
+  REQUIRE(50, !clip_muted(1));
+
+  // ---- Snap toggle: same engine, only enabled/disabled -------------------------------
+  const double width = 1000.0;
+  const double start_px = controller.timelineClips()->index(1, 0).data(TimelineClipListModel::StartProgressRole).toDouble() * width;
+  const double end_px = controller.timelineClips()->index(1, 0).data(TimelineClipListModel::EndProgressRole).toDouble() * width;
+  const double press = (start_px + end_px) / 2.0;
+  REQUIRE(51, controller.snapEnabled());
+  const auto snapped = controller.previewTimelineMove(clip_key(1), press, press + 3.0, width);
+  REQUIRE(52, snapped.value("guide").toDouble() >= 0.0 && std::abs(snapped.value("offset").toDouble()) < 0.5);
+  controller.setSnapEnabled(false);
+  const auto free_move = controller.previewTimelineMove(clip_key(1), press, press + 3.0, width);
+  REQUIRE(53, free_move.value("guide").toDouble() < 0.0 && std::abs(free_move.value("offset").toDouble() - 3.0) < 0.5);
+  // Overlap protection is not part of snapping: dragging left over the neighbour still stops flush.
+  const auto into_neighbour = controller.previewTimelineMove(clip_key(1), press, press - (end_px - start_px), width);
+  REQUIRE(54, into_neighbour.value("offset").toDouble() >= -0.5);
+  controller.setSnapEnabled(true);
+  const auto again = controller.previewTimelineMove(clip_key(1), press, press + 3.0, width);
+  REQUIRE(55, again.value("guide").toDouble() >= 0.0);
+
+  // ---- Wheel zoom keeps the time under the cursor ------------------------------------
+  controller.zoomTimelineAt(width * 0.75, width, 4.0);
+  REQUIRE(56, controller.timelineZoom() > 3.9 && controller.timelineScroll() > 0.0);
+  controller.fitTimeline();
+  REQUIRE(57, controller.timelineZoom() == 1.0 && controller.timelineScroll() == 0.0);
 
   fs::remove_all(root);
   return 0;

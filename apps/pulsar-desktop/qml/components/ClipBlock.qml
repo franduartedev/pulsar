@@ -18,6 +18,7 @@ Rectangle {
     property bool muted: false
     property real gainDb: 0
     property bool audioClip: false
+    property bool hasAudio: false
     property real canonicalStartX: 0
     property real canonicalWidth: 3
     property real timelineWidth: 1
@@ -30,6 +31,9 @@ Rectangle {
     property bool moveDragging: false
     readonly property real nameStripHeight: 18
     signal activated()
+    signal muteToggled()
+    // Right click: window coordinates, so the menu can live above the timeline.
+    signal contextRequested(real sx, real sy)
     // Snap guide x in timeline pixels (excluding the header), or -1.
     signal snapGuide(real x)
 
@@ -61,7 +65,7 @@ Rectangle {
     Text {
         visible: block.width > 40
         anchors.left: parent.left; anchors.leftMargin: 8
-        anchors.right: chips.visible ? chips.left : parent.right; anchors.rightMargin: 6
+        anchors.right: chips.visible ? chips.left : (speaker.visible ? speaker.left : parent.right); anchors.rightMargin: 6
         anchors.top: parent.top
         height: block.nameStripHeight
         verticalAlignment: Text.AlignVCenter
@@ -99,15 +103,19 @@ Rectangle {
     // Only states that are not the default: mute, offline.
     Row {
         id: chips
-        visible: block.width > 90 && (block.muted || block.missing)
-        anchors.right: parent.right; anchors.rightMargin: 6
+        visible: block.width > 90 && (block.muted || block.missing || speakerMouse.containsMouse)
+        anchors.right: speaker.visible ? speaker.left : parent.right; anchors.rightMargin: speaker.visible ? 2 : 6
         anchors.top: parent.top; anchors.topMargin: 2
         spacing: 4
         Rectangle { visible: block.missing; height: 14; width: offlineText.implicitWidth + 10; radius: 3; color: Theme.error
             Text { id: offlineText; anchors.centerIn: parent; text: "Sin conexión"; color: Theme.textOnAccent; font.pixelSize: 10; font.bold: true } }
-        Rectangle { visible: block.muted; height: 14; width: muteText.implicitWidth + 10; radius: 3; color: Theme.warning
+        Rectangle { visible: block.muted && !speakerMouse.containsMouse; height: 14; width: muteText.implicitWidth + 10; radius: 3; color: Theme.warning
             Text { id: muteText; anchors.centerIn: parent; text: "Silenciado"; color: Theme.textOnWarning; font.pixelSize: 10; font.bold: true } }
+        // Hover hint for the speaker (inside the clip: a floating tooltip would be clipped).
+        Rectangle { visible: speakerMouse.containsMouse; height: 14; width: hintText.implicitWidth + 10; radius: 3; color: Theme.chipOverlay
+            Text { id: hintText; anchors.centerIn: parent; text: block.muted ? "Activar audio (M)" : "Silenciar audio (M)"; color: Theme.textPrimary; font.pixelSize: 10; font.bold: true } }
     }
+
     Text {
         readonly property string note: waveform.waveformState === WaveformItem.Failed ? "Onda no disponible"
             : (waveform.waveformState === WaveformItem.Missing || waveform.waveformState === WaveformItem.Generating ? "Generando onda…" : "")
@@ -208,14 +216,20 @@ Rectangle {
         anchors.rightMargin: rightHandle.width
         preventStealing: true
         hoverEnabled: true
+        acceptedButtons: Qt.LeftButton | Qt.RightButton
         cursorShape: block.moveDragging ? Qt.ClosedHandCursor : Qt.ArrowCursor
         onPressed: function(mouse) {
+            if (mouse.button === Qt.RightButton) {
+                var p = body.mapToItem(null, mouse.x, mouse.y)
+                block.contextRequested(p.x, p.y)
+                return
+            }
             block.pressTimelineX = block.timelineX(parent, mouse)
             block.moveDragging = false
             block.previewOffset = 0
         }
         onPositionChanged: function(mouse) {
-            if (!pressed) return
+            if (!pressed || pressedButtons !== Qt.LeftButton) return
             var current = block.timelineX(parent, mouse)
             if (Math.abs(current - block.pressTimelineX) >= 4) block.moveDragging = true
             if (block.moveDragging) {
@@ -225,6 +239,7 @@ Rectangle {
             }
         }
         onReleased: function(mouse) {
+            if (mouse.button === Qt.RightButton) return
             var current = block.timelineX(parent, mouse)
             if (block.moveDragging) {
                 controller.moveTimelineClip(block.clipKey, block.pressTimelineX, current, block.timelineWidth)
@@ -234,6 +249,29 @@ Rectangle {
             block.previewOffset = 0
             block.moveDragging = false
             block.snapGuide(-1)
+        }
+    }
+
+    // Audio state: speaker = audible, crossed speaker = silenced. Click toggles the clip's
+    // one mute state (same operation as the Inspector button, M and the context menu).
+    Item {
+        id: speaker
+        visible: block.hasAudio && !block.missing && block.width > 56
+        anchors.right: parent.right; anchors.rightMargin: 3
+        anchors.top: parent.top
+        width: 24; height: block.nameStripHeight
+        TGlyph {
+            anchors.centerIn: parent; width: 15; height: 15
+            kind: block.muted ? "speaker-off" : "speaker"
+            ink: block.muted ? Theme.warning : Theme.textPrimary
+            opacity: block.muted || block.selected || body.containsMouse || speakerMouse.containsMouse ? 1.0 : 0.55
+        }
+        MouseArea {
+            id: speakerMouse
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: block.muteToggled()
         }
     }
 }

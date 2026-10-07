@@ -134,6 +134,7 @@ Panel {
                 spacing: Theme.spaceM
                 SectionLabel { text: "AUDIO" }
                 Row {
+                    visible: controller.selectedClipHasAudio
                     width: parent.width
                     spacing: 6
                     Text { width: 52; anchors.verticalCenter: parent.verticalCenter; text: "Ganancia"; color: Theme.textSecondary; font.pixelSize: Theme.fontSizeS }
@@ -152,6 +153,7 @@ Panel {
                             font.pixelSize: Theme.fontSizeM
                             font.family: Theme.mono
                             inputMethodHints: Qt.ImhFormattedNumbersOnly
+                            validator: DoubleValidator { bottom: -60; top: 12; decimals: 1; notation: DoubleValidator.StandardNotation }
                             text: Number(controller.selectedClipGainDb).toFixed(1)
                             selectByMouse: true
                             onEditingFinished: controller.setSelectedClipGainDb(Number(text))
@@ -160,26 +162,31 @@ Panel {
                     }
                     PButton { width: 28; height: Theme.controlHeightSmall; text: "+"; onClicked: controller.setSelectedClipGainDb(controller.selectedClipGainDb + 1) }
                 }
-                Row {
-                    width: parent.width
-                    spacing: 6
-                    Text { width: 52; anchors.verticalCenter: parent.verticalCenter; text: "Silenciar"; color: Theme.textSecondary; font.pixelSize: Theme.fontSizeS }
-                    // Toggle: accent only while active.
-                    Rectangle {
-                        id: muteToggle
-                        width: 38; height: 20; radius: 10
-                        anchors.verticalCenter: parent.verticalCenter
-                        color: controller.selectedClipMuted ? Theme.accent : Theme.track
-                        border.width: activeFocus ? 1 : 0
-                        border.color: Theme.focus
-                        activeFocusOnTab: true
-                        Keys.onSpacePressed: controller.toggleSelectedClipMute()
-                        Keys.onReturnPressed: controller.toggleSelectedClipMute()
-                        Rectangle { y: 2; x: controller.selectedClipMuted ? parent.width - width - 2 : 2; width: 16; height: 16; radius: 8; color: Theme.textPrimary }
-                        MouseArea { anchors.fill: parent; onClicked: { muteToggle.forceActiveFocus(); controller.toggleSelectedClipMute() } }
+                // One unambiguous action; the state is the clip's single mute flag.
+                Rectangle {
+                    id: muteButton
+                    visible: controller.selectedClipHasAudio
+                    width: parent.width; height: 32
+                    radius: Theme.radiusM
+                    activeFocusOnTab: true
+                    color: muteMouse.pressed ? Theme.bgPressed
+                         : (controller.selectedClipMuted ? (muteMouse.containsMouse ? "#4a3a1c" : "#3a2f18")
+                         : (muteMouse.containsMouse ? Theme.bgHover : Theme.bgElevated))
+                    border.width: 1
+                    border.color: activeFocus ? Theme.focus : (controller.selectedClipMuted ? Theme.warning : Theme.borderStrong)
+                    Keys.onSpacePressed: controller.toggleSelectedClipMute()
+                    Keys.onReturnPressed: controller.toggleSelectedClipMute()
+                    Row {
+                        anchors.centerIn: parent
+                        spacing: 8
+                        TGlyph { anchors.verticalCenter: parent.verticalCenter; width: 16; height: 16; kind: controller.selectedClipMuted ? "speaker-off" : "speaker"; ink: controller.selectedClipMuted ? Theme.warning : Theme.textPrimary }
+                        Text { anchors.verticalCenter: parent.verticalCenter; text: controller.selectedClipMuted ? "Activar audio" : "Silenciar audio"; color: Theme.textPrimary; font.pixelSize: Theme.fontSizeM }
+                        Text { anchors.verticalCenter: parent.verticalCenter; text: "M"; color: Theme.textMuted; font.pixelSize: Theme.fontSizeXS; font.family: Theme.mono }
                     }
+                    MouseArea { id: muteMouse; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: { muteButton.forceActiveFocus(); controller.toggleSelectedClipMute() } }
                 }
-                Text { width: parent.width; text: "−60 a +12 dB"; color: Theme.textMuted; font.pixelSize: Theme.fontSizeXS }
+                Text { visible: !controller.selectedClipHasAudio; width: parent.width; wrapMode: Text.WordWrap; text: "Este clip no tiene audio."; color: Theme.textMuted; font.pixelSize: Theme.fontSizeS }
+                Text { visible: controller.selectedClipHasAudio; width: parent.width; text: "−60 a +12 dB"; color: Theme.textMuted; font.pixelSize: Theme.fontSizeXS }
             }
 
             // ---- MEDIA INFO (informative) ------------------------------

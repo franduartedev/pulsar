@@ -1,4 +1,5 @@
 #include "desktop_controller.hpp"
+#include "timeline_zoom.hpp"
 #include "builtin_sound_catalog.hpp"
 #include <QFileInfo>
 #include <QDir>
@@ -474,6 +475,9 @@ QString DesktopController::rulerLabel(double seconds, double step) {
 // Snap distance is fixed on screen (pixels), whatever the zoom: converted to
 // time with the current viewport only to decide whether an edge is "near".
 std::optional<MediaTime> DesktopController::snapToleranceAt(double width) const {
+  // Snap off: a zero tolerance makes every resolver return the raw gesture result
+  // (overlap confinement still applies, it is not part of snapping).
+  if (!snap_enabled_) return MediaTime::zero();
   constexpr double kSnapPixels = 8.0;
   const auto far = timelineTimeAt(kSnapPixels, width);
   const auto origin = timelineTimeAt(0.0, width);
@@ -528,6 +532,19 @@ void DesktopController::setTimelineZoom(double zoom) {
   const auto value = std::clamp(zoom, 1.0, 10'000'000.0);
   if (std::abs(value - timeline_zoom_) < 1e-9) return;
   timeline_zoom_ = value;
+  publishTimeline();
+  emit timelineViewChanged();
+}
+
+void DesktopController::zoomTimelineAt(double pixel, double width, double factor) {
+  if (!active_session_ || !(width > 0.0)) return;
+  const auto total = active_session_->timeline_duration();
+  if (total <= MediaTime::zero()) return;
+  const auto next = pulsar::desktop::anchored_zoom(secondsAsDouble(total), {timeline_zoom_, timeline_scroll_},
+                                                   factor, pixel / width);
+  if (std::abs(next.zoom - timeline_zoom_) < 1e-9 && std::abs(next.scroll - timeline_scroll_) < 1e-12) return;
+  timeline_zoom_ = next.zoom;
+  timeline_scroll_ = next.scroll;
   publishTimeline();
   emit timelineViewChanged();
 }
@@ -1060,7 +1077,7 @@ void DesktopController::setSelectedClipGainDb(double gain_db) {
   }
 }
 void DesktopController::toggleSelectedClipMute() {
-  if (!active_session_ || !active_session_->selected_clip()) return;
+  if (!active_session_ || !active_session_->selected_clip() || !selectedClipHasAudio()) return;
   try {
     active_session_->set_clip_muted(*active_session_->selected_clip(), !selectedClipMuted());
     clearError();

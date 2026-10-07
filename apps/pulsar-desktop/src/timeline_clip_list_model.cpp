@@ -29,6 +29,7 @@ QVariant TimelineClipListModel::data(const QModelIndex& index, int role) const {
   case InViewportRole: return row.in_viewport;
   case TrackIndexRole: return row.track_index;
   case AudioTrackRole: return row.audio_track;
+  case HasAudioRole: return row.has_audio;
   default: return {};
   }
 }
@@ -39,7 +40,7 @@ QHash<int, QByteArray> TimelineClipListModel::roleNames() const {
           {SelectedRole, "selected"}, {MutedRole, "muted"}, {GainDbRole, "gainDb"},
           {StartProgressRole, "startProgress"}, {EndProgressRole, "endProgress"},
           {InViewportRole, "inViewport"}, {TrackIndexRole, "trackIndex"},
-          {AudioTrackRole, "audioTrack"}};
+          {AudioTrackRole, "audioTrack"}, {HasAudioRole, "hasAudio"}};
 }
 
 void TimelineClipListModel::refresh(const pulsar::desktop::EditorSession& session,
@@ -69,6 +70,7 @@ void TimelineClipListModel::refresh(const pulsar::desktop::EditorSession& sessio
                       clip->timeline_range().start() < view_end;
     row.track_index = static_cast<int>(view.track_index);
     row.audio_track = view.track_kind == pulsar::domain::TrackKind::Audio;
+    row.has_audio = view.has_audio;
     desired.push_back(std::move(row));
   }
 
@@ -85,7 +87,7 @@ void TimelineClipListModel::refresh(const pulsar::desktop::EditorSession& sessio
   constexpr int roles[] = {ClipKeyRole, NameRole, StartRole, EndRole, DurationRole,
                            MissingRole, SelectedRole, MutedRole, GainDbRole,
                            StartProgressRole, EndProgressRole, InViewportRole};
-  constexpr int track_roles[] = {TrackIndexRole, AudioTrackRole};
+  constexpr int track_roles[] = {TrackIndexRole, AudioTrackRole, HasAudioRole};
   for (std::size_t row_index = 0; row_index < rows_.size(); ++row_index) {
     auto& row = rows_[row_index];
     const Row& next = desired[row_index];
@@ -111,7 +113,8 @@ void TimelineClipListModel::refresh(const pulsar::desktop::EditorSession& sessio
     }
     for (const int role : track_roles) {
       const bool role_changed = role == TrackIndexRole ? row.track_index != next.track_index
-                                                       : row.audio_track != next.audio_track;
+                              : role == AudioTrackRole ? row.audio_track != next.audio_track
+                                                       : row.has_audio != next.has_audio;
       changed = changed || role_changed;
     }
     if (changed) {

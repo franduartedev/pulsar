@@ -1,6 +1,7 @@
 #include "duration_sample_ring.hpp"
 #include "editor_session.hpp"
 #include "project_path_resolution.hpp"
+#include "timeline_zoom.hpp"
 
 #include <pulsar/application/media/media_probe.hpp>
 #include <pulsar/application/playback/playback_worker.hpp>
@@ -1296,6 +1297,34 @@ void grouped_edit_rolls_back_and_trims_whole_groups() {
   assert(document.timeline().find_track(document.video_track_id())->clips().size() <= 2);
 }
 
+void wheel_zoom_keeps_the_anchor_time_under_the_cursor() {
+  using desktop::ZoomView;
+  const double total = 40.0;
+  // Time under anchor a for a view: start + a * duration.
+  const auto time_under = [&](ZoomView view, double anchor) {
+    const double duration = total / view.zoom;
+    return (total - duration) * view.scroll + anchor * duration;
+  };
+  for (const double anchor : {0.0, 0.25, 0.5, 0.9, 1.0}) {
+    ZoomView view{1.0, 0.0};
+    for (int step = 0; step < 12; ++step) {
+      const double before = time_under(view, anchor);
+      view = desktop::anchored_zoom(total, view, 1.5, anchor);
+      assert(view.zoom > 1.0 && view.scroll >= 0.0 && view.scroll <= 1.0);
+      assert(std::abs(time_under(view, anchor) - before) < 1e-9);
+    }
+    // Zooming back out never leaves the valid range and ends in the fitted view.
+    for (int step = 0; step < 40; ++step) view = desktop::anchored_zoom(total, view, 1.0 / 1.5, anchor);
+    assert(view.zoom == desktop::kMinTimelineZoom && view.scroll == 0.0);
+  }
+  // Clamped at the maximum; invalid input leaves the view untouched.
+  ZoomView deep{desktop::kMaxTimelineZoom, 0.5};
+  assert(desktop::anchored_zoom(total, deep, 100.0, 0.5).zoom == desktop::kMaxTimelineZoom);
+  const auto same = desktop::anchored_zoom(0.0, ZoomView{2.0, 0.3}, 2.0, 0.5);
+  assert(same.zoom == 2.0 && same.scroll == 0.3);
+  assert(desktop::anchored_zoom(total, ZoomView{2.0, 0.3}, std::nan(""), 0.5).zoom == 2.0);
+}
+
 int main() {
   viewport_is_exactly_guarded();
   zoom_and_pan_preserve_editorial_time_mapping();
@@ -1339,5 +1368,6 @@ int main() {
   separate_audio_reuses_or_adds_audio_tracks();
   separate_audio_refusals_leave_no_trace();
   grouped_edit_rolls_back_and_trims_whole_groups();
+  wheel_zoom_keeps_the_anchor_time_under_the_cursor();
   return 0;
 }

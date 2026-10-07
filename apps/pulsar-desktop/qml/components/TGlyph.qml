@@ -4,7 +4,7 @@ import "../theme/Theme.js" as Theme
 // Static vector glyph painted once on a Canvas (no icon assets to package).
 // Kinds: transport "home" | "play" | "pause" | "end";
 //        edit "split" | "trash" | "undo" | "redo" | "fit";
-//        media "video" | "audio".
+//        media "video" | "audio";  audio state "speaker" | "speaker-off"; "magnet".
 Item {
     id: glyph
     property string kind: "play"
@@ -83,6 +83,34 @@ Item {
                 ctx.fillRect(w * 0.80, h * 0.22, w * 0.08, h * 0.56)
                 tri(0.26, 0.34, 0.26, 0.66, 0.46, 0.50)
                 tri(0.74, 0.34, 0.74, 0.66, 0.54, 0.50)
+            } else if (glyph.kind === "speaker" || glyph.kind === "speaker-off") {
+                // Speaker cone; waves when active, a cross when silenced.
+                ctx.beginPath()
+                ctx.moveTo(w * 0.12, h * 0.40); ctx.lineTo(w * 0.30, h * 0.40)
+                ctx.lineTo(w * 0.50, h * 0.22); ctx.lineTo(w * 0.50, h * 0.78)
+                ctx.lineTo(w * 0.30, h * 0.60); ctx.lineTo(w * 0.12, h * 0.60)
+                ctx.closePath()
+                ctx.fill()
+                if (glyph.kind === "speaker") {
+                    ctx.beginPath(); ctx.arc(w * 0.50, h * 0.50, w * 0.20, -0.9, 0.9); ctx.stroke()
+                    ctx.beginPath(); ctx.arc(w * 0.50, h * 0.50, w * 0.36, -0.9, 0.9); ctx.stroke()
+                } else {
+                    ctx.beginPath()
+                    ctx.moveTo(w * 0.64, h * 0.38); ctx.lineTo(w * 0.90, h * 0.62)
+                    ctx.moveTo(w * 0.90, h * 0.38); ctx.lineTo(w * 0.64, h * 0.62)
+                    ctx.stroke()
+                }
+            } else if (glyph.kind === "magnet") {
+                // Horseshoe magnet: U shape with two pole tips.
+                ctx.lineWidth = 2.6
+                ctx.beginPath()
+                ctx.moveTo(w * 0.24, h * 0.14); ctx.lineTo(w * 0.24, h * 0.52)
+                ctx.arc(w * 0.50, h * 0.52, w * 0.26, Math.PI, 0, true)
+                ctx.lineTo(w * 0.76, h * 0.14)
+                ctx.stroke()
+                ctx.lineWidth = 1.4
+                ctx.fillRect(w * 0.17, h * 0.14, w * 0.14, h * 0.12)
+                ctx.fillRect(w * 0.69, h * 0.14, w * 0.14, h * 0.12)
             } else if (glyph.kind === "video") {
                 ctx.strokeRect(w * 0.12, h * 0.24, w * 0.76, h * 0.52)
                 tri(0.43, 0.38, 0.43, 0.62, 0.63, 0.50)

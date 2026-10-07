@@ -73,6 +73,8 @@ class DesktopController final : public QObject {
   Q_PROPERTY(QString selectedClipKey READ selectedClipKey NOTIFY timelineChanged)
   Q_PROPERTY(double selectedClipGainDb READ selectedClipGainDb NOTIFY timelineChanged)
   Q_PROPERTY(bool selectedClipMuted READ selectedClipMuted NOTIFY timelineChanged)
+  Q_PROPERTY(bool selectedClipHasAudio READ selectedClipHasAudio NOTIFY timelineChanged)
+  Q_PROPERTY(bool snapEnabled READ snapEnabled WRITE setSnapEnabled NOTIFY snapEnabledChanged)
   Q_PROPERTY(bool canSplit READ canSplit NOTIFY editActionStateChanged)
   Q_PROPERTY(bool canSeparateAudio READ canSeparateAudio NOTIFY editActionStateChanged)
   Q_PROPERTY(bool canUndo READ canUndo NOTIFY timelineChanged)
@@ -128,6 +130,12 @@ public:
   [[nodiscard]] QString selectedClipKey() const { return selected_clip_key_; }
   [[nodiscard]] double selectedClipGainDb() const;
   [[nodiscard]] bool selectedClipMuted() const;
+  [[nodiscard]] bool selectedClipHasAudio() const {
+    return active_session_ && active_session_->selected_clip().has_value() &&
+           active_session_->clip_has_audio(*active_session_->selected_clip());
+  }
+  [[nodiscard]] bool snapEnabled() const { return snap_enabled_; }
+  void setSnapEnabled(bool enabled) { if (snap_enabled_ == enabled) return; snap_enabled_ = enabled; emit snapEnabledChanged(); }
   [[nodiscard]] bool canSplit() const { return active_session_ && active_session_->can_split(); }
   [[nodiscard]] bool canSeparateAudio() const {
     return active_session_ && active_session_->selected_clip().has_value() &&
@@ -151,6 +159,8 @@ public:
   Q_INVOKABLE void selectTimelineClip(const QString& clip_key);
   Q_INVOKABLE void seekTimelineAt(double pixel, double width);
   Q_INVOKABLE void setTimelineZoom(double zoom);
+  // Wheel zoom: scales the view by `factor`, keeping the time under `pixel` under the cursor.
+  Q_INVOKABLE void zoomTimelineAt(double pixel, double width, double factor);
   // Show the whole program: logical viewport only, clips are untouched.
   Q_INVOKABLE void fitTimeline();
   // Live feedback for a drag, including magnetic snapping. {offset: px to
@@ -196,7 +206,7 @@ signals:
   void exportRunningChanged(); void exportProgressChanged(); void exportStatusChanged();
   void exportDestinationChanged();
   void projectDirtyChanged(); void activeProjectPathChanged();
-  void diagnosticsChanged(); void timelineChanged(); void timelinePlayheadChanged(); void timelineViewChanged(); void waveformPolicyChanged(); void editActionStateChanged(); void focusImportPathRequested();
+  void diagnosticsChanged(); void timelineChanged(); void timelinePlayheadChanged(); void timelineViewChanged(); void snapEnabledChanged(); void waveformPolicyChanged(); void editActionStateChanged(); void focusImportPathRequested();
   void soundLibraryChanged(); void assetsChanged();
 private:
   struct WorkerCommand { std::filesystem::path path; std::uint64_t generation; };
@@ -267,6 +277,7 @@ private:
   WaveformSourceCreator waveform_source_creator_;
   std::unordered_map<std::string, std::shared_ptr<pulsar::application::WaveformCacheRequest>> waveform_requests_;
   std::vector<QPointer<QObject>> waveform_items_;
+  bool snap_enabled_{true};
   QVariantList sound_library_;
   struct BuiltinSound { std::string id; std::string name; std::string category; std::int64_t duration_frames; };
   std::unordered_map<std::string, BuiltinSound> builtin_sounds_;
