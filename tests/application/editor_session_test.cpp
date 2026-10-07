@@ -663,6 +663,304 @@ void runtime_media_path_resolution() {
          std::filesystem::path{"media/clip.mp4"});
 }
 
+// ---- QA-001: multi-video ingest --------------------------------------------
+
+class SecondsProbe final : public MediaProbe {
+public:
+  explicit SecondsProbe(std::int64_t seconds, bool video = true) : seconds_{seconds}, video_{video} {}
+  MediaProbeResult probe(const std::filesystem::path& path) const override {
+    MediaProbeResult result;
+    result.path = path;
+    const MediaTime duration{seconds_, Rational{1, 1}};
+    if (video_) {
+      result.video_streams.push_back(VideoStreamInfo{0, "h264", 1280, 720, Rational{1, 90000},
+                                                     duration, std::nullopt});
+    }
+    result.audio_streams.push_back(application::AudioStreamInfo{1, "aac", 48'000, 2,
+                                                                 Rational{1, 48'000}, duration});
+    return result;
+  }
+
+private:
+  std::int64_t seconds_;
+  bool video_;
+};
+
+MediaTime secs(std::int64_t value) { return MediaTime{value, Rational{1, 1}}; }
+
+std::vector<std::pair<std::int64_t, std::int64_t>> video_layout(const EditorSession& session) {
+  std::vector<std::pair<std::int64_t, std::int64_t>> layout;
+  const auto* track = session.document().timeline().find_track(session.document().video_track_id());
+  for (const auto& clip : track->clips()) {
+    layout.emplace_back(clip.timeline_range().start().seconds().numerator() /
+                            clip.timeline_range().start().seconds().denominator(),
+                        clip.timeline_range().end().seconds().numerator() /
+                            clip.timeline_range().end().seconds().denominator());
+  }
+  return layout;
+}
+using Layout = std::vector<std::pair<std::int64_t, std::int64_t>>;
+
+std::size_t video_clip_count(const EditorSession& session) {
+  return session.document().timeline().find_track(session.document().video_track_id())->clips().size();
+}
+
+// A: second video goes into a gap; B: third video appends; the audio track
+// being longer than VIDEO 1 must not move the append point.
+void ingest_inserts_into_gap_and_appends_after_video_end() {
+  EditorSession session;
+  const auto a = session.processor().import_asset("a.mp4", SecondsProbe{10});
+  (void)session.processor().add_clip(a, TimeRange{MediaTime::zero(), secs(10)}, MediaTime::zero());
+  session.synchronize_document_state();
+  const auto b = session.processor().import_asset("b.mp4", SecondsProbe{3});
+  const auto c = session.processor().import_asset("c.mp4", SecondsProbe{2});
+
+  const auto inserted = session.insert_video_asset(b, secs(12));
+  assert((video_layout(session) == Layout{{0, 10}, {12, 15}}));
+  const auto* clip_b = session.document().timeline().find_clip(inserted);
+  assert(clip_b != nullptr && clip_b->media_id() == b);
+  assert(clip_b->source_range().start() == MediaTime::zero());
+  assert(clip_b->source_range().end() == secs(3));
+  assert(session.selected_clip() == std::optional<domain::ClipId>{inserted});
+
+  // Long independent audio must not influence "append".
+  const auto audio_track = session.processor().add_track(domain::TrackKind::Audio);
+  const auto music = session.processor().import_asset("music.wav", SecondsProbe{60, false});
+  (void)session.processor().add_clip(audio_track, music, TimeRange{MediaTime::zero(), secs(60)}, MediaTime::zero());
+  session.synchronize_document_state();
+  assert(session.timeline_duration() == secs(60));
+  assert(session.video_track_end() == secs(15));
+  (void)session.append_video_asset(c);
+  assert((video_layout(session) == Layout{{0, 10}, {12, 15}, {15, 17}}));
+}
+
+void ingest_into_empty_track_starts_at_zero() {
+  EditorSession session;
+  const auto a = session.processor().import_asset("a.mp4", SecondsProbe{4});
+  assert(session.video_track_end() == MediaTime::zero());
+  (void)session.append_video_asset(a);
+  assert((video_layout(session) == Layout{{0, 4}}));
+}
+
+// C: overlap is a clean refusal: no clip, no history entry, no generation or
+// dirty change.
+void ingest_overlap_is_refused_without_mutation() {
+  EditorSession session;
+  const auto a = session.processor().import_asset("a.mp4", SecondsProbe{10});
+  (void)session.processor().add_clip(a, TimeRange{MediaTime::zero(), secs(10)}, MediaTime::zero());
+  session.synchronize_document_state();
+  const auto b = session.processor().import_asset("b.mp4", SecondsProbe{3});
+
+  const auto undo_before = session.processor().undo_size();
+  const auto redo_before = session.processor().redo_size();
+  const auto history_before = session.document().history_state_id();
+  const auto generation_before = session.document().document_generation();
+  const auto dirty_before = session.is_dirty();
+  const auto layout_before = video_layout(session);
+
+  for (const auto start : {secs(5), secs(0), secs(8), MediaTime{9'999, Rational{1, 1000}}}) {
+    bool refused = false;
+    try {
+      (void)session.insert_video_asset(b, start);
+    } catch (const desktop::VideoIngestException& error) {
+      refused = error.code() == desktop::VideoIngestError::NoSpace;
+    }
+    assert(refused);
+  }
+  // Touching at the half-open boundary is fine (start == end of A).
+  assert(video_layout(session) == layout_before);
+  assert(session.processor().undo_size() == undo_before);
+  assert(session.processor().redo_size() == redo_before);
+  assert(session.document().history_state_id() == history_before);
+  assert(session.document().document_generation() == generation_before);
+  assert(session.is_dirty() == dirty_before);
+  (void)session.insert_video_asset(b, secs(10));
+  assert((video_layout(session) == Layout{{0, 10}, {10, 13}}));
+}
+
+// A clip that would fit before an existing one but spills over it is refused too.
+void ingest_refuses_overlap_with_following_clip() {
+  EditorSession session;
+  const auto a = session.processor().import_asset("a.mp4", SecondsProbe{4});
+  (void)session.processor().add_clip(a, TimeRange{MediaTime::zero(), secs(4)}, secs(10));
+  session.synchronize_document_state();
+  const auto b = session.processor().import_asset("b.mp4", SecondsProbe{3});
+  bool refused = false;
+  try { (void)session.insert_video_asset(b, secs(8)); }
+  catch (const desktop::VideoIngestException& e) { refused = e.code() == desktop::VideoIngestError::NoSpace; }
+  assert(refused);
+  (void)session.insert_video_asset(b, secs(7));  // [7,10) touches the next clip
+  assert((video_layout(session) == Layout{{7, 10}, {10, 14}}));
+}
+
+// D + E: insertion and append are single undoable edits; the asset outlives
+// the clip.
+void ingest_participates_in_undo_redo_and_dirty_state() {
+  for (const bool append : {false, true}) {
+    EditorSession session;
+    const auto a = session.processor().import_asset("a.mp4", SecondsProbe{10});
+    (void)session.processor().add_clip(a, TimeRange{MediaTime::zero(), secs(10)}, MediaTime::zero());
+    session.synchronize_document_state();
+    const auto b = session.processor().import_asset("b.mp4", SecondsProbe{3});
+    const auto undo_before = session.processor().undo_size();
+    const auto layout_before = video_layout(session);
+
+    (void)(append ? session.append_video_asset(b) : session.insert_video_asset(b, secs(12)));
+    const auto layout_after = video_layout(session);
+    assert(layout_after.size() == 2);
+    assert(session.processor().undo_size() == undo_before + 1);
+    assert(session.is_dirty());
+
+    assert(session.undo());
+    assert(video_layout(session) == layout_before);
+    assert(session.document().find_asset(b).has_value());  // asset stays in the library
+    assert(session.timeline_views().size() == 1);
+
+    assert(session.redo());
+    assert(video_layout(session) == layout_after);
+    assert(session.timeline_views().size() == 2);
+  }
+}
+
+// Saving after ingest marks the document clean and a new ingest dirties it.
+void ingest_dirty_follows_saved_identity() {
+  EditorSession session;
+  const auto a = session.processor().import_asset("a.mp4", SecondsProbe{4});
+  (void)session.append_video_asset(a);
+  session.document().mark_current_state_saved();
+  assert(!session.is_dirty());
+  const auto b = session.processor().import_asset("b.mp4", SecondsProbe{4});
+  session.document().mark_current_state_saved();
+  assert(!session.is_dirty());
+  (void)session.append_video_asset(b);
+  assert(session.is_dirty());
+  assert(session.undo());
+  assert(!session.is_dirty());
+}
+
+// F: audio-only media can never land on VIDEO 1 (session API, command API and
+// persisted state).
+void audio_only_asset_is_rejected_for_video_track() {
+  EditorSession session;
+  const auto music = session.processor().import_asset("music.wav", SecondsProbe{5, false});
+  const auto undo_before = session.processor().undo_size();
+  bool refused = false;
+  try { (void)session.append_video_asset(music); }
+  catch (const desktop::VideoIngestException& e) { refused = e.code() == desktop::VideoIngestError::NotVideoAsset; }
+  assert(refused);
+  assert(video_clip_count(session) == 0);
+  assert(session.processor().undo_size() == undo_before);
+
+  bool core_refused = false;
+  try {
+    (void)session.processor().add_clip(session.document().video_track_id(), music,
+                                       TimeRange{MediaTime::zero(), secs(5)}, MediaTime::zero());
+  } catch (const std::invalid_argument&) { core_refused = true; }
+  assert(core_refused);
+  assert(video_clip_count(session) == 0);
+
+  // A malformed project placing audio-only media on VIDEO 1 is refused on load.
+  application::MediaAsset audio_asset = application::MediaAsset::audio_only(
+      domain::MediaId{1}, "music.wav", secs(5),
+      application::AudioAssetMetadata{0, 48'000, 2, Rational{1, 48'000}, secs(5)});
+  domain::Track track{domain::TrackId{3}, domain::TrackKind::Video};
+  track.insert_clip(domain::Clip{domain::ClipId{1}, domain::MediaId{1},
+                                 TimeRange{MediaTime::zero(), secs(5)}, MediaTime::zero()});
+  application::ProjectAllocatorState allocator;
+  allocator.next_media_id = 2; allocator.next_clip_id = 2; allocator.next_timeline_id = 6; allocator.next_track_id = 4;
+  auto state = make_restore_state(domain::TimelineId{5}, domain::TrackId{3}, {audio_asset}, track, allocator);
+  bool load_refused = false;
+  try { EditorSession loaded(std::move(state), [](const std::filesystem::path&, int) { return std::unique_ptr<application::PlaybackMediaWorker>{}; }); }
+  catch (const std::invalid_argument&) { load_refused = true; }
+  assert(load_refused);
+}
+
+// G (session part): the first video is auto-placed by the desktop; asking to
+// insert the same asset at the same spot afterwards must not duplicate it.
+void ingest_does_not_duplicate_an_already_placed_first_video() {
+  EditorSession session;
+  const auto a = session.processor().import_asset("a.mp4", SecondsProbe{6});
+  (void)session.processor().add_clip(a, TimeRange{MediaTime::zero(), secs(6)}, MediaTime::zero());
+  session.synchronize_document_state();
+  bool refused = false;
+  try { (void)session.insert_video_asset_at_playhead(a); }
+  catch (const desktop::VideoIngestException& e) { refused = e.code() == desktop::VideoIngestError::NoSpace; }
+  assert(refused);
+  assert(video_clip_count(session) == 1);
+}
+
+// H: A, gap, B, C(append) survive save -> reload with identical layout, ranges
+// and assets.
+void multi_video_project_roundtrips() {
+  EditorSession session;
+  const auto a = session.processor().import_asset("a.mp4", SecondsProbe{10});
+  (void)session.processor().add_clip(a, TimeRange{MediaTime::zero(), secs(10)}, MediaTime::zero());
+  session.synchronize_document_state();
+  const auto b = session.processor().import_asset("b.mp4", SecondsProbe{3});
+  const auto c = session.processor().import_asset("c.mp4", SecondsProbe{2});
+  (void)session.insert_video_asset(b, secs(12));
+  (void)session.append_video_asset(c);
+  const auto expected = Layout{{0, 10}, {12, 15}, {15, 17}};
+  assert(video_layout(session) == expected);
+
+  const auto bytes = application::ProjectCodec::encode(session.document().snapshot());
+  EditorSession loaded(application::ProjectCodec::decode(bytes),
+                       [](const std::filesystem::path&, int) { return std::unique_ptr<application::PlaybackMediaWorker>{}; });
+  assert(video_layout(loaded) == expected);
+  assert(loaded.document().asset_list().size() == 3);
+  const auto* track = loaded.document().timeline().find_track(loaded.document().video_track_id());
+  assert(track->clips().size() == 3);
+  for (const auto& clip : track->clips()) {
+    assert(clip.source_range().start() == MediaTime::zero());
+    const auto asset = loaded.document().find_asset(clip.media_id());
+    assert(asset.has_value() && clip.source_range().end() == asset->playable_duration());
+  }
+  assert(application::ProjectCodec::encode(loaded.document().snapshot()) == bytes);
+  // The reloaded session keeps ingesting without id collisions.
+  const auto d = loaded.processor().import_asset("d.mp4", SecondsProbe{1});
+  (void)loaded.append_video_asset(d);
+  assert(video_clip_count(loaded) == 4);
+}
+
+// I: an asset whose media is unavailable is refused clearly.
+void ingest_refuses_unavailable_assets() {
+  application::VideoAssetMetadata metadata{"h264", 1920, 1080, Rational{1, 90000}, std::nullopt, std::nullopt};
+  application::MediaAsset offline{domain::MediaId{7}, "media/offline.mp4", 0, secs(10), metadata,
+                                  application::MediaAvailability::Unavailable, std::string{"gone"}};
+  domain::Track track{domain::TrackId{3}, domain::TrackKind::Video};
+  application::ProjectAllocatorState allocator;
+  allocator.next_media_id = 8; allocator.next_clip_id = 10; allocator.next_timeline_id = 6; allocator.next_track_id = 4;
+  auto state = make_restore_state(domain::TimelineId{5}, domain::TrackId{3}, {offline}, track, allocator);
+  EditorSession loaded(std::move(state), [](const std::filesystem::path&, int) { return std::unique_ptr<application::PlaybackMediaWorker>{}; });
+  const auto generation = loaded.document().document_generation();
+  bool refused = false;
+  try { (void)loaded.append_video_asset(domain::MediaId{7}); }
+  catch (const desktop::VideoIngestException& e) { refused = e.code() == desktop::VideoIngestError::UnavailableAsset; }
+  assert(refused);
+  bool unknown = false;
+  try { (void)loaded.append_video_asset(domain::MediaId{99}); }
+  catch (const desktop::VideoIngestException& e) { unknown = e.code() == desktop::VideoIngestError::UnknownAsset; }
+  assert(unknown);
+  assert(video_clip_count(loaded) == 0);
+  assert(loaded.document().document_generation() == generation);
+}
+
+// The read model's asset revision moves only when the asset set changes.
+void asset_revision_tracks_asset_set_only() {
+  EditorSession session;
+  const auto r0 = session.document().asset_revision();
+  const auto a = session.processor().import_asset("a.mp4", SecondsProbe{4});
+  const auto r1 = session.document().asset_revision();
+  assert(r1 != r0);
+  (void)session.append_video_asset(a);
+  assert(session.document().asset_revision() == r1);  // clip edits do not touch assets
+  assert(session.undo());                              // undo the clip
+  assert(session.document().asset_revision() == r1);
+  assert(session.undo());                              // undo the import
+  assert(session.document().asset_revision() != r1);
+  assert(session.document().asset_list().empty());
+}
+
 int main() {
   viewport_is_exactly_guarded();
   zoom_and_pan_preserve_editorial_time_mapping();
@@ -681,5 +979,16 @@ int main() {
   missing_media_survives_restore_without_workers();
   failed_candidate_preserves_active_session();
   runtime_media_path_resolution();
+  ingest_inserts_into_gap_and_appends_after_video_end();
+  ingest_into_empty_track_starts_at_zero();
+  ingest_overlap_is_refused_without_mutation();
+  ingest_refuses_overlap_with_following_clip();
+  ingest_participates_in_undo_redo_and_dirty_state();
+  ingest_dirty_follows_saved_identity();
+  audio_only_asset_is_rejected_for_video_track();
+  ingest_does_not_duplicate_an_already_placed_first_video();
+  multi_video_project_roundtrips();
+  ingest_refuses_unavailable_assets();
+  asset_revision_tracks_asset_set_only();
   return 0;
 }

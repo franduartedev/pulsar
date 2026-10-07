@@ -10,6 +10,8 @@ qt_add_executable(pulsar_desktop
   src/builtin_sound_catalog.hpp
   src/timeline_clip_list_model.cpp
   src/timeline_clip_list_model.hpp
+  src/media_asset_list_model.cpp
+  src/media_asset_list_model.hpp
   src/waveform_quick_item.cpp
   src/waveform_quick_item.hpp
   src/editor_session.cpp
@@ -101,6 +103,8 @@ add_executable(pulsar_desktop_export_tests
   src/desktop_controller.hpp
   src/timeline_clip_list_model.cpp
   src/timeline_clip_list_model.hpp
+  src/media_asset_list_model.cpp
+  src/media_asset_list_model.hpp
   src/waveform_quick_item.cpp
   src/waveform_quick_item.hpp
   src/editor_session.cpp
@@ -134,4 +138,47 @@ pulsar_apply_compiler_warnings(pulsar_desktop_export_tests)
 add_test(NAME pulsar.desktop.export_integration
          COMMAND pulsar_desktop_export_tests)
 set_tests_properties(pulsar.desktop.export_integration
+  PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+add_executable(pulsar_desktop_ingest_tests
+  tests/desktop_controller_ingest_test.cpp
+  src/desktop_controller.cpp
+  src/desktop_controller.hpp
+  src/timeline_clip_list_model.cpp
+  src/timeline_clip_list_model.hpp
+  src/media_asset_list_model.cpp
+  src/media_asset_list_model.hpp
+  src/waveform_quick_item.cpp
+  src/waveform_quick_item.hpp
+  src/editor_session.cpp
+  src/editor_session.hpp
+  src/preview_image_provider.cpp
+  src/preview_image_provider.hpp
+  src/builtin_sound_catalog.hpp
+)
+set_target_properties(pulsar_desktop_ingest_tests PROPERTIES AUTOMOC ON)
+target_include_directories(pulsar_desktop_ingest_tests PRIVATE src)
+target_link_libraries(pulsar_desktop_ingest_tests
+  PRIVATE
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Qml
+    Qt6::Quick
+    Qt6::Multimedia
+    pulsar::media_ffmpeg
+    pulsar::media_qt_audio
+    pulsar::application
+    pulsar::domain
+    pulsar::project_file
+)
+target_compile_definitions(pulsar_desktop_ingest_tests
+  PRIVATE
+    PULSAR_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+    PULSAR_HAS_QT_AUDIO=1
+)
+pulsar_apply_project_options(pulsar_desktop_ingest_tests)
+pulsar_apply_compiler_warnings(pulsar_desktop_ingest_tests)
+add_test(NAME pulsar.desktop.ingest_integration
+         COMMAND pulsar_desktop_ingest_tests)
+set_tests_properties(pulsar.desktop.ingest_integration
   PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")

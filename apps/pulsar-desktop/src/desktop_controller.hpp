@@ -4,6 +4,7 @@
 #include "duration_sample_ring.hpp"
 #include "preview_image_provider.hpp"
 #include "timeline_clip_list_model.hpp"
+#include "media_asset_list_model.hpp"
 
 #include <pulsar/application/media/media_probe_result.hpp>
 #include <pulsar/application/playback/timeline_playback_coordinator.hpp>
@@ -65,6 +66,8 @@ class DesktopController final : public QObject {
   Q_PROPERTY(double timelineZoom READ timelineZoom NOTIFY timelineViewChanged)
   Q_PROPERTY(double timelineScroll READ timelineScroll NOTIFY timelineViewChanged)
   Q_PROPERTY(double waveformDensity READ waveformDensity WRITE setWaveformDensity NOTIFY waveformPolicyChanged)
+  Q_PROPERTY(QAbstractItemModel* mediaAssets READ mediaAssets NOTIFY assetsChanged)
+  Q_PROPERTY(QString selectedAssetId READ selectedAssetId NOTIFY assetsChanged)
   Q_PROPERTY(QString selectedClipKey READ selectedClipKey NOTIFY timelineChanged)
   Q_PROPERTY(double selectedClipGainDb READ selectedClipGainDb NOTIFY timelineChanged)
   Q_PROPERTY(bool selectedClipMuted READ selectedClipMuted NOTIFY timelineChanged)
@@ -117,6 +120,8 @@ public:
   [[nodiscard]] double timelineZoom() const { return timeline_zoom_; }
   [[nodiscard]] double timelineScroll() const { return timeline_scroll_; }
   [[nodiscard]] double waveformDensity() const { return waveform_density_; }
+  [[nodiscard]] QAbstractItemModel* mediaAssets() { return &asset_model_; }
+  [[nodiscard]] QString selectedAssetId() const { return selected_asset_id_; }
   [[nodiscard]] QString selectedClipKey() const { return selected_clip_key_; }
   [[nodiscard]] double selectedClipGainDb() const;
   [[nodiscard]] bool selectedClipMuted() const;
@@ -151,6 +156,11 @@ public:
   Q_INVOKABLE void insertBuiltinSound(const QString& sound_id);
   Q_INVOKABLE void saveProject(const QString& path);
   Q_INVOKABLE void openProject(const QString& path);
+  // Library actions on imported media. Video assets go to VIDEO 1 as one
+  // undoable edit; overlap is refused without changing the project.
+  Q_INVOKABLE void selectAsset(const QString& media_id);
+  Q_INVOKABLE void insertAssetAtPlayhead(const QString& media_id);
+  Q_INVOKABLE void appendAssetToVideoTrack(const QString& media_id);
   Q_INVOKABLE void exportProject(const QString& path);
   Q_INVOKABLE void cancelExport();
   Q_INVOKABLE void attachWaveformItem(const QString& clip_key, QObject* item);
@@ -162,7 +172,7 @@ signals:
   void exportDestinationChanged();
   void projectDirtyChanged(); void activeProjectPathChanged();
   void diagnosticsChanged(); void timelineChanged(); void timelinePlayheadChanged(); void timelineViewChanged(); void waveformPolicyChanged(); void editActionStateChanged(); void focusImportPathRequested();
-  void soundLibraryChanged();
+  void soundLibraryChanged(); void assetsChanged();
 private:
   struct WorkerCommand { std::filesystem::path path; std::uint64_t generation; };
   struct WaveformItemStamp {
@@ -204,6 +214,9 @@ private:
                                                                         double width) const;
   [[nodiscard]] double timelinePixelAt(pulsar::domain::MediaTime time, double width) const;
   void publishProjectDirty();
+  void refreshAssetsIfChanged();
+  void applyAssetSelection(const QString& media_id);
+  void ingestVideoAsset(const QString& media_id, bool append);
   void refreshWaveformItems();
   void loadSoundLibrary();
   void refreshWaveformItem(WaveformQuickItem* item);
@@ -241,6 +254,10 @@ private:
   std::uint64_t export_generation_{0};
   QString status_{"Vacío"}; QString technical_status_{"Preview CPU"}; QString media_name_; QString metadata_; QString error_message_; QString preview_source_; QString viewer_state_{"empty"}; QString position_text_{"00:00:00.000"}; QString duration_text_{"--:--:--.---"}; QString debug_metrics_; QVariantList timeline_ruler_ticks_; QVariantList timeline_tracks_; QString timeline_duration_text_{"00:00:00.000"}; QString selected_clip_key_;
   TimelineClipListModel timeline_model_;
+  MediaAssetListModel asset_model_;
+  QString selected_asset_id_;
+  std::uint64_t asset_model_epoch_{0};
+  std::uint64_t asset_model_revision_{~std::uint64_t{0}};
   double timeline_playhead_progress_{0.0}; double progress_{0.0}; double export_progress_{0.0}; bool has_media_{false}; bool has_video_media_{false}; bool playing_{false}; bool busy_{false}; bool export_running_{false}; bool preview_late_{false}; bool published_project_dirty_{false};
   QString export_status_{""}; QString export_destination_;
   std::optional<pulsar::domain::MediaTime> timeline_view_start_;

@@ -21,7 +21,7 @@ Item {
             anchors.left: parent.left; anchors.leftMargin: Theme.spaceL
             anchors.right: lateRow.left; anchors.rightMargin: Theme.spaceM
             anchors.verticalCenter: parent.verticalCenter
-            text: controller.hasMedia ? controller.mediaName : ""
+            text: controller.hasMedia ? "Programa" : ""
             color: Theme.textSecondary
             font.pixelSize: Theme.fontSizeS
             elide: Text.ElideMiddle

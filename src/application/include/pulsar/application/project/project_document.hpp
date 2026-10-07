@@ -22,6 +22,10 @@ public:
   [[nodiscard]] domain::TrackId video_track_id() const noexcept { return video_track_id_; }
   [[nodiscard]] domain::TrackId next_track_id() const { return allocator_.next_track(); }
   [[nodiscard]] std::vector<MediaAsset> assets() const { return assets_; }
+  // Allocation-free view for UI read models. Valid until the next asset edit.
+  [[nodiscard]] const std::vector<MediaAsset>& asset_list() const noexcept { return assets_; }
+  // Increments whenever the asset set changes (import, undo/redo of import).
+  [[nodiscard]] std::uint64_t asset_revision() const noexcept { return asset_revision_; }
   [[nodiscard]] std::optional<MediaAsset> find_asset(domain::MediaId id) const;
   [[nodiscard]] const domain::Timeline& timeline() const noexcept { return timeline_; }
   [[nodiscard]] domain::ClipId next_clip_id() const;
@@ -85,6 +89,7 @@ private:
   domain::Timeline timeline_;
   domain::TrackId video_track_id_;
   std::vector<MediaAsset> assets_;
+  std::uint64_t asset_revision_{0};
   HistoryStateId current_history_state_id_{1};
   HistoryStateId saved_history_state_id_{1};
   HistoryStateId next_history_state_id_{2};

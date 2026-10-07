@@ -7,39 +7,11 @@ Panel {
     signal importRequested()
     id: mediaPanel
 
-    // Presentation-only lookup into the existing metadata blob.
-    function metaValue(key) {
-        var text = controller.metadata
-        if (!text) {
-            return ""
-        }
-        var lines = text.split("\n")
-        for (var i = 0; i < lines.length; ++i) {
-            var idx = lines[i].indexOf(":")
-            if (idx < 0) {
-                continue
-            }
-            if (lines[i].slice(0, idx).trim() === key) {
-                return lines[i].slice(idx + 1).trim()
-            }
-        }
-        return ""
-    }
     function focusPath() {
         pathInput.forceActiveFocus()
         pathInput.selectAll()
     }
 
-    // "Video · 1280 × 720" / "Audio · 44100 Hz": short, no codec jargon.
-    property string assetInfo: {
-        var res = metaValue("Resolución")
-        if (res.length > 0) {
-            return "Video · " + res
-        }
-        var rate = metaValue("Audio sample rate")
-        return rate.length > 0 ? "Audio · " + rate : "Medio"
-    }
-    readonly property bool assetIsVideo: assetInfo.indexOf("Video") === 0
     property bool soundsTab: false
 
     Text { id: title; anchors.left: parent.left; anchors.top: parent.top; anchors.leftMargin: Theme.spaceL; anchors.topMargin: Theme.spaceL; text: "Biblioteca"; color: Theme.textPrimary; font.pixelSize: Theme.fontSizeL; font.bold: true }
@@ -83,30 +55,46 @@ Panel {
         anchors.leftMargin: Theme.spaceM; anchors.rightMargin: Theme.spaceM
         anchors.topMargin: Theme.spaceS; anchors.bottomMargin: Theme.spaceS
         clip: true; spacing: 4
-        // One entry today (the active source). The row is the unit the media
-        // bin will list per asset once the controller exposes more than one.
-        model: controller.hasMedia ? 1 : 0
+        boundsBehavior: Flickable.StopAtBounds
+        model: controller.mediaAssets
         delegate: Rectangle {
-            width: mediaList.width; height: 52; radius: Theme.radiusM
-            color: Theme.bgSelected
-            Rectangle { anchors.left: parent.left; anchors.top: parent.top; anchors.bottom: parent.bottom; anchors.topMargin: 10; anchors.bottomMargin: 10; width: 2; radius: 1; color: Theme.accent }
+            id: assetRow
+            readonly property bool current: model.mediaId === controller.selectedAssetId
+            readonly property bool isVideo: model.kind === "video"
+            // Actions only on the selected video asset: one quiet row, no per-row buttons.
+            readonly property bool showActions: current && isVideo
+            width: mediaList.width
+            height: 52 + (showActions ? 38 : 0)
+            radius: Theme.radiusM
+            color: current ? Theme.bgSelected : (rowMouse.containsMouse ? Theme.bgHover : "transparent")
+            opacity: model.available ? 1.0 : 0.6
+            MouseArea { id: rowMouse; anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top; height: 52; hoverEnabled: true; onClicked: controller.selectAsset(model.mediaId) }
+            Rectangle { visible: assetRow.current; anchors.left: parent.left; anchors.top: parent.top; anchors.topMargin: 10; width: 2; height: 32; radius: 1; color: Theme.accent }
             Rectangle {
                 id: iconBox
-                anchors.left: parent.left; anchors.leftMargin: 12; anchors.verticalCenter: parent.verticalCenter
+                anchors.left: parent.left; anchors.leftMargin: 12; anchors.top: parent.top; anchors.topMargin: 10
                 width: 32; height: 32; radius: Theme.radiusM; color: Theme.bgElevated
-                TGlyph { anchors.centerIn: parent; width: 18; height: 18; kind: mediaPanel.assetIsVideo ? "video" : "audio"; ink: mediaPanel.assetIsVideo ? Theme.waveform : Theme.waveformAudio }
+                TGlyph { anchors.centerIn: parent; width: 18; height: 18; kind: assetRow.isVideo ? "video" : "audio"; ink: assetRow.isVideo ? Theme.waveform : Theme.waveformAudio }
             }
             Column {
                 anchors.left: iconBox.right; anchors.leftMargin: 10; anchors.right: parent.right; anchors.rightMargin: 10
-                anchors.verticalCenter: parent.verticalCenter
+                anchors.top: parent.top; anchors.topMargin: 10
                 spacing: 2
-                Text { width: parent.width; text: controller.mediaName; color: Theme.textPrimary; font.pixelSize: Theme.fontSizeM; elide: Text.ElideMiddle }
-                Text { width: parent.width; text: mediaPanel.assetInfo; color: Theme.textSecondary; font.pixelSize: Theme.fontSizeXS; elide: Text.ElideRight }
+                Text { width: parent.width; text: model.name; color: Theme.textPrimary; font.pixelSize: Theme.fontSizeM; elide: Text.ElideMiddle }
+                Text { width: parent.width; text: model.info; color: model.available ? Theme.textSecondary : Theme.error; font.pixelSize: Theme.fontSizeXS; elide: Text.ElideRight }
+            }
+            Row {
+                visible: assetRow.showActions
+                anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom
+                anchors.leftMargin: 12; anchors.rightMargin: 12; anchors.bottomMargin: 8
+                spacing: 6
+                PButton { width: (parent.width - 6) / 2; height: Theme.controlHeightSmall; primary: true; text: "Insertar"; enabled: model.available; onClicked: controller.insertAssetAtPlayhead(model.mediaId) }
+                PButton { width: (parent.width - 6) / 2; height: Theme.controlHeightSmall; text: "Al final"; enabled: model.available; onClicked: controller.appendAssetToVideoTrack(model.mediaId) }
             }
         }
     }
     Column {
-        visible: !mediaPanel.soundsTab && !controller.hasMedia
+        visible: !mediaPanel.soundsTab && mediaList.count === 0
         anchors.horizontalCenter: parent.horizontalCenter; anchors.top: tabs.bottom; anchors.topMargin: 40
         width: parent.width - 2 * Theme.spaceXL
         spacing: 6

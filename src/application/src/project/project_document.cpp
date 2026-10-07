@@ -109,6 +109,9 @@ ProjectDocument ProjectDocument::restore(const ProjectRestoreState& state) {
       if (asset == state.assets.end()) {
         throw std::invalid_argument{"clip source range exceeds stored media duration"};
       }
+      if (restore_track.kind == domain::TrackKind::Video && !asset->has_video()) {
+        throw std::invalid_argument{"video track clip references an asset without video"};
+      }
       if (restore_track.kind == domain::TrackKind::Audio && !asset->audio().has_value()) {
         throw std::invalid_argument{"audio track clip references an asset without audio"};
       }
@@ -220,6 +223,7 @@ void ProjectDocument::add_asset_value(const MediaAsset& asset) {
     throw std::invalid_argument{"media asset id already exists in document"};
   }
   assets_.push_back(asset);
+  ++asset_revision_;
 }
 
 void ProjectDocument::remove_asset_value(domain::MediaId id) {
@@ -236,6 +240,7 @@ void ProjectDocument::remove_asset_value(domain::MediaId id) {
     throw std::invalid_argument{"media asset does not exist in document"};
   }
   assets_.erase(iterator);
+  ++asset_revision_;
 }
 
 void ProjectDocument::validate_clip_for_track(domain::TrackId track_id,
@@ -250,6 +255,9 @@ void ProjectDocument::validate_clip_for_track(domain::TrackId track_id,
   }
   if (asset->availability() != MediaAvailability::Available) {
     throw std::invalid_argument{"clip references unavailable media"};
+  }
+  if (track->kind() == domain::TrackKind::Video && !asset->has_video()) {
+    throw std::invalid_argument{"video track clip requires an asset with video"};
   }
   if (track->kind() == domain::TrackKind::Audio && !asset->audio().has_value()) {
     throw std::invalid_argument{"audio track clip requires an asset with usable audio"};

@@ -105,6 +105,58 @@ EditorSession::EditorSession(application::ProjectRestoreState restore_state,
   synchronize_document_state();
 }
 
+domain::MediaTime EditorSession::video_track_end() const {
+  const auto* track = document_.timeline().find_track(document_.video_track_id());
+  auto end = domain::MediaTime::zero();
+  if (track != nullptr) {
+    for (const auto& clip : track->clips()) end = std::max(end, clip.timeline_range().end());
+  }
+  return end;
+}
+
+domain::ClipId EditorSession::insert_video_asset_at_playhead(domain::MediaId media) {
+  return insert_video_asset(media, playback_position());
+}
+
+domain::ClipId EditorSession::append_video_asset(domain::MediaId media) {
+  return insert_video_asset(media, video_track_end());
+}
+
+domain::ClipId EditorSession::insert_video_asset(domain::MediaId media,
+                                                 domain::MediaTime timeline_start) {
+  const auto asset = document_.find_asset(media);
+  if (!asset.has_value()) {
+    throw VideoIngestException{VideoIngestError::UnknownAsset, "unknown media asset"};
+  }
+  if (!asset->has_video()) {
+    throw VideoIngestException{VideoIngestError::NotVideoAsset,
+                               "audio-only media cannot be placed on the video track"};
+  }
+  if (asset->availability() != application::MediaAvailability::Available) {
+    throw VideoIngestException{VideoIngestError::UnavailableAsset, "media asset is unavailable"};
+  }
+  const auto duration = asset->playable_duration();
+  if (duration <= domain::MediaTime::zero() || timeline_start < domain::MediaTime::zero()) {
+    throw VideoIngestException{VideoIngestError::InvalidDuration,
+                               "media has no usable duration or start is negative"};
+  }
+  const domain::TimeRange destination{timeline_start, timeline_start + duration};
+  const auto* track = document_.timeline().find_track(document_.video_track_id());
+  if (track != nullptr) {
+    for (const auto& clip : track->clips()) {
+      if (destination.overlaps(clip.timeline_range())) {
+        throw VideoIngestException{VideoIngestError::NoSpace,
+                                   "not enough room on the video track"};
+      }
+    }
+  }
+  const auto clip = processor_.add_clip(media, domain::TimeRange{domain::MediaTime::zero(), duration},
+                                        timeline_start);
+  selected_clip_ = clip;  // set before sync so the rebuilt read model marks it
+  synchronize_document_state();
+  return clip;
+}
+
 domain::MediaTime EditorSession::timeline_duration() const noexcept {
   return document_.timeline().duration();
 }

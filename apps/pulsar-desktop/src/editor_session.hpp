@@ -14,6 +14,7 @@
 #include <filesystem>
 #include <memory>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -60,6 +61,26 @@ class TimelineViewport {public:
 private:
   domain::MediaTime duration_;
   domain::MediaTime view_start_{domain::MediaTime::zero()};
+};
+
+// Why a video ingest request was refused. The document is never mutated when
+// one of these is thrown.
+enum class VideoIngestError {
+  UnknownAsset,
+  NotVideoAsset,
+  UnavailableAsset,
+  InvalidDuration,
+  NoSpace,
+};
+
+class VideoIngestException final : public std::invalid_argument {
+public:
+  VideoIngestException(VideoIngestError code, const char* message)
+      : std::invalid_argument{message}, code_{code} {}
+  [[nodiscard]] VideoIngestError code() const noexcept { return code_; }
+
+private:
+  VideoIngestError code_;
 };
 
 class EditorSession final {
@@ -111,6 +132,18 @@ public:
   [[nodiscard]] bool can_split() const;
   [[nodiscard]] domain::ClipId split_selected_at_playhead();
   void delete_selected();
+  // Ingest an already imported video asset into VIDEO 1 with its full playable
+  // range. No ripple, overwrite or split: a request that would overlap an
+  // existing clip throws VideoIngestException{NoSpace} and changes nothing.
+  // One undoable command; selects the new clip.
+  [[nodiscard]] domain::ClipId insert_video_asset(domain::MediaId media,
+                                                  domain::MediaTime timeline_start);
+  [[nodiscard]] domain::ClipId insert_video_asset_at_playhead(domain::MediaId media);
+  // Appends right after the last clip of VIDEO 1 (zero when it is empty).
+  [[nodiscard]] domain::ClipId append_video_asset(domain::MediaId media);
+  // End of the last clip on VIDEO 1: the authority for "append", independent of
+  // longer audio tracks.
+  [[nodiscard]] domain::MediaTime video_track_end() const;
   [[nodiscard]] bool undo();
   [[nodiscard]] bool redo();
   [[nodiscard]] bool can_undo() const noexcept { return processor_.can_undo(); }

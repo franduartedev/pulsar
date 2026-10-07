@@ -292,7 +292,7 @@ void DesktopController::closeMedia() {
   waveform_clip_identities_.clear();
   waveform_requests_.clear();
   waveform_item_stamps_.clear();
-  ++editor_session_epoch_;
+  ++editor_session_epoch_; selected_asset_id_.clear();
   visual_mailbox_->clear();
   has_media_ = false; media_name_.clear(); metadata_.clear(); duration_text_ = "--:--:--.---";
   progress_ = 0.0; position_text_ = "00:00:00.000";
@@ -304,6 +304,7 @@ void DesktopController::publishTimeline() {
   const bool old_has_media = has_media_;
   const QString old_duration = duration_text_;
   if (!active_session_) { selected_clip_key_.clear(); emit timelineChanged(); publishProjectDirty(); return; }
+  refreshAssetsIfChanged();
   recomputeTimelineViewport();
   selected_clip_key_ = active_session_->selected_clip() ? QString::number(active_session_->selected_clip()->value()) : QString{};
   timeline_model_.refresh(*active_session_, *timeline_view_start_, *timeline_view_duration_);
@@ -676,6 +677,7 @@ void DesktopController::installTimelineAsset(const pulsar::application::MediaPro
   try {
     StaticProbe probe{result};
     const auto media = active_session_->processor().import_asset(result.path, probe);
+    selected_asset_id_ = QString::number(media.value());
     if (!result.video_streams.empty()) {
       const auto& stream = result.video_streams.front();
       const auto duration = stream.duration ? stream.duration : result.duration;
@@ -700,7 +702,7 @@ void DesktopController::installTimelineAsset(const pulsar::application::MediaPro
       const auto insert_at = active_session_->timeline_duration() > MediaTime::zero()
                                  ? active_session_->playback_position()
                                  : MediaTime::zero();
-      const pulsar::domain::TimeRange inserted_range{insert_at, *duration};
+      const pulsar::domain::TimeRange inserted_range{insert_at, insert_at + *duration};
       std::optional<pulsar::domain::TrackId> audio_track;
       for (const auto& track : active_session_->document().timeline().tracks()) {
         if (track.kind() == pulsar::domain::TrackKind::Audio &&
@@ -734,6 +736,97 @@ void DesktopController::installTimelineAsset(const pulsar::application::MediaPro
     setStatus("Error");
   }
 }
+void DesktopController::refreshAssetsIfChanged() {
+  if (!active_session_) return;
+  const auto& document = active_session_->document();
+  if (asset_model_epoch_ == editor_session_epoch_ &&
+      asset_model_revision_ == document.asset_revision()) {
+    return;
+  }
+  asset_model_epoch_ = editor_session_epoch_;
+  asset_model_revision_ = document.asset_revision();
+  asset_model_.refresh(document);
+  if (!asset_model_.contains(selected_asset_id_)) {
+    // Selection vanished (undo of an import, project switch): fall back to the
+    // most recent listed asset so the Inspector never describes a stale one.
+    selected_asset_id_.clear();
+    for (const auto& asset : document.asset_list()) {
+      if (asset.source_locator().string().rfind("pulsar-sound:", 0) == 0) continue;
+      selected_asset_id_ = QString::number(asset.id().value());
+    }
+    if (selected_asset_id_.isEmpty()) {
+      media_name_.clear();
+      metadata_.clear();
+    } else {
+      applyAssetSelection(selected_asset_id_);
+    }
+  }
+  emit assetsChanged();
+}
+
+void DesktopController::applyAssetSelection(const QString& media_id) {
+  bool ok = false;
+  const auto value = media_id.toULongLong(&ok);
+  if (!ok || !active_session_) return;
+  const auto asset = active_session_->document().find_asset(pulsar::domain::MediaId{value});
+  if (!asset.has_value()) return;
+  selected_asset_id_ = media_id;
+  media_name_ = QString::fromStdString(asset->source_locator().filename().string());
+  metadata_ = assetMetadataText(*asset);
+  emit mediaChanged();
+}
+
+void DesktopController::selectAsset(const QString& media_id) {
+  if (!asset_model_.contains(media_id) || media_id == selected_asset_id_) return;
+  applyAssetSelection(media_id);
+  emit assetsChanged();
+}
+
+void DesktopController::insertAssetAtPlayhead(const QString& media_id) { ingestVideoAsset(media_id, false); }
+void DesktopController::appendAssetToVideoTrack(const QString& media_id) { ingestVideoAsset(media_id, true); }
+
+void DesktopController::ingestVideoAsset(const QString& media_id, bool append) {
+  if (!active_session_) return;
+  bool ok = false;
+  const auto value = media_id.toULongLong(&ok);
+  if (!ok || value == 0) {
+    setError(QStringLiteral("Medio no encontrado."));
+    return;
+  }
+  const pulsar::domain::MediaId media{value};
+  try {
+    if (append) (void)active_session_->append_video_asset(media);
+    else (void)active_session_->insert_video_asset_at_playhead(media);
+  } catch (const pulsar::desktop::VideoIngestException& error) {
+    // Nothing was changed: no history entry, no dirty change, no republish.
+    switch (error.code()) {
+      case pulsar::desktop::VideoIngestError::NoSpace:
+        setError(QStringLiteral("No hay espacio suficiente en la pista de video."));
+        break;
+      case pulsar::desktop::VideoIngestError::UnavailableAsset:
+        setError(QStringLiteral("El medio no está disponible."));
+        break;
+      case pulsar::desktop::VideoIngestError::NotVideoAsset:
+        setError(QStringLiteral("Este medio no tiene video; no se puede colocar en la pista de video."));
+        break;
+      case pulsar::desktop::VideoIngestError::InvalidDuration:
+        setError(QStringLiteral("El medio no tiene una duración utilizable."));
+        break;
+      case pulsar::desktop::VideoIngestError::UnknownAsset:
+        setError(QStringLiteral("Medio no encontrado."));
+        break;
+    }
+    return;
+  } catch (const std::exception&) {
+    setError(QStringLiteral("No se pudo agregar el clip."));
+    return;
+  }
+  clearError();
+  applyAssetSelection(media_id);
+  clearProgram("loading");
+  publishTimeline();
+}
+
 void DesktopController::selectTimelineClip(const QString& key) { if (!active_session_) return; if (key.isEmpty()) active_session_->select_clip(std::nullopt); else { bool ok=false; auto value=key.toULongLong(&ok); if (ok && value) active_session_->select_clip(pulsar::domain::ClipId{value}); } publishTimeline(); }
 double DesktopController::selectedClipGainDb() const {
   if (!active_session_ || !active_session_->selected_clip()) return 0.0;
@@ -880,7 +973,7 @@ void DesktopController::openProject(const QString& path) {
     waveform_clip_identities_.clear();
     waveform_requests_.clear();
     waveform_item_stamps_.clear();
-    ++editor_session_epoch_;
+    ++editor_session_epoch_; selected_asset_id_.clear();
   } catch (const std::exception& error) {
     setBusy(false);
     setError(QString::fromUtf8(error.what()));
