@@ -543,6 +543,7 @@ void DesktopController::onThumbnailFinished(const QString& key, bool ok) {
 }
 
 void DesktopController::publishTimeline() {
+  emit selectedTitleOnScreenChanged();   // selection / range edits change whether the title is drawn
   const bool old_has_media = has_media_;
   const QString old_duration = duration_text_;
   if (!active_session_) { selected_clip_key_.clear(); emit timelineChanged(); publishProjectDirty(); return; }
@@ -1888,7 +1889,41 @@ QVariantMap DesktopController::selectedTitle() const {
   map.insert("shadow", title->shadow());
   map.insert("background", static_cast<int>(title->background()));
   map.insert("opacity", title->opacity_percent());
+  map.insert("hasPosition", title->position().has_value());
+  // The visible block in permille of the frame, so the Viewer can draw its drag handle exactly
+  // where the compositor puts it (one layout pass, only when the selection or the title changes).
+  if (const auto canvas = projectCanvasSize()) {
+    QRect block;
+    if (QtTitleRasterizer::rasterizeWithBlock(*title, canvas->first, canvas->second, &block) && block.width() > 0) {
+      map.insert("blockX", block.x() * 1000.0 / canvas->first);
+      map.insert("blockY", block.y() * 1000.0 / canvas->second);
+      map.insert("blockW", block.width() * 1000.0 / canvas->first);
+      map.insert("blockH", block.height() * 1000.0 / canvas->second);
+    }
+  }
   return map;
+}
+
+bool DesktopController::selectedTitleOnScreen() const {
+  if (!active_session_ || !active_session_->selected_title()) return false;
+  const auto* title = active_session_->document().find_title(*active_session_->selected_title());
+  return title != nullptr && title->active_at(active_session_->playback_position());
+}
+
+void DesktopController::setSelectedTitlePosition(int x_permille, int y_permille) {
+  if (!active_session_ || !active_session_->selected_title()) return;
+  const auto* title = active_session_->document().find_title(*active_session_->selected_title());
+  if (title == nullptr) return;
+  const pulsar::domain::TitlePosition position{std::clamp(x_permille, 0, 1000), std::clamp(y_permille, 0, 1000)};
+  if (title->position() && *title->position() == position) return;
+  commitTitle(title->with_position(position));   // one undo step per drag
+}
+
+void DesktopController::resetSelectedTitlePosition() {
+  if (!active_session_ || !active_session_->selected_title()) return;
+  const auto* title = active_session_->document().find_title(*active_session_->selected_title());
+  if (title == nullptr || !title->position()) return;
+  commitTitle(title->with_position(std::nullopt));
 }
 
 void DesktopController::commitTitle(pulsar::domain::Title title) {
@@ -1968,7 +2003,10 @@ void DesktopController::setSelectedTitleStyle(int size_percent, const QString& c
   const auto h = static_cast<pulsar::domain::TitleHAlign>(std::clamp(horizontal, 0, 2));
   const auto v = static_cast<pulsar::domain::TitleVAlign>(std::clamp(vertical, 0, 2));
   if (size == title->size_permille() && rgba == title->color_rgba() && h == title->horizontal() && v == title->vertical() && shadow == title->shadow()) return;
-  commitTitle(title->with_style(size, rgba, h, v, shadow));
+  auto styled = title->with_style(size, rgba, h, v, shadow);
+  // Picking an alignment preset puts the title back on the preset grid.
+  if (h != title->horizontal() || v != title->vertical()) styled = styled.with_position(std::nullopt);
+  commitTitle(std::move(styled));
 }
 
 void DesktopController::setSelectedTitleLook(int background, int opacity_percent) {
@@ -2447,7 +2485,7 @@ void DesktopController::presentTimeline(const pulsar::application::TimelinePrese
 void DesktopController::displayLease(const pulsar::application::TimelinePresentSample& present){const auto source_epoch=visual_mailbox_->active_epoch();const auto generation=active_session_->document().document_generation();VisualIdentity identity{editor_session_epoch_,generation,present.clip_id,present.media_id,source_epoch,present.sample.ordinal};if(displayed_identity_&&displayed_identity_.value().session_epoch==identity.session_epoch&&displayed_identity_->document_generation==identity.document_generation&&displayed_identity_->clip_id==identity.clip_id&&displayed_identity_->media_id==identity.media_id&&displayed_identity_->source_epoch==identity.source_epoch&&displayed_identity_->ordinal==identity.ordinal&&viewer_state_=="frame")return;auto lease=visual_mailbox_->take(source_epoch,present.sample.ordinal);if(!lease){++visual_misses_;clearProgram("loading");return;}try{FFmpegPreviewConverter converter;auto preview=converter.convert(*lease);composeTitlesOnPreview(preview,present.timeline_position);image_provider_.setImage(imageFromPreview(preview));last_conversion_time_=preview.conversion_time;conversion_durations_.push(preview.conversion_time);++conversion_count_;displayed_identity_=identity;viewer_state_="frame";++displayed_frames_;++preview_revision_;preview_source_=QString("image://pulsar-preview/current?rev=%1").arg(preview_revision_);emit previewChanged();}catch(const std::exception& error){setError(QString::fromUtf8(error.what()));clearProgram("error");}}
 void DesktopController::clearProgram(QString state){title_gap_key_.clear();const bool changed=viewer_state_!=state||!preview_source_.isEmpty();image_provider_.clear();preview_source_.clear();displayed_identity_.reset();viewer_state_=std::move(state);if(changed)emit previewChanged();}
 void DesktopController::updateTick(){if(!active_session_||!has_media_){return;}try{const auto presentation=active_session_->update_playback();presentTimeline(presentation);const bool now_playing=active_session_->playback_intent()==pulsar::application::PlaybackIntent::Playing;if(now_playing!=playing_){playing_=now_playing;emit playbackChanged();}updatePositionProperties();updateDiagnostics();}catch(const std::exception& error){active_session_->pause();playing_=false;emit playbackChanged();clearProgram("error");setError(QString::fromUtf8(error.what()));setStatus("Error");}}
-void DesktopController::updatePositionProperties(){if(!active_session_)return;const auto position=active_session_->playback_position();const auto duration=active_session_->timeline_duration();position_text_=formatTime(position);duration_text_=formatTime(duration);progress_=duration>MediaTime::zero()?std::clamp(secondsAsDouble(position)/secondsAsDouble(duration),0.0,1.0):0.0;timeline_playhead_progress_=timeline_view_start_&&timeline_view_duration_&&position>=*timeline_view_start_&&position<=*timeline_view_start_+*timeline_view_duration_?timelinePixelAt(position,1.0):-1.0;emit positionChanged();emit timelinePlayheadChanged();emit editActionStateChanged();}
+void DesktopController::updatePositionProperties(){if(!active_session_)return;const auto position=active_session_->playback_position();const auto duration=active_session_->timeline_duration();position_text_=formatTime(position);duration_text_=formatTime(duration);progress_=duration>MediaTime::zero()?std::clamp(secondsAsDouble(position)/secondsAsDouble(duration),0.0,1.0):0.0;timeline_playhead_progress_=timeline_view_start_&&timeline_view_duration_&&position>=*timeline_view_start_&&position<=*timeline_view_start_+*timeline_view_duration_?timelinePixelAt(position,1.0):-1.0;emit positionChanged();emit selectedTitleOnScreenChanged();emit timelinePlayheadChanged();emit editActionStateChanged();}
 void DesktopController::publishProjectDirty() {
   const bool now = projectDirty();
   if (now == published_project_dirty_) {

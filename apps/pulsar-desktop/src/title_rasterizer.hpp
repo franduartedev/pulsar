@@ -2,6 +2,7 @@
 
 #include <pulsar/application/composition/title_compositor.hpp>
 
+#include <QRect>
 #include <QString>
 
 // Draws a title with the bundled font (assets/fonts/Inter-Bold.otf) into premultiplied RGBA.
@@ -12,6 +13,11 @@ class QtTitleRasterizer final : public pulsar::application::composition::TitleRa
 public:
   [[nodiscard]] std::optional<pulsar::application::composition::TitleRaster> rasterize(
       const pulsar::domain::Title& title, int canvas_width, int canvas_height) override;
+
+  // Same drawing, also reporting the visible block (text plus box) in canvas pixels: the Viewer
+  // uses it for the drag handle, so what is dragged is exactly what is drawn.
+  [[nodiscard]] static std::optional<pulsar::application::composition::TitleRaster> rasterizeWithBlock(
+      const pulsar::domain::Title& title, int canvas_width, int canvas_height, QRect* block);
 
   // Loads the bundled font once (idempotent). Returns the family used for titles.
   static QString fontFamily();

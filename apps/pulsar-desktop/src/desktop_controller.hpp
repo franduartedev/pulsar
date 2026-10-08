@@ -79,6 +79,7 @@ class DesktopController final : public QObject {
   Q_PROPERTY(QAbstractItemModel* timelineTitles READ timelineTitles NOTIFY timelineChanged)
   Q_PROPERTY(QString selectedTitleKey READ selectedTitleKey NOTIFY timelineChanged)
   Q_PROPERTY(QVariantMap selectedTitle READ selectedTitle NOTIFY timelineChanged)
+  Q_PROPERTY(bool selectedTitleOnScreen READ selectedTitleOnScreen NOTIFY selectedTitleOnScreenChanged)   // selected title is drawn at the playhead
   Q_PROPERTY(QVariantList timelineTracks READ timelineTracks NOTIFY timelineChanged)
   Q_PROPERTY(QString timelineDurationText READ timelineDurationText NOTIFY timelineChanged)
   Q_PROPERTY(QVariantList timelineRulerTicks READ timelineRulerTicks NOTIFY timelineChanged)
@@ -145,6 +146,7 @@ public:
   [[nodiscard]] QAbstractItemModel* timelineTitles() { return &title_model_; }
   [[nodiscard]] QString selectedTitleKey() const;
   [[nodiscard]] QVariantMap selectedTitle() const;
+  [[nodiscard]] bool selectedTitleOnScreen() const;
   // Test hook: the first title of the document (nullptr when there is none).
   [[nodiscard]] const pulsar::domain::Title* titleForTest() const { return active_session_ && !active_session_->titles().empty() ? &active_session_->titles().front() : nullptr; }
   [[nodiscard]] QVariantList timelineTracks() const { return timeline_tracks_; }
@@ -242,6 +244,8 @@ public:
   Q_INVOKABLE void setSelectedTitleText(const QString& text);
   // colour "#RRGGBB"; h: 0 left 1 centre 2 right; v: 0 top 1 middle 2 bottom; size in 2..20 % of the height
   Q_INVOKABLE void setSelectedTitleStyle(int size_percent, const QString& color, int horizontal, int vertical, bool shadow);
+  Q_INVOKABLE void setSelectedTitlePosition(int x_permille, int y_permille);   // block centre, permille of the frame
+  Q_INVOKABLE void resetSelectedTitlePosition();                                // back to the alignment presets
   Q_INVOKABLE void setSelectedTitleLook(int background, int opacity_percent);   // 0 none / 1 dark / 2 light box
   Q_INVOKABLE QVariantMap previewTitleMove(const QString& key, double press, double current, double width);
   Q_INVOKABLE void moveTitle(const QString& key, double press, double current, double width);
@@ -284,7 +288,7 @@ public:
   Q_INVOKABLE void detachWaveformItem(QObject* item);
 signals:
   void statusChanged(); void technicalStatusChanged(); void mediaChanged(); void errorChanged();
-  void previewChanged(); void positionChanged(); void playbackChanged(); void busyChanged();
+  void previewChanged(); void positionChanged(); void selectedTitleOnScreenChanged(); void playbackChanged(); void busyChanged();
   void exportRunningChanged(); void exportProgressChanged(); void exportStatusChanged();
   void exportDestinationChanged();
   void projectDirtyChanged(); void activeProjectPathChanged();

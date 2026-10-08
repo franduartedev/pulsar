@@ -7,10 +7,11 @@ namespace pulsar::domain {
 
 Title::Title(TitleId id, std::string text, TimeRange range, int size_permille,
              std::uint32_t color_rgba, TitleHAlign horizontal, TitleVAlign vertical, bool shadow,
-             TitleBackground background, int opacity_percent)
+             TitleBackground background, int opacity_percent,
+             std::optional<TitlePosition> position)
     : id_{id}, text_{std::move(text)}, range_{range}, size_permille_{size_permille},
       color_rgba_{color_rgba}, horizontal_{horizontal}, vertical_{vertical}, shadow_{shadow},
-      background_{background}, opacity_percent_{opacity_percent} {
+      background_{background}, opacity_percent_{opacity_percent}, position_{position} {
   if (text_.empty()) throw std::invalid_argument{"title text cannot be empty"};
   if (text_.size() > maximum_text_bytes) throw std::invalid_argument{"title text is too long"};
   for (const unsigned char c : text_) {
@@ -25,23 +26,31 @@ Title::Title(TitleId id, std::string text, TimeRange range, int size_permille,
       static_cast<int>(background_) > static_cast<int>(TitleBackground::Light)) {
     throw std::invalid_argument{"title look is out of range"};
   }
+  if (position_ && (position_->x_permille < 0 || position_->x_permille > 1000 || position_->y_permille < 0 ||
+                    position_->y_permille > 1000)) {
+    throw std::invalid_argument{"title position is out of range"};
+  }
 }
 
 Title Title::with_text(std::string text) const {
-  return Title{id_, std::move(text), range_, size_permille_, color_rgba_, horizontal_, vertical_, shadow_, background_, opacity_percent_};
+  return Title{id_, std::move(text), range_, size_permille_, color_rgba_, horizontal_, vertical_, shadow_, background_, opacity_percent_, position_};
 }
 
 Title Title::with_range(TimeRange range) const {
-  return Title{id_, text_, range, size_permille_, color_rgba_, horizontal_, vertical_, shadow_, background_, opacity_percent_};
+  return Title{id_, text_, range, size_permille_, color_rgba_, horizontal_, vertical_, shadow_, background_, opacity_percent_, position_};
 }
 
 Title Title::with_style(int size_permille, std::uint32_t color_rgba, TitleHAlign horizontal,
                         TitleVAlign vertical, bool shadow) const {
-  return Title{id_, text_, range_, size_permille, color_rgba, horizontal, vertical, shadow, background_, opacity_percent_};
+  return Title{id_, text_, range_, size_permille, color_rgba, horizontal, vertical, shadow, background_, opacity_percent_, position_};
 }
 
 Title Title::with_look(TitleBackground background, int opacity_percent) const {
-  return Title{id_, text_, range_, size_permille_, color_rgba_, horizontal_, vertical_, shadow_, background, opacity_percent};
+  return Title{id_, text_, range_, size_permille_, color_rgba_, horizontal_, vertical_, shadow_, background, opacity_percent, position_};
+}
+
+Title Title::with_position(std::optional<TitlePosition> position) const {
+  return Title{id_, text_, range_, size_permille_, color_rgba_, horizontal_, vertical_, shadow_, background_, opacity_percent_, position};
 }
 
 bool Title::active_at(MediaTime time) const {
@@ -52,7 +61,9 @@ std::string Title::look_key() const {
   return std::to_string(size_permille_) + "|" + std::to_string(color_rgba_) + "|" +
          std::to_string(static_cast<int>(horizontal_)) + "|" +
          std::to_string(static_cast<int>(vertical_)) + "|" + (shadow_ ? "s" : "n") + "|" +
-         std::to_string(static_cast<int>(background_)) + "|" + std::to_string(opacity_percent_) + "|" + text_;
+         std::to_string(static_cast<int>(background_)) + "|" + std::to_string(opacity_percent_) + "|" +
+         (position_ ? std::to_string(position_->x_permille) + "," + std::to_string(position_->y_permille) : std::string{"-"}) +
+         "|" + text_;
 }
 
 } // namespace pulsar::domain

@@ -201,7 +201,9 @@ std::string ProjectCodec::encode(const ProjectSnapshot& snapshot) {
   // Files without titles stay byte-compatible version 2; titles need version 3.
   const bool has_titles = !snapshot.titles.empty() || snapshot.allocator_state.next_title_id != 1;
   bool needs_v4 = false;
+  bool needs_v5 = false;
   for (const auto& title : snapshot.titles) {
+    if (title.position()) needs_v5 = true;   // free title placement
     if (title.background() != domain::TitleBackground::None || title.opacity_percent() != 100) needs_v4 = true;   // newer features share version 4
   }
   for (const auto& track : snapshot.timeline.tracks()) {
@@ -210,7 +212,7 @@ std::string ProjectCodec::encode(const ProjectSnapshot& snapshot) {
     }
   }
   // Version 4 adds clip fades; every file that does not need a newer feature keeps its old version.
-  output << (needs_v4 ? "PULSAR_PROJECT 4\n" : has_titles ? "PULSAR_PROJECT 3\n" : "PULSAR_PROJECT 2\n");
+  output << (needs_v5 ? "PULSAR_PROJECT 5\n" : needs_v4 ? "PULSAR_PROJECT 4\n" : has_titles ? "PULSAR_PROJECT 3\n" : "PULSAR_PROJECT 2\n");
   output << "TIMELINE " << snapshot.timeline.id().value() << "\n";
   const auto tracks = sorted_tracks(snapshot.timeline);
   for (const auto* track : tracks) {
@@ -311,6 +313,10 @@ std::string ProjectCodec::encode(const ProjectSnapshot& snapshot) {
       output << "TITLE_LOOK " << title.id().value() << ' ' << static_cast<int>(title.background()) << ' '
              << title.opacity_percent() << "\n";
     }
+    if (title.position()) {
+      output << "TITLE_POS " << title.id().value() << ' ' << title.position()->x_permille << ' '
+             << title.position()->y_permille << "\n";
+    }
   }
 
   output << "ALLOCATOR " << snapshot.allocator_state.next_media_id << ' '
@@ -370,7 +376,7 @@ ProjectRestoreState ProjectCodec::decode(std::string_view bytes) {
 
     try {
       if (tokens[0].text == "PULSAR_PROJECT") {
-        if (header || tokens.size() != 2 || (tokens[1].text != "1" && tokens[1].text != "2" && tokens[1].text != "3" && tokens[1].text != "4")) {
+        if (header || tokens.size() != 2 || (tokens[1].text != "1" && tokens[1].text != "2" && tokens[1].text != "3" && tokens[1].text != "4" && tokens[1].text != "5")) {
           parse_fail(line_number, "invalid header/version");
         }
         header = true;
@@ -571,6 +577,19 @@ ProjectRestoreState ProjectCodec::decode(std::string_view bytes) {
         if (found == state.titles.end() || background > 2) parse_fail(line_number, "invalid TITLE_LOOK value");
         try {
           *found = found->with_look(static_cast<domain::TitleBackground>(background), opacity);
+        } catch (const std::exception& error) {
+          parse_fail(line_number, error.what());
+        }
+      } else if (tokens[0].text == "TITLE_POS") {
+        if (section != Section::Titles || tokens.size() != 4) parse_fail(line_number, "invalid TITLE_POS");
+        const auto title_id = domain::TitleId{unsigned_number(tokens[1], line_number, "title id")};
+        const auto x = int_number(tokens[2], line_number, "title x");
+        const auto y = int_number(tokens[3], line_number, "title y");
+        const auto found = std::find_if(state.titles.begin(), state.titles.end(),
+                                        [title_id](const auto& item) { return item.id() == title_id; });
+        if (found == state.titles.end()) parse_fail(line_number, "invalid TITLE_POS value");
+        try {
+          *found = found->with_position(domain::TitlePosition{x, y});
         } catch (const std::exception& error) {
           parse_fail(line_number, error.what());
         }

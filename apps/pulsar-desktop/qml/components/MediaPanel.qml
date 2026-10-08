@@ -107,8 +107,18 @@ Panel {
         anchors.leftMargin: Theme.spaceM; anchors.rightMargin: Theme.spaceM; anchors.topMargin: Theme.spaceS
         spacing: 6
         visible: mediaPanel.soundsTab ? controller.soundPackAvailable : mediaPanel.totalAssets > 0
-        Flow {
-            width: parent.width
+        // One scrollable line: ten sound categories must not push the list off a 768 px screen.
+        Flickable {
+            id: chipStrip
+            width: parent.width; height: 22
+            contentWidth: chipRow.width; contentHeight: 22
+            clip: true
+            interactive: contentWidth > width
+            boundsBehavior: Flickable.StopAtBounds
+            WheelHandler { acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+                onWheel: function(event) { chipStrip.contentX = Math.max(0, Math.min(chipStrip.contentWidth - chipStrip.width, chipStrip.contentX - (event.angleDelta.y + event.angleDelta.x) / 2)) } }
+        Row {
+            id: chipRow
             spacing: 4
             Repeater {
                 model: mediaPanel.soundsTab
@@ -126,6 +136,7 @@ Panel {
                     MouseArea { id: chipMouse; anchors.fill: parent; hoverEnabled: true; onClicked: { if (mediaPanel.soundsTab) mediaPanel.soundCategory = modelData.key; else mediaPanel.kindFilter = modelData.key } }
                 }
             }
+        }
         }
         Rectangle {
             visible: mediaPanel.showSearch

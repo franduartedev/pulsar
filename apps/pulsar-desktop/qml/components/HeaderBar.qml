@@ -26,7 +26,7 @@ Rectangle {
         anchors.leftMargin: Theme.spaceL
         anchors.verticalCenter: parent.verticalCenter
         spacing: 10
-        BrandMark { anchors.verticalCenter: parent.verticalCenter }
+        BrandMark { size: 24; anchors.verticalCenter: parent.verticalCenter }
         Text { anchors.verticalCenter: parent.verticalCenter; text: "PULSAR"; color: Theme.textPrimary; font.pixelSize: Theme.fontSizeXL; font.bold: true; font.letterSpacing: 2.4
             MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: header.aboutRequested() } }
         Rectangle { anchors.verticalCenter: parent.verticalCenter; width: 1; height: 16; color: Theme.borderStrong }

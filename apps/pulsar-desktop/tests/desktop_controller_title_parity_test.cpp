@@ -150,6 +150,43 @@ int main(int argc, char** argv) {
   controller.undoEdit();
   REQUIRE(47, controller.selectedTitle().value("background").toInt() == 0 && controller.selectedTitle().value("opacity").toInt() == 100);
 
+  // ---- Free position: a dragged title lands where it was dropped, in preview and in the export ----
+  controller.setSelectedTitlePosition(220, 260);
+  REQUIRE(50, controller.selectedTitle().value("hasPosition").toBool());
+  REQUIRE(51, controller.selectedTitle().value("blockW").toDouble() > 0.0);
+  const auto placed_titles = std::vector<pulsar::domain::Title>{*controller.titleForTest()};
+  REQUIRE(52, placed_titles[0].position() && placed_titles[0].position()->x_permille == 220);
+  auto placed_expected = frame_at(video, t);
+  composition::TitleCompositor placed_compositor{std::make_shared<QtTitleRasterizer>()};
+  REQUIRE(53, placed_compositor.composite(composition::RgbaCanvas{placed_expected.width, placed_expected.height, placed_expected.stride_bytes, placed_expected.pixels.data()}, placed_titles, t));
+  int px0 = placed_expected.width, py0 = placed_expected.height, px1 = 0, py1 = 0;
+  for (int y = 0; y < placed_expected.height; ++y) for (int x = 0; x < placed_expected.width; ++x) {
+    if (mean_abs_diff(placed_expected, without_title, x, y, x + 1, y + 1) > 8) { px0 = std::min(px0, x); px1 = std::max(px1, x); py0 = std::min(py0, y); py1 = std::max(py1, y); }
+  }
+  const double centre_x = (px0 + px1) / 2.0 / placed_expected.width * 1000.0;
+  const double centre_y = (py0 + py1) / 2.0 / placed_expected.height * 1000.0;
+  std::fprintf(stderr, "TITLES placed centre: %.0f,%.0f permille (asked 220,260)\n", centre_x, centre_y);
+  REQUIRE(54, std::fabs(centre_x - 220.0) < 40.0 && std::fabs(centre_y - 260.0) < 60.0);   // the ink sits where it was dropped
+  const auto placed_destination = root / "placed.mp4";
+  controller.exportProjectWithPreset(QString::fromStdString(placed_destination.string()), QStringLiteral("original"));
+  REQUIRE(55, wait_until([&] { return !controller.exportRunning(); }));
+  const auto placed_exported = frame_at(placed_destination, t);
+  const double placed_inside = mean_abs_diff(placed_exported, placed_expected, px0, py0, px1 + 1, py1 + 1);
+  const double placed_vs_untitled = mean_abs_diff(placed_exported, without_title, px0, py0, px1 + 1, py1 + 1);
+  std::fprintf(stderr, "TITLES placed export vs preview: %.2f, vs untitled: %.2f\n", placed_inside, placed_vs_untitled);
+  REQUIRE(56, placed_inside < 14.0 && placed_inside * 2.0 < placed_vs_untitled);
+  // The alignment presets take the title back to the grid; undo / redo move it exactly.
+  controller.setSelectedTitleStyle(controller.selectedTitle().value("size").toInt(), QStringLiteral("#FFFFFF"), 0, 0, true);
+  REQUIRE(57, !controller.selectedTitle().value("hasPosition").toBool());
+  controller.undoEdit();
+  REQUIRE(58, controller.selectedTitle().value("hasPosition").toBool());
+  controller.resetSelectedTitlePosition();
+  REQUIRE(59, !controller.selectedTitle().value("hasPosition").toBool());
+  controller.undoEdit();
+  REQUIRE(60, controller.selectedTitle().value("hasPosition").toBool());
+  controller.undoEdit();   // back to the plain look so the scaler step below is unchanged
+  REQUIRE(61, !controller.selectedTitle().value("hasPosition").toBool());
+
   // ---- Scaler: a 720p-box preset on this 320x180 project never enlarges ------------------------
   const auto destination720 = root / "small.mp4";
   controller.exportProjectWithPreset(QString::fromStdString(destination720.string()), QStringLiteral("1080p"));

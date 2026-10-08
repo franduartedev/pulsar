@@ -33,6 +33,7 @@ qt_add_resources(pulsar_desktop pulsar_desktop_qml
   FILES
     qml/Main.qml
     qml/theme/Theme.js
+    qml/assets/pulse_arc_mark.png
     qml/components/Panel.qml
     qml/components/PButton.qml
     qml/components/PText.qml
@@ -62,6 +63,10 @@ qt_add_resources(pulsar_desktop pulsar_desktop_qml
     qml/components/AboutDialog.qml
     qml/components/PathPromptDialog.qml
     qml/components/PSlider.qml
+    qml/components/FieldRow.qml
+    qml/components/Segmented.qml
+    qml/components/Stepper.qml
+    qml/components/InspectorSection.qml
 )
 
 set_source_files_properties(imports/QtQml/WorkerScript/qmldir
@@ -116,7 +121,7 @@ add_test(NAME pulsar.desktop.smoke
          COMMAND pulsar_desktop --smoke-exit-ms 250)
 set_tests_properties(pulsar.desktop.smoke
   PROPERTIES
-    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;PULSAR_RECOVERY_DIR=${CMAKE_CURRENT_BINARY_DIR}/recovery-test"
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;PULSAR_RECOVERY_DIR=${CMAKE_CURRENT_BINARY_DIR}/recovery-test;LSAN_OPTIONS=suppressions=${CMAKE_SOURCE_DIR}/cmake/lsan.supp:print_suppressions=0"
 )
 
 add_executable(pulsar_desktop_export_tests

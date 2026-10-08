@@ -257,6 +257,49 @@ void title_look_rules_and_persistence() {
   }
 }
 
+void title_position_rules_and_persistence() {
+  const Title plain{TitleId{1}, "Hola", TimeRange{secs(1), secs(4)}};
+  assert(!plain.position());
+  const auto placed = plain.with_position(domain::TitlePosition{200, 750});
+  assert(placed.position() && placed.position()->x_permille == 200 && placed.position()->y_permille == 750);
+  assert(placed.look_key() != plain.look_key());                                         // a new place is a new raster
+  assert(placed.with_text("Chau").position() == placed.position());                      // other edits keep it
+  assert(placed.with_style(90, 0xFF0000FFu, domain::TitleHAlign::Left, domain::TitleVAlign::Top, true).position() == placed.position());
+  assert(!placed.with_position(std::nullopt).position());
+  assert(throws_invalid([&] { (void)plain.with_position(domain::TitlePosition{-1, 500}); }));
+  assert(throws_invalid([&] { (void)plain.with_position(domain::TitlePosition{500, 1001}); }));
+
+  application::ProjectDocument document;
+  application::CommandProcessor processor{document};
+  const auto media = processor.import_asset("v.mp4", Probe{320, 180, 10});
+  (void)processor.add_clip(media, TimeRange{MediaTime::zero(), secs(10)}, MediaTime::zero());
+  (void)processor.add_title(Title{document.next_title_id(), "Uno", TimeRange{secs(1), secs(3)}});
+  (void)processor.add_title(Title{document.next_title_id(), "Dos", TimeRange{secs(5), secs(7)}});
+  processor.replace_title(document.titles()[0].with_position(domain::TitlePosition{333, 120}));
+  processor.undo();
+  assert(!document.titles()[0].position());                                              // undo returns to the presets
+  processor.redo();
+  assert(document.titles()[0].position() && document.titles()[0].position()->x_permille == 333);
+  const auto bytes = application::ProjectCodec::encode(document.snapshot());
+  assert(bytes.rfind("PULSAR_PROJECT 5\n", 0) == 0 && bytes.find("TITLE_POS 1 333 120") != std::string::npos);
+  assert(bytes.find("TITLE_POS 2") == std::string::npos);                                // unplaced titles add nothing
+  const auto restored = application::ProjectDocument::restore(application::ProjectCodec::decode(bytes));
+  assert(restored.titles()[0].position() && restored.titles()[0].position()->y_permille == 120 && !restored.titles()[1].position());
+  assert(application::ProjectCodec::encode(restored.snapshot()) == bytes);
+  // Out-of-range / orphan records are refused, not clamped silently.
+  auto corrupt = bytes;
+  corrupt.replace(corrupt.find("TITLE_POS 1 333 120"), 19, "TITLE_POS 1 333 5000");
+  bool refused = false;
+  try { (void)application::ProjectCodec::decode(corrupt); } catch (const std::exception&) { refused = true; }
+  assert(refused);
+  // Files without free placement keep their older version.
+  application::ProjectDocument simple;
+  application::CommandProcessor simple_processor{simple};
+  (void)simple_processor.import_asset("v.mp4", Probe{320, 180, 10});
+  (void)simple_processor.add_title(Title{simple.next_title_id(), "Uno", TimeRange{secs(1), secs(3)}});
+  assert(application::ProjectCodec::encode(simple.snapshot()).rfind("PULSAR_PROJECT 3\n", 0) == 0);
+}
+
 void export_preset_sizing() {
   using application::exporting::ExportPlan;
   using application::exporting::ExportProfile;
@@ -320,6 +363,7 @@ int main() {
   title_project_file_round_trip();
   compositor_blend_cache_and_failure();
   title_look_rules_and_persistence();
+  title_position_rules_and_persistence();
   export_preset_sizing();
   fit_geometry_cases();
   return 0;

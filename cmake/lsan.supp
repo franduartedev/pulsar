@@ -1,0 +1,4 @@
+# Qt Quick software scene graph keeps the first Image texture alive past window teardown
+# (reported only when the offscreen smoke test exits 250 ms after the first frame).
+leak:QSGRenderContext::textureForFactory
+leak:QQuickImage::updatePaintNode

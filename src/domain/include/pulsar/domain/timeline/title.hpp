@@ -5,6 +5,7 @@
 #include <pulsar/domain/time/time_range.hpp>
 
 #include <cstdint>
+#include <optional>
 #include <string>
 
 namespace pulsar::domain {
@@ -16,6 +17,14 @@ enum class TitleHAlign : std::uint8_t { Left, Center, Right };
 enum class TitleVAlign : std::uint8_t { Top, Middle, Bottom };
 // A box behind the text (None = just text). Colours are fixed so the look stays consistent.
 enum class TitleBackground : std::uint8_t { None, Dark, Light };
+
+// Free placement: the CENTRE of the title block (text plus its box), in permille of the output
+// frame width / height. Resolution independent like the size. Absent = the alignment presets.
+struct TitlePosition {
+  int x_permille = 500;
+  int y_permille = 500;
+  friend bool operator==(const TitlePosition&, const TitlePosition&) = default;
+};
 
 // A static text overlay on the video. Pure data: no fonts, pixels or UI types. The size is
 // stored in permille of the output frame HEIGHT, so the same title looks the same at 720p,
@@ -31,7 +40,8 @@ public:
   Title(TitleId id, std::string text, TimeRange range, int size_permille = 70,
         std::uint32_t color_rgba = 0xFFFFFFFFu, TitleHAlign horizontal = TitleHAlign::Center,
         TitleVAlign vertical = TitleVAlign::Bottom, bool shadow = true,
-        TitleBackground background = TitleBackground::None, int opacity_percent = 100);
+        TitleBackground background = TitleBackground::None, int opacity_percent = 100,
+        std::optional<TitlePosition> position = std::nullopt);
 
   [[nodiscard]] TitleId id() const noexcept { return id_; }
   [[nodiscard]] const std::string& text() const noexcept { return text_; }
@@ -46,6 +56,7 @@ public:
   [[nodiscard]] TitleBackground background() const noexcept { return background_; }
   // Overall opacity of text, shadow and box, in percent.
   [[nodiscard]] int opacity_percent() const noexcept { return opacity_percent_; }
+  [[nodiscard]] const std::optional<TitlePosition>& position() const noexcept { return position_; }
 
   // Value-style editing: every "with" returns a validated copy.
   [[nodiscard]] Title with_text(std::string text) const;
@@ -53,6 +64,7 @@ public:
   [[nodiscard]] Title with_style(int size_permille, std::uint32_t color_rgba, TitleHAlign horizontal,
                                  TitleVAlign vertical, bool shadow) const;
   [[nodiscard]] Title with_look(TitleBackground background, int opacity_percent) const;
+  [[nodiscard]] Title with_position(std::optional<TitlePosition> position) const;
 
   // The title is on screen in [start, end).
   [[nodiscard]] bool active_at(MediaTime time) const;
@@ -70,6 +82,7 @@ private:
   bool shadow_;
   TitleBackground background_;
   int opacity_percent_;
+  std::optional<TitlePosition> position_;
 };
 
 } // namespace pulsar::domain

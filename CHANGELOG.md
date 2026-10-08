@@ -8,6 +8,10 @@ the version is defined once, in the root `CMakeLists.txt`.
 First public beta (Linux x86_64). History before this release is not itemised.
 
 ### Added
+- **Official identity**: the *Pulse Arc* mark (header, About box, application icon and AppImage/desktop icon) replaces the placeholder bars. The artwork comes from the supplied brand sheet; `docs/release/brand.md` records its provenance.
+- **Free title placement**: drag the selected title in the Viewer (centre guides snap at the middle of the frame); one undo step per drag; saved in the project (`TITLE_POS`, format version 5 only when a title is placed); preview and export share the rasteriser, so the title lands on the same pixels. The alignment presets (a 3×3 pad in the Inspector) return a title to the grid and *Restablecer* clears a free position.
+- **Inspector redesigned**: a context chip (TÍTULO / VIDEO / FOTO / PLACA / AUDIO), grouped sections (Texto · Posición · Estilo; Clip · Audio · Medio), segmented controls for background and fades, steppers for size and opacity, "Nada seleccionado" empty state.
+- Sound category filter is one scrollable line, so the list keeps its room on a 768 px screen.
 - **Photos and colour cards as clips** (PNG, JPEG, WebP; *Placa de color* in the library): real stills on VIDEO 1, 5 s by default, trimmable to any length, never stretched (fit with bars), same picture in preview and export, EXIF orientation applied, transparency flattened over black. No temporary movie is made. A still-only project is built around at most 1920×1080.
 - **Audio fades**: linear fade-in / fade-out per clip (Inspector presets Sin, ¼, ½, 1, 2 s), drawn on the clip, identical in preview and export. Project format version 4 only when a fade or a title look exists.
 - **Titles**: background box (dark / light) and opacity; titles duplicate and keep their look.

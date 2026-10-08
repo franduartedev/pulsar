@@ -9,6 +9,7 @@
 #include <QMutex>
 #include <QMutexLocker>
 #include <QPainter>
+#include <QRect>
 #include <QRectF>
 #include <QStringList>
 
@@ -37,6 +38,12 @@ QString QtTitleRasterizer::fontFamily() {
 
 std::optional<pulsar::application::composition::TitleRaster> QtTitleRasterizer::rasterize(
     const pulsar::domain::Title& title, int canvas_width, int canvas_height) {
+  return rasterizeWithBlock(title, canvas_width, canvas_height, nullptr);
+}
+
+std::optional<pulsar::application::composition::TitleRaster> QtTitleRasterizer::rasterizeWithBlock(
+    const pulsar::domain::Title& title, int canvas_width, int canvas_height, QRect* block) {
+  int block_x = 0, block_y = 0, block_w = 0, block_h = 0;
   using pulsar::domain::TitleHAlign;
   using pulsar::domain::TitleVAlign;
   if (canvas_width <= 0 || canvas_height <= 0) return std::nullopt;
@@ -104,12 +111,20 @@ std::optional<pulsar::application::composition::TitleRaster> QtTitleRasterizer::
   raster.height = image_h;
   const int full_w = text_w + 2 * box_pad_x;     // the visible block: text plus its box, if any
   const int full_h = text_h + 2 * box_pad_y;
-  const int box_x = title.horizontal() == TitleHAlign::Left ? side_margin
-                   : title.horizontal() == TitleHAlign::Right ? canvas_width - side_margin - full_w
-                                                              : (canvas_width - full_w) / 2;
-  const int box_y = title.vertical() == TitleVAlign::Top ? vertical_margin
-                   : title.vertical() == TitleVAlign::Middle ? (canvas_height - full_h) / 2
-                                                            : canvas_height - vertical_margin - full_h;
+  int box_x = title.horizontal() == TitleHAlign::Left ? side_margin
+             : title.horizontal() == TitleHAlign::Right ? canvas_width - side_margin - full_w
+                                                        : (canvas_width - full_w) / 2;
+  int box_y = title.vertical() == TitleVAlign::Top ? vertical_margin
+             : title.vertical() == TitleVAlign::Middle ? (canvas_height - full_h) / 2
+                                                      : canvas_height - vertical_margin - full_h;
+  if (const auto& free = title.position()) {   // dragged placement: the block's centre, kept on screen
+    box_x = std::clamp(static_cast<int>(std::lround(free->x_permille / 1000.0 * canvas_width - full_w / 2.0)), 0,
+                       std::max(0, canvas_width - full_w));
+    box_y = std::clamp(static_cast<int>(std::lround(free->y_permille / 1000.0 * canvas_height - full_h / 2.0)), 0,
+                       std::max(0, canvas_height - full_h));
+  }
+  block_x = box_x; block_y = box_y; block_w = full_w; block_h = full_h;
+  if (block != nullptr) *block = QRect{block_x, block_y, block_w, block_h};
   raster.x = box_x - pad;
   raster.y = box_y - pad;
   raster.premultiplied_rgba.resize(static_cast<std::size_t>(image_w) * image_h * 4);
