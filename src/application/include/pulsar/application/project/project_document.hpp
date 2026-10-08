@@ -20,6 +20,9 @@ public:
   [[nodiscard]] static ProjectDocument restore(const ProjectRestoreState& state);
 
   [[nodiscard]] domain::TrackId video_track_id() const noexcept { return video_track_id_; }
+  [[nodiscard]] const std::vector<domain::TrackId>& visual_track_ids() const noexcept {
+    return visual_track_ids_;
+  }
   [[nodiscard]] domain::TrackId next_track_id() const { return allocator_.next_track(); }
   [[nodiscard]] std::vector<MediaAsset> assets() const { return assets_; }
   // Allocation-free view for UI read models. Valid until the next asset edit.
@@ -98,6 +101,7 @@ private:
   IdAllocator allocator_;
   domain::Timeline timeline_;
   domain::TrackId video_track_id_;
+  std::vector<domain::TrackId> visual_track_ids_;
   std::vector<MediaAsset> assets_;
   std::vector<domain::Title> titles_;
   std::uint64_t asset_revision_{0};

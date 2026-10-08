@@ -21,6 +21,25 @@ void increment_checked(std::uint64_t& value, const char* what) {
 
 } // namespace
 
+void validate_visual_track_ids(const domain::Timeline& timeline, domain::TrackId primary,
+                              const std::vector<domain::TrackId>& visual_track_ids) {
+  std::unordered_set<std::uint64_t> remaining;
+  for (const auto& track : timeline.tracks()) {
+    if (track.kind() == domain::TrackKind::Video) remaining.insert(track.id().value());
+  }
+  if (!remaining.contains(primary.value())) {
+    throw std::invalid_argument{"primary video track is absent or not a video track"};
+  }
+  for (const auto id : visual_track_ids) {
+    if (remaining.erase(id.value()) != 1) {
+      throw std::invalid_argument{"visual stack contains a duplicate or non-video track"};
+    }
+  }
+  if (!remaining.empty()) {
+    throw std::invalid_argument{"visual stack must contain every video track exactly once"};
+  }
+}
+
 void ProjectDocument::IdAllocator::ensure_media_consumable() const {
   if (state.next_media_id == std::numeric_limits<std::uint64_t>::max()) {
     throw std::overflow_error{"cannot allocate another media id"};
@@ -66,7 +85,8 @@ void ProjectDocument::IdAllocator::consume_track() {
 }
 
 ProjectDocument::ProjectDocument()
-    : allocator_{}, timeline_{allocator_.next_timeline()}, video_track_id_{allocator_.next_track()} {
+    : allocator_{}, timeline_{allocator_.next_timeline()}, video_track_id_{allocator_.next_track()},
+      visual_track_ids_{video_track_id_} {
   allocator_.consume_timeline();
   allocator_.consume_track();
   timeline_.add_track(domain::Track{video_track_id_, domain::TrackKind::Video});
@@ -87,15 +107,11 @@ ProjectDocument ProjectDocument::restore(const ProjectRestoreState& state) {
   }
 
   bool designated_video_found = false;
-  std::size_t video_track_count = 0;
   std::uint64_t max_track_id = 0;
   std::uint64_t max_clip_id = 0;
   for (const auto& restore_track : state.tracks) {
     if (!track_ids.insert(restore_track.id.value()).second) {
       throw std::invalid_argument{"duplicate track id in project restore state"};
-    }
-    if (restore_track.kind == domain::TrackKind::Video) {
-      ++video_track_count;
     }
     if (restore_track.id == state.video_track_id) {
       if (restore_track.kind != domain::TrackKind::Video) {
@@ -141,9 +157,7 @@ ProjectDocument ProjectDocument::restore(const ProjectRestoreState& state) {
   if (!designated_video_found) {
     throw std::invalid_argument{"designated video track is absent"};
   }
-  if (video_track_count != 1) {
-    throw std::invalid_argument{"project must contain exactly one video track"};
-  }
+  validate_visual_track_ids(timeline, state.video_track_id, state.visual_track_ids);
   if (state.allocator_state.next_media_id == 0 ||
       state.allocator_state.next_media_id <= max_media_id ||
       state.allocator_state.next_media_id == std::numeric_limits<std::uint64_t>::max()) {
@@ -187,6 +201,7 @@ ProjectDocument ProjectDocument::restore(const ProjectRestoreState& state) {
   restored.titles_ = std::move(titles);
   restored.timeline_ = std::move(timeline);
   restored.video_track_id_ = state.video_track_id;
+  restored.visual_track_ids_ = state.visual_track_ids;
   restored.assets_ = state.assets;
   restored.allocator_.state = state.allocator_state;
   restored.current_history_state_id_ = 1;
@@ -337,7 +352,7 @@ void ProjectDocument::validate_clip_for_track(domain::TrackId track_id,
 ProjectSnapshot ProjectDocument::snapshot() const {
   return ProjectSnapshot{timeline_, assets_, video_track_id_, allocator_.state,
                          current_history_state_id_, saved_history_state_id_, next_history_state_id_,
-                         document_generation_, titles_};
+                         document_generation_, titles_, visual_track_ids_};
 }
 
 void ProjectDocument::ensure_new_edit_possible() const {

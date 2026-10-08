@@ -37,3 +37,17 @@ The parser bounds line size, quoted string size, project record count, and
 integer syntax. Unknown versions, malformed escapes, extra records, missing
 sections, and trailing data are rejected. No SQLite, Qt, FFmpeg, or POSIX I/O
 is present in application persistence code.
+
+## PULSAR 1.2: explicit visual stack (v6)
+
+Projects with multiple video tracks use `PULSAR_PROJECT 6`. Immediately after
+`VIDEO_TRACK <primary-id>`, a required `VISUAL_TRACKS <id> [<id> ...]` record
+stores bottom-to-top visual order. It must contain every VIDEO track exactly
+once, including the primary. AUDIO tracks and unknown IDs are rejected.
+Timeline storage order and numeric IDs do not determine visual order.
+
+Versions 1–5 migrate to the singleton stack `[video_track_id]`. Single-video
+documents continue to use the existing feature-dependent v2–v5 encoding; v6
+is emitted only for multi-video state. Snapshots and restore states carry the
+explicit order. Codec and document restore validate it before publication.
+Same-track collision and allocator invariants remain enforced by restoration.

@@ -190,8 +190,15 @@ std::vector<const domain::Track*> sorted_tracks(const domain::Timeline& timeline
 } // namespace
 
 std::string ProjectCodec::encode(const ProjectSnapshot& snapshot) {
+  try {
+    validate_visual_track_ids(snapshot.timeline, snapshot.video_track_id, snapshot.visual_track_ids);
+  } catch (const std::invalid_argument& error) {
+    throw ProjectCodecError{error.what()};
+  }
+  const bool needs_v6 = snapshot.visual_track_ids.size() > 1;
   const std::size_t record_count = 1 + 1 + snapshot.timeline.tracks().size() + 1 +
-                                   snapshot.assets.size() + snapshot.titles.size();
+                                   snapshot.assets.size() + snapshot.titles.size() +
+                                   (needs_v6 ? 1 : 0);
   std::size_t clip_count = 0;
   for (const auto& track : snapshot.timeline.tracks()) clip_count += track.clips().size();
   if (record_count + clip_count + 2 > max_records) {
@@ -212,7 +219,7 @@ std::string ProjectCodec::encode(const ProjectSnapshot& snapshot) {
     }
   }
   // Version 4 adds clip fades; every file that does not need a newer feature keeps its old version.
-  output << (needs_v5 ? "PULSAR_PROJECT 5\n" : needs_v4 ? "PULSAR_PROJECT 4\n" : has_titles ? "PULSAR_PROJECT 3\n" : "PULSAR_PROJECT 2\n");
+  output << (needs_v6 ? "PULSAR_PROJECT 6\n" : needs_v5 ? "PULSAR_PROJECT 5\n" : needs_v4 ? "PULSAR_PROJECT 4\n" : has_titles ? "PULSAR_PROJECT 3\n" : "PULSAR_PROJECT 2\n");
   output << "TIMELINE " << snapshot.timeline.id().value() << "\n";
   const auto tracks = sorted_tracks(snapshot.timeline);
   for (const auto* track : tracks) {
@@ -220,6 +227,11 @@ std::string ProjectCodec::encode(const ProjectSnapshot& snapshot) {
            << (track->kind() == domain::TrackKind::Video ? "VIDEO" : "AUDIO") << "\n";
   }
   output << "VIDEO_TRACK " << snapshot.video_track_id.value() << "\n";
+  if (needs_v6) {
+    output << "VISUAL_TRACKS";
+    for (const auto id : snapshot.visual_track_ids) output << ' ' << id.value();
+    output << '\n';
+  }
 
   std::vector<const MediaAsset*> assets;
   for (const auto& asset : snapshot.assets) assets.push_back(&asset);
@@ -342,9 +354,10 @@ ProjectRestoreState ProjectCodec::decode(std::string_view bytes) {
   bool header = false;
   bool timeline = false;
   bool video_track = false;
+  bool version6 = false;
   bool allocator = false;
   bool ended = false;
-  enum class Section { Header, Timeline, Tracks, VideoTrack, Assets, Clips, Titles, Allocator, End };
+  enum class Section { Header, Timeline, Tracks, VideoTrack, VisualTracks, Assets, Clips, Titles, Allocator, End };
   Section section = Section::Header;
   std::size_t line_number = 0;
   std::size_t records = 0;
@@ -376,10 +389,11 @@ ProjectRestoreState ProjectCodec::decode(std::string_view bytes) {
 
     try {
       if (tokens[0].text == "PULSAR_PROJECT") {
-        if (header || tokens.size() != 2 || (tokens[1].text != "1" && tokens[1].text != "2" && tokens[1].text != "3" && tokens[1].text != "4" && tokens[1].text != "5")) {
+        if (header || tokens.size() != 2 || (tokens[1].text != "1" && tokens[1].text != "2" && tokens[1].text != "3" && tokens[1].text != "4" && tokens[1].text != "5" && tokens[1].text != "6")) {
           parse_fail(line_number, "invalid header/version");
         }
         header = true;
+        version6 = tokens[1].text == "6";
         section = Section::Timeline;
       } else if (!header) {
         parse_fail(line_number, "header required");
@@ -401,6 +415,16 @@ ProjectRestoreState ProjectCodec::decode(std::string_view bytes) {
         if (video_track || state.tracks.empty() || (section != Section::Tracks && section != Section::VideoTrack) || tokens.size() != 2) parse_fail(line_number, "invalid VIDEO_TRACK");
         state.video_track_id = domain::TrackId{unsigned_number(tokens[1], line_number, "video track id")};
         video_track = true;
+        state.visual_track_ids = {state.video_track_id};
+        section = version6 ? Section::VisualTracks : Section::Assets;
+      } else if (tokens[0].text == "VISUAL_TRACKS") {
+        if (!version6 || section != Section::VisualTracks || tokens.size() < 2) {
+          parse_fail(line_number, "invalid VISUAL_TRACKS");
+        }
+        state.visual_track_ids.clear();
+        for (std::size_t i = 1; i < tokens.size(); ++i) {
+          state.visual_track_ids.emplace_back(unsigned_number(tokens[i], line_number, "visual track id"));
+        }
         section = Section::Assets;
       } else if (tokens[0].text == "ASSET") {
         if (!video_track || (section != Section::Assets) || tokens.size() < 4) parse_fail(line_number, "invalid ASSET");
@@ -619,6 +643,15 @@ ProjectRestoreState ProjectCodec::decode(std::string_view bytes) {
   }
 
   if (!ended) throw ProjectCodecError{"missing END record"};
+  domain::Timeline visual_timeline{state.timeline_id};
+  try {
+    for (const auto& track : state.tracks) {
+      visual_timeline.add_track(domain::Track{track.id, track.kind});
+    }
+    validate_visual_track_ids(visual_timeline, state.video_track_id, state.visual_track_ids);
+  } catch (const std::invalid_argument& error) {
+    throw ProjectCodecError{error.what()};
+  }
   return state;
 }
 

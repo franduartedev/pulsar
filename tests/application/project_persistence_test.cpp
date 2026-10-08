@@ -79,6 +79,82 @@ void codec_roundtrip_and_canonical_output() {
   assert(bytes.find("CLIP ") != std::string::npos);
 }
 
+void visual_stack_versions_and_validation() {
+  using domain::TrackId;
+  using domain::TrackKind;
+  const auto legacy = ProjectCodec::encode(make_document().snapshot());
+  for (int version = 1; version <= 5; ++version) {
+    auto bytes = legacy;
+    bytes.replace(15, 1, std::to_string(version));
+    const auto state = ProjectCodec::decode(bytes);
+    const auto document = ProjectDocument::restore(state);
+    assert(state.visual_track_ids == std::vector<TrackId>{state.video_track_id});
+    assert(document.visual_track_ids() == state.visual_track_ids);
+    assert(ProjectCodec::encode(document.snapshot()) == legacy);
+  }
+
+  auto snapshot = make_document().snapshot();
+  snapshot.timeline.add_track(domain::Track{TrackId{9}, TrackKind::Video});
+  snapshot.timeline.add_track(domain::Track{TrackId{3}, TrackKind::Video});
+  snapshot.timeline.add_track(domain::Track{TrackId{4}, TrackKind::Audio});
+  snapshot.allocator_state.next_track_id = 10;
+  snapshot.visual_track_ids = {TrackId{9}, TrackId{1}, TrackId{3}};
+  const auto bytes = ProjectCodec::encode(snapshot);
+  assert(bytes.starts_with("PULSAR_PROJECT 6\n"));
+  assert(bytes.find("VISUAL_TRACKS 9 1 3\n") != std::string::npos);
+  const auto restored = ProjectDocument::restore(ProjectCodec::decode(bytes));
+  assert(restored.video_track_id() == TrackId{1});
+  assert(restored.visual_track_ids() == snapshot.visual_track_ids);
+  assert(restored.snapshot().visual_track_ids == snapshot.visual_track_ids);
+  assert(ProjectCodec::encode(restored.snapshot()) == bytes);
+
+  for (const auto& invalid : std::vector<std::vector<TrackId>>{
+           {}, {TrackId{9}, TrackId{3}}, {TrackId{1}, TrackId{9}},
+           {TrackId{9}, TrackId{1}, TrackId{3}, TrackId{3}},
+           {TrackId{9}, TrackId{1}, TrackId{3}, TrackId{4}},
+           {TrackId{9}, TrackId{1}, TrackId{3}, TrackId{99}}}) {
+    auto state = ProjectCodec::decode(bytes);
+    state.visual_track_ids = invalid;
+    bool rejected = false;
+    try { (void)ProjectDocument::restore(state); }
+    catch (const std::invalid_argument&) { rejected = true; }
+    assert(rejected);
+    auto bad_snapshot = snapshot;
+    bad_snapshot.visual_track_ids = invalid;
+    rejected = false;
+    try { (void)ProjectCodec::encode(bad_snapshot); }
+    catch (const ProjectCodecError&) { rejected = true; }
+    assert(rejected);
+  }
+  for (const auto replacement : {"", "VISUAL_TRACKS\n", "VISUAL_TRACKS 9 3\n",
+                                 "VISUAL_TRACKS 9 1 3 3\n", "VISUAL_TRACKS 9 1 4\n",
+                                 "VISUAL_TRACKS 9 1 99\n",
+                                 "VISUAL_TRACKS 9 1 3\nVISUAL_TRACKS 9 1 3\n"}) {
+    auto bad = bytes;
+    bad.replace(bad.find("VISUAL_TRACKS"), std::string{"VISUAL_TRACKS 9 1 3\n"}.size(), replacement);
+    bool rejected = false;
+    try { (void)ProjectCodec::decode(bad); }
+    catch (const ProjectCodecError&) { rejected = true; }
+    assert(rejected);
+  }
+  for (const auto primary : {TrackId{4}, TrackId{99}}) {
+    auto state = ProjectCodec::decode(bytes);
+    state.video_track_id = primary;
+    bool rejected = false;
+    try { (void)ProjectDocument::restore(state); }
+    catch (const std::invalid_argument&) { rejected = true; }
+    assert(rejected);
+  }
+  // Older formats cannot smuggle in an unrepresented auxiliary visual track.
+  auto old_multivideo = bytes;
+  old_multivideo.replace(15, 1, "5");
+  old_multivideo.erase(old_multivideo.find("VISUAL_TRACKS"), std::string{"VISUAL_TRACKS 9 1 3\n"}.size());
+  bool rejected = false;
+  try { (void)ProjectCodec::decode(old_multivideo); }
+  catch (const ProjectCodecError&) { rejected = true; }
+  assert(rejected);
+}
+
 void builtin_locator_roundtrip() {
   ProjectDocument document;
   CommandProcessor processor{document};
@@ -356,7 +432,7 @@ void repository_normalizes_codec_failures() {
 
   // Malformed bytes through the real repository surface as repository errors.
   const auto malformed = root / "malformed.pulsar";
-  { std::ofstream output{malformed}; output << "PULSAR_PROJECT 6\n"; }
+  { std::ofstream output{malformed}; output << "PULSAR_PROJECT 7\n"; }
   bool load_rejected = false;
   try {
     (void)repository.load(malformed);
@@ -395,6 +471,7 @@ void repository_normalizes_codec_failures() {
 }
 
 int main() {
+  visual_stack_versions_and_validation();
   codec_roundtrip_and_canonical_output();
   builtin_locator_roundtrip();
   golden_fixture_decodes();
