@@ -1,6 +1,7 @@
 #pragma once
 
 #include <pulsar/application/composition/title_compositor.hpp>
+#include <pulsar/application/composition/visual_compositor.hpp>
 #include <pulsar/application/export/export_plan.hpp>
 #include <pulsar/application/timeline/timeline_clip_resolver.hpp>
 
@@ -16,12 +17,7 @@ namespace pulsar::application::exporting {
 
 enum class OfflinePixelFormat { Rgba8888 };
 
-struct OfflineVideoPixelBuffer {
-  int width;
-  int height;
-  int stride_bytes;
-  std::vector<std::uint8_t> pixels;
-};
+using OfflineVideoPixelBuffer = composition::RgbaSurface;
 
 struct OfflineVideoSourceFrame {
   std::optional<domain::MediaTime> presentation_timestamp;

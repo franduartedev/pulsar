@@ -9,12 +9,6 @@
 namespace pulsar::application::exporting {
 namespace {
 
-#if defined(__SIZEOF_INT128__)
-using WideInt = __int128_t;
-#else
-#error "PULSAR requires signed __int128 support for exact video geometry arithmetic."
-#endif
-
 [[nodiscard]] std::size_t checked_buffer_size(int width, int height, int stride) {
   if (width <= 0 || height <= 0 || stride < static_cast<std::int64_t>(width) * 4) {
     throw OfflineVideoRenderError{OfflineVideoRenderErrorCode::UnsupportedFrame,
@@ -220,18 +214,11 @@ OfflineVideoFrame OfflineVideoRenderer::compose_frame(
                                                   static_cast<int>(output_height));
   const auto scaled_width = static_cast<std::int64_t>(geometry.scaled_width);
   const auto scaled_height = static_cast<std::int64_t>(geometry.scaled_height);
-  const auto offset_x = static_cast<std::int64_t>(geometry.offset_x);
-  const auto offset_y = static_cast<std::int64_t>(geometry.offset_y);
-  const int output_stride = checked_rgba_stride(output_width);
-  const auto output_size = checked_buffer_size(static_cast<int>(output_width),
-                                               static_cast<int>(output_height), output_stride);
-  std::vector<std::uint8_t> pixels(output_size, 0);
-  for (std::size_t offset = 3; offset < pixels.size(); offset += 4) pixels[offset] = 255;
+  auto canvas = composition::black_surface(static_cast<int>(output_width), static_cast<int>(output_height));
 
   // Same size: straight row copy. Different size: the media adapter's scaler (bicubic/lanczos
   // through libswscale) when provided, otherwise the basic nearest-neighbour fallback.
   const OfflineVideoPixelBuffer* placed = &source;
-  OfflineVideoPixelBuffer scaled_storage;
   if (scaled_width != source.width || scaled_height != source.height) {
     if (options_.scaler != nullptr) {
       if (!scaled_cache_ || scaled_cache_->source != source_frame.image || scaled_cache_->width != scaled_width ||
@@ -240,38 +227,26 @@ OfflineVideoFrame OfflineVideoRenderer::compose_frame(
                                     options_.scaler->scale(source, static_cast<int>(scaled_width), static_cast<int>(scaled_height))};
       }
       placed = &scaled_cache_->scaled;
-    } else {
-      for (std::int64_t y = 0; y < scaled_height; ++y) {
-        const auto source_y = static_cast<std::int64_t>((static_cast<WideInt>(y) * source.height) / scaled_height);
-        for (std::int64_t x = 0; x < scaled_width; ++x) {
-          const auto source_x = static_cast<std::int64_t>((static_cast<WideInt>(x) * source.width) / scaled_width);
-          const auto source_offset = static_cast<std::size_t>(source_y) * source.stride_bytes + static_cast<std::size_t>(source_x) * 4;
-          const auto destination_offset = static_cast<std::size_t>(offset_y + y) * output_stride + static_cast<std::size_t>(offset_x + x) * 4;
-          std::copy_n(source.pixels.data() + source_offset, 4, pixels.data() + destination_offset);
-        }
-      }
-      placed = nullptr;
     }
   }
-  if (placed != nullptr) {
-    if (placed->width != scaled_width || placed->height != scaled_height || placed->pixels.size() < static_cast<std::size_t>(placed->stride_bytes) * placed->height) {
+  if (placed != &source) {
+    if (placed->width != scaled_width || placed->height != scaled_height) {
       throw OfflineVideoRenderError{OfflineVideoRenderErrorCode::ConversionFailed, "offline frame scaler returned an unexpected picture"};
     }
-    for (std::int64_t y = 0; y < scaled_height; ++y) {
-      const auto* from = placed->pixels.data() + static_cast<std::size_t>(y) * placed->stride_bytes;
-      auto* to = pixels.data() + static_cast<std::size_t>(offset_y + y) * output_stride + static_cast<std::size_t>(offset_x) * 4;
-      std::copy_n(from, static_cast<std::size_t>(scaled_width) * 4, to);
-      for (std::int64_t x = 0; x < scaled_width; ++x) to[x * 4 + 3] = 255;
-    }
+  }
+  try {
+    composition::composite_opaque_layer(canvas, *placed, geometry);
+  } catch (const std::invalid_argument& error) {
+    throw OfflineVideoRenderError{OfflineVideoRenderErrorCode::ConversionFailed, error.what()};
   }
 
   return OfflineVideoFrame{frame_index,
                            timeline_time,
                            static_cast<int>(output_width),
                            static_cast<int>(output_height),
-                           output_stride,
+                           canvas.stride_bytes,
                            OfflinePixelFormat::Rgba8888,
-                           std::move(pixels)};
+                           std::move(canvas.pixels)};
 }
 
 OfflineVideoFrame OfflineVideoRenderer::render_frame(domain::FrameNumber frame_index) {
