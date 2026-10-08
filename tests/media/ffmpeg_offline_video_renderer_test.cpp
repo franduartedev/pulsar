@@ -9,6 +9,7 @@
 #include <filesystem>
 #include <chrono>
 #include <cstdlib>
+#include <iostream>
 #include <string>
 #include <stdexcept>
 #include <vector>
@@ -116,6 +117,43 @@ void normalizes_non_zero_stream_origin() {
   std::filesystem::remove(path);
 }
 
+void multilayer_real_decode_matches_single_track() {
+  using namespace pulsar;
+  application::ProjectDocument document;
+  application::CommandProcessor processor{document};
+  media::ffmpeg::FFmpegMediaProbe probe;
+  const auto fixture = std::filesystem::path{PULSAR_SOURCE_DIR} / "tests/fixtures/audio_decode_fixture.mp4";
+  const auto id = processor.import_asset(fixture, probe);
+  const auto duration = document.find_asset(id)->playable_duration();
+  (void)processor.add_clip(id, {domain::MediaTime::zero(), duration}, domain::MediaTime::zero());
+  auto snapshot = document.snapshot();
+  const auto single_plan = application::exporting::ExportPlan::build(snapshot);
+  for (const auto track_id : {9U, 3U}) {
+    domain::Track track{domain::TrackId{track_id}, domain::TrackKind::Video};
+    track.insert_clip(domain::Clip{domain::ClipId{track_id}, id,
+        {domain::MediaTime::zero(), duration}, domain::MediaTime::zero()});
+    snapshot.timeline.add_track(std::move(track));
+    snapshot.visual_track_ids.push_back(domain::TrackId{track_id});
+  }
+  const auto multi_plan = application::exporting::ExportPlan::build(snapshot);
+  media::ffmpeg::FFmpegOfflineVideoSourceFactory factory;
+  application::exporting::OfflineVideoRenderer single{single_plan, factory};
+  application::exporting::OfflineVideoRenderer multi{multi_plan, factory};
+  for (std::int64_t i = 0; i < single_plan.frame_count(); ++i) {
+    const auto expected = single.render_frame(domain::FrameNumber{i});
+    const auto actual = multi.render_frame(domain::FrameNumber{i});
+    assert(expected.timeline_time == actual.timeline_time && expected.pixels == actual.pixels);
+  }
+  const auto& metrics = multi.metrics();
+  assert(metrics.peak_active_decoders == 3 && metrics.decoder_opens == 3);
+  assert(metrics.peak_live_source_frames <= 6);
+  std::cout << "multi-layer export: layers=" << metrics.peak_active_layers
+            << " decoders=" << metrics.peak_active_decoders
+            << " live_source_frames=" << metrics.peak_live_source_frames
+            << " frames=" << metrics.output_frames
+            << " composite_ns=" << metrics.composite_nanoseconds << '\n';
+}
+
 void renders_long_fixtures_with_bounded_state() {
   for (const auto seconds : {10, 30}) {
     const auto path = std::filesystem::temp_directory_path() /
@@ -204,6 +242,7 @@ void renders_h264_24fps_non_frame_aligned_source_range() {
 } // namespace
 
 int main() {
+  multilayer_real_decode_matches_single_track();
   renders_real_fixture_sequentially();
   normalizes_non_zero_stream_origin();
   renders_long_fixtures_with_bounded_state();

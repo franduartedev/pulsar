@@ -2,6 +2,7 @@
 #include <pulsar/application/export/offline_video_renderer.hpp>
 #include <pulsar/application/media/media_probe.hpp>
 #include <pulsar/application/project/project_document.hpp>
+#include <pulsar/application/audio/audio_contributor_resolver.hpp>
 
 #include <cassert>
 #include <cstdint>
@@ -192,6 +193,53 @@ void sequential_render_reuses_decoder_and_letterboxes() {
   assert_rgba(third, 1, 0, 0, 0, 255);
 }
 
+void multilayer_export_order_gaps_state_and_audio() {
+  auto snapshot = project_with_clips({{"video.mp4", domain::MediaTime::zero()}}, {3, {1, 1}});
+  domain::Track upper{domain::TrackId{9}, domain::TrackKind::Video};
+  upper.insert_clip(domain::Clip{domain::ClipId{20}, snapshot.assets.front().id(),
+      domain::TimeRange{{1, {1, 1}}, {2, {1, 1}}}, domain::MediaTime::zero()});
+  snapshot.timeline.add_track(std::move(upper));
+  snapshot.visual_track_ids = {snapshot.video_track_id, domain::TrackId{9}};
+  const auto original = snapshot.assets.front();
+  snapshot.assets.front() = application::MediaAsset{
+      original.id(), original.source_locator(), original.video_stream_index(),
+      original.playable_duration(), original.metadata(), application::MediaAvailability::Available,
+      std::nullopt, application::AudioAssetMetadata{1, 48000, 2, {1, 48000}, domain::MediaTime{10, {1, 1}}}};
+  const auto audio = application::resolve_audio_contributors(snapshot, {{0, {1, 1}}, {1, {1, 1}}});
+  assert(audio.contributors.size() == 1);
+  assert(audio.contributors.front().track_id == snapshot.video_track_id);
+
+  const auto plan = plan_for(snapshot);
+  FakeFactory factory;
+  factory.sources["video.mp4"] = rgb_frames();
+  exporting::OfflineVideoRenderer renderer{plan, factory};
+  assert_rgba(renderer.render_frame(domain::FrameNumber{0}), 1, 0, 0, 255, 0);
+  assert_rgba(renderer.render_frame(domain::FrameNumber{1}), 1, 0, 0, 255, 0);
+  assert_rgba(renderer.render_frame(domain::FrameNumber{2}), 1, 0, 0, 0, 255);
+  assert(factory.opens == 2);
+  assert(renderer.metrics().peak_active_decoders == 2);
+  assert(renderer.metrics().peak_active_layers == 2);
+  assert(renderer.metrics().peak_live_source_frames <= 4);
+  assert(renderer.metrics().composite_nanoseconds > 0);
+
+  snapshot.visual_track_ids = {domain::TrackId{9}, snapshot.video_track_id};
+  const auto reversed_plan = plan_for(snapshot);
+  exporting::OfflineVideoRenderer reversed{reversed_plan, factory};
+  assert_rgba(reversed.render_frame(domain::FrameNumber{0}), 1, 0, 255, 0, 0);
+
+  // Cancellation between layers cannot return a partially composed output frame.
+  FakeFactory cancelled_factory;
+  cancelled_factory.sources["video.mp4"] = rgb_frames();
+  exporting::OfflineVideoRenderer cancelled{plan, cancelled_factory, {},
+      [&] { return cancelled_factory.opens != 0; }};
+  bool rejected = false;
+  try { (void)cancelled.render_frame(domain::FrameNumber{0}); }
+  catch (const exporting::OfflineVideoRenderError& error) {
+    rejected = error.code() == exporting::OfflineVideoRenderErrorCode::Cancelled;
+  }
+  assert(rejected && cancelled.metrics().output_frames == 0 && cancelled_factory.opens == 1);
+}
+
 void gaps_are_black_and_clip_boundaries_are_half_open() {
   const auto snapshot = project_with_clips({{"video.mp4", {0, {1, 1}}},
                                             {"video.mp4", {2, {1, 1}}}},
@@ -274,6 +322,7 @@ void source_without_pts_is_not_silently_accepted() {
 } // namespace
 
 int main() {
+  multilayer_export_order_gaps_state_and_audio();
   sequential_render_reuses_decoder_and_letterboxes();
   gaps_are_black_and_clip_boundaries_are_half_open();
   vfr_selection_uses_timestamps_not_source_fps();

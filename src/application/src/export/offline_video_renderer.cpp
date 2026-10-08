@@ -1,6 +1,8 @@
 #include <pulsar/application/export/offline_video_renderer.hpp>
+#include <pulsar/application/composition/visual_composition_resolver.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <limits>
 #include <sstream>
 #include <type_traits>
@@ -22,14 +24,6 @@ namespace {
   return static_cast<std::size_t>(size);
 }
 
-[[nodiscard]] int checked_rgba_stride(std::int64_t width) {
-  if (width <= 0 || width > std::numeric_limits<int>::max() / 4) {
-    throw OfflineVideoRenderError{OfflineVideoRenderErrorCode::ConversionFailed,
-                                  "output RGBA stride is invalid"};
-  }
-  return static_cast<int>(width * 4);
-}
-
 } // namespace
 
 struct OfflineVideoRenderer::ActiveSource {
@@ -40,23 +34,48 @@ struct OfflineVideoRenderer::ActiveSource {
   std::unique_ptr<OfflineVideoSource> source;
   std::optional<OfflineVideoSourceFrame> candidate;
   std::optional<OfflineVideoSourceFrame> lookahead;
+  struct ScaledCache {
+    std::shared_ptr<const OfflineVideoPixelBuffer> source;
+    std::int64_t width{0};
+    std::int64_t height{0};
+    OfflineVideoPixelBuffer scaled;
+  };
+  std::optional<ScaledCache> scaled_cache;
 };
 
 OfflineVideoRenderer::OfflineVideoRenderer(const ExportPlan& plan,
                                            OfflineVideoSourceFactory& source_factory,
-                                           OfflineVideoRenderOptions options)
-    : plan_{plan}, source_factory_{source_factory}, options_{options} {}
+                                           OfflineVideoRenderOptions options,
+                                           std::function<bool()> is_cancelled)
+    : plan_{plan}, source_factory_{source_factory}, options_{options},
+      is_cancelled_{std::move(is_cancelled)} {}
 
 OfflineVideoRenderer::~OfflineVideoRenderer() = default;
 
 void OfflineVideoRenderer::update_live_frame_metric() noexcept {
-  const auto live = static_cast<std::uint64_t>(
-      (active_source_ && active_source_->candidate.has_value() ? 1 : 0) +
-      (active_source_ && active_source_->lookahead.has_value() ? 1 : 0));
+  std::uint64_t live = 0;
+  for (const auto& [id, active] : active_sources_) {
+    (void)id;
+    live += (active->candidate.has_value() ? 1 : 0) + (active->lookahead.has_value() ? 1 : 0);
+    if (active->scaled_cache &&
+        (!active->candidate || active->candidate->image != active->scaled_cache->source) &&
+        (!active->lookahead || active->lookahead->image != active->scaled_cache->source)) ++live;
+  }
   metrics_.peak_live_source_frames = std::max(metrics_.peak_live_source_frames, live);
+  metrics_.peak_active_decoders = std::max(metrics_.peak_active_decoders,
+      static_cast<std::uint64_t>(active_sources_.size()));
 }
 
-void OfflineVideoRenderer::open_source(const ResolvedClip& clip, domain::MediaTime source_time) {
+void OfflineVideoRenderer::check_cancelled() const {
+  if (is_cancelled_ && is_cancelled_()) {
+    throw OfflineVideoRenderError{OfflineVideoRenderErrorCode::Cancelled, "export cancelled"};
+  }
+}
+
+void OfflineVideoRenderer::open_source(domain::TrackId track_id, const ResolvedClip& clip,
+                                      domain::MediaTime source_time) {
+  check_cancelled();
+  active_sources_.erase(track_id.value());
   std::unique_ptr<OfflineVideoSource> source;
   try {
     source = source_factory_.open(clip.source_locator, clip.video_stream_index);
@@ -83,7 +102,7 @@ void OfflineVideoRenderer::open_source(const ResolvedClip& clip, domain::MediaTi
   }
   metrics_.decoded_source_frames += seek_result.frames_decoded_after_seek;
   metrics_.conversion_count += seek_result.frames_decoded_after_seek;
-  active_source_ = std::make_unique<ActiveSource>(ActiveSource{
+  active_sources_[track_id.value()] = std::make_unique<ActiveSource>(ActiveSource{
       clip.clip_id,
       clip.media_id,
       clip.video_stream_index,
@@ -91,22 +110,25 @@ void OfflineVideoRenderer::open_source(const ResolvedClip& clip, domain::MediaTi
       std::move(source),
       std::move(seek_result.candidate),
       std::move(seek_result.lookahead),
+      std::nullopt,
   });
   update_live_frame_metric();
 }
 
 const OfflineVideoSourceFrame& OfflineVideoRenderer::select_source_frame(
-    const ResolvedClip& clip, domain::MediaTime source_time) {
+    domain::TrackId track_id, const ResolvedClip& clip, domain::MediaTime source_time) {
+  const auto found = active_sources_.find(track_id.value());
+  const auto* active_source = found == active_sources_.end() ? nullptr : found->second.get();
   const bool same_segment =
-      active_source_ && active_source_->clip_id == clip.clip_id &&
-      active_source_->media_id == clip.media_id &&
-      active_source_->video_stream_index == clip.video_stream_index &&
-      source_time >= active_source_->last_source_time;
+      active_source && active_source->clip_id == clip.clip_id &&
+      active_source->media_id == clip.media_id &&
+      active_source->video_stream_index == clip.video_stream_index &&
+      source_time >= active_source->last_source_time;
   if (!same_segment) {
-    open_source(clip, source_time);
+    open_source(track_id, clip, source_time);
   }
 
-  auto& active = *active_source_;
+  auto& active = *active_sources_.at(track_id.value());
   active.last_source_time = source_time;
 
   auto check_timestamp = [](const OfflineVideoSourceFrame& frame) {
@@ -125,6 +147,7 @@ const OfflineVideoSourceFrame& OfflineVideoRenderer::select_source_frame(
 
   while (active.lookahead.has_value() &&
          *active.lookahead->presentation_timestamp <= source_time) {
+    check_cancelled();
     active.candidate = std::move(active.lookahead);
     active.lookahead.reset();
     try {
@@ -186,21 +209,8 @@ const OfflineVideoSourceFrame& OfflineVideoRenderer::select_source_frame(
   return *active.candidate;
 }
 
-OfflineVideoFrame OfflineVideoRenderer::black_frame(domain::FrameNumber frame_index,
-                                                    domain::MediaTime timeline_time) const {
-  const int stride = checked_rgba_stride(plan_.output_width());
-  const auto size = checked_buffer_size(static_cast<int>(plan_.output_width()),
-                                        static_cast<int>(plan_.output_height()), stride);
-  std::vector<std::uint8_t> pixels(size, 0);
-  for (std::size_t offset = 3; offset < pixels.size(); offset += 4) pixels[offset] = 255;
-  return OfflineVideoFrame{frame_index, timeline_time, static_cast<int>(plan_.output_width()),
-                           static_cast<int>(plan_.output_height()), stride,
-                           OfflinePixelFormat::Rgba8888, std::move(pixels)};
-}
-
-OfflineVideoFrame OfflineVideoRenderer::compose_frame(
-    domain::FrameNumber frame_index, domain::MediaTime timeline_time,
-    const OfflineVideoSourceFrame& source_frame) const {
+void OfflineVideoRenderer::compose_frame(composition::RgbaSurface& canvas, ActiveSource& active,
+                                         const OfflineVideoSourceFrame& source_frame) {
   const auto& source = *source_frame.image;
   const auto source_size = checked_buffer_size(source.width, source.height, source.stride_bytes);
   if (source.pixels.size() < source_size) {
@@ -214,19 +224,22 @@ OfflineVideoFrame OfflineVideoRenderer::compose_frame(
                                                   static_cast<int>(output_height));
   const auto scaled_width = static_cast<std::int64_t>(geometry.scaled_width);
   const auto scaled_height = static_cast<std::int64_t>(geometry.scaled_height);
-  auto canvas = composition::black_surface(static_cast<int>(output_width), static_cast<int>(output_height));
 
   // Same size: straight row copy. Different size: the media adapter's scaler (bicubic/lanczos
   // through libswscale) when provided, otherwise the basic nearest-neighbour fallback.
   const OfflineVideoPixelBuffer* placed = &source;
   if (scaled_width != source.width || scaled_height != source.height) {
     if (options_.scaler != nullptr) {
-      if (!scaled_cache_ || scaled_cache_->source != source_frame.image || scaled_cache_->width != scaled_width ||
-          scaled_cache_->height != scaled_height) {
-        scaled_cache_ = ScaledCache{source_frame.image, scaled_width, scaled_height,
-                                    options_.scaler->scale(source, static_cast<int>(scaled_width), static_cast<int>(scaled_height))};
+      if (!active.scaled_cache || active.scaled_cache->source != source_frame.image || active.scaled_cache->width != scaled_width ||
+          active.scaled_cache->height != scaled_height) {
+        active.scaled_cache.reset();
+        const auto start = std::chrono::steady_clock::now();
+        active.scaled_cache = ActiveSource::ScaledCache{source_frame.image, scaled_width, scaled_height,
+            options_.scaler->scale(source, static_cast<int>(scaled_width), static_cast<int>(scaled_height))};
+        metrics_.scale_nanoseconds += static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::steady_clock::now() - start).count());
       }
-      placed = &scaled_cache_->scaled;
+      placed = &active.scaled_cache->scaled;
     }
   }
   if (placed != &source) {
@@ -235,18 +248,14 @@ OfflineVideoFrame OfflineVideoRenderer::compose_frame(
     }
   }
   try {
+    const auto start = std::chrono::steady_clock::now();
     composition::composite_opaque_layer(canvas, *placed, geometry);
+    metrics_.composite_nanoseconds += static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::steady_clock::now() - start).count());
   } catch (const std::invalid_argument& error) {
     throw OfflineVideoRenderError{OfflineVideoRenderErrorCode::ConversionFailed, error.what()};
   }
 
-  return OfflineVideoFrame{frame_index,
-                           timeline_time,
-                           static_cast<int>(output_width),
-                           static_cast<int>(output_height),
-                           canvas.stride_bytes,
-                           OfflinePixelFormat::Rgba8888,
-                           std::move(canvas.pixels)};
 }
 
 OfflineVideoFrame OfflineVideoRenderer::render_frame(domain::FrameNumber frame_index) {
@@ -260,36 +269,41 @@ OfflineVideoFrame OfflineVideoRenderer::render_frame(domain::FrameNumber frame_i
   }
 
   const auto timeline_time = output_frame_time(frame_index, plan_.frame_rate());
-  const auto outcome = resolve_clip_at(plan_.snapshot(), plan_.snapshot().video_track_id,
-                                       timeline_time);
+  check_cancelled();
+  const auto composition = resolve_visual_composition(plan_.snapshot(), timeline_time);
   std::ostringstream diagnostic;
   diagnostic << "frame_index=" << frame_index.value()
              << " timeline_time=" << static_cast<double>(timeline_time);
-  if (const auto* clip = std::get_if<ResolvedClip>(&outcome)) {
-    const auto source_time = clip_source_position(*clip, timeline_time);
-    diagnostic << " clip_id=" << clip->clip_id.value() << " media_id=" << clip->media_id.value()
-               << " source_time=" << static_cast<double>(source_time);
+  std::uint64_t active_layers = 0;
+  // Evict inactive tracks before opening new ones, including their scaled caches.
+  for (const auto& layer : composition.layers) {
+    if (std::holds_alternative<ResolvedClip>(layer.source)) ++active_layers;
+    else active_sources_.erase(layer.track_id.value());
   }
+  metrics_.peak_active_layers = std::max(metrics_.peak_active_layers, active_layers);
 
   try {
-    OfflineVideoFrame output = std::visit(
-        [this, frame_index, timeline_time](const auto& resolved) -> OfflineVideoFrame {
-        using Result = std::decay_t<decltype(resolved)>;
-        if constexpr (std::is_same_v<Result, TimelineGap>) {
-          active_source_.reset();
-          return black_frame(frame_index, timeline_time);
-        } else if constexpr (std::is_same_v<Result, ResolvedClip>) {
-          const auto source_time = clip_source_position(resolved, timeline_time);
-          return compose_frame(frame_index, timeline_time, select_source_frame(resolved, source_time));
-        } else if constexpr (std::is_same_v<Result, MissingClipMedia>) {
-          throw OfflineVideoRenderError{OfflineVideoRenderErrorCode::MissingMedia,
-                                        "offline video clip references missing media"};
-        } else {
-          throw OfflineVideoRenderError{OfflineVideoRenderErrorCode::InternalInvariant,
-                                        "timeline ended before the export plan"};
-        }
-        },
-        outcome);
+    auto canvas = composition::black_surface(static_cast<int>(plan_.output_width()),
+                                              static_cast<int>(plan_.output_height()));
+    for (const auto& layer : composition.layers) {
+      check_cancelled();
+      diagnostic << " track_id=" << layer.track_id.value();
+      if (const auto* clip = std::get_if<ResolvedClip>(&layer.source)) {
+        diagnostic << " clip_id=" << clip->clip_id.value() << " media_id=" << clip->media_id.value()
+                   << " source_time=" << static_cast<double>(clip->source_time);
+        const auto& frame = select_source_frame(layer.track_id, *clip, clip->source_time);
+        compose_frame(canvas, *active_sources_.at(layer.track_id.value()), frame);
+      } else if (std::holds_alternative<MissingClipMedia>(layer.source)) {
+        throw OfflineVideoRenderError{OfflineVideoRenderErrorCode::MissingMedia,
+                                      "offline video clip references missing media"};
+      } else if (std::holds_alternative<TimelineEnded>(layer.source)) {
+        throw OfflineVideoRenderError{OfflineVideoRenderErrorCode::InternalInvariant,
+                                      "timeline ended before the export plan"};
+      }
+    }
+    check_cancelled();
+    OfflineVideoFrame output{frame_index, timeline_time, canvas.width, canvas.height,
+        canvas.stride_bytes, OfflinePixelFormat::Rgba8888, std::move(canvas.pixels)};
     if (options_.titles != nullptr && !plan_.snapshot().titles.empty()) {
       // Titles ride on the finished output frame: the same compositor the preview uses.
       options_.titles->composite(composition::RgbaCanvas{output.width, output.height, output.stride_bytes, output.pixels.data()},
@@ -299,16 +313,17 @@ OfflineVideoFrame OfflineVideoRenderer::render_frame(domain::FrameNumber frame_i
     ++metrics_.output_frames;
     return output;
   } catch (OfflineVideoRenderError& error) {
-    if (active_source_ != nullptr) {
-      if (active_source_->candidate.has_value() &&
-          active_source_->candidate->presentation_timestamp.has_value()) {
+    for (const auto& [id, active] : active_sources_) {
+      diagnostic << " source_track_id=" << id;
+      if (active->candidate.has_value() &&
+          active->candidate->presentation_timestamp.has_value()) {
         diagnostic << " candidate_pts="
-                   << static_cast<double>(*active_source_->candidate->presentation_timestamp);
+                   << static_cast<double>(*active->candidate->presentation_timestamp);
       }
-      if (active_source_->lookahead.has_value() &&
-          active_source_->lookahead->presentation_timestamp.has_value()) {
+      if (active->lookahead.has_value() &&
+          active->lookahead->presentation_timestamp.has_value()) {
         diagnostic << " lookahead_pts="
-                   << static_cast<double>(*active_source_->lookahead->presentation_timestamp);
+                   << static_cast<double>(*active->lookahead->presentation_timestamp);
       }
     }
     error.set_diagnostic_context(diagnostic.str());

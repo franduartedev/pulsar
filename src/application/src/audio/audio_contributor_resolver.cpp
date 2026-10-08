@@ -58,7 +58,8 @@ AudioContributorResolution resolve_audio_contributors(const ProjectSnapshot& sna
 
   // Embedded program audio always precedes independent tracks in mix order.
   for (std::size_t index = 0; index < tracks.size(); ++index) {
-    if (tracks[index].kind() == domain::TrackKind::Video) {
+    if (tracks[index].id() == snapshot.video_track_id &&
+        tracks[index].kind() == domain::TrackKind::Video) {
       resolve_track(snapshot, tracks[index], index, timeline_range, result);
     }
   }

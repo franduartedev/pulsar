@@ -7,6 +7,8 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <functional>
+#include <map>
 #include <memory>
 #include <optional>
 #include <stdexcept>
@@ -56,6 +58,7 @@ enum class OfflineVideoRenderErrorCode {
   ConversionFailed,
   MissingMedia,
   InternalInvariant,
+  Cancelled,
 };
 
 class OfflineVideoRenderError final : public std::runtime_error {
@@ -91,6 +94,10 @@ struct OfflineVideoRenderMetrics {
   std::uint64_t decoded_source_frames{0};
   std::uint64_t conversion_count{0};
   std::uint64_t peak_live_source_frames{0};
+  std::uint64_t peak_active_decoders{0};
+  std::uint64_t peak_active_layers{0};
+  std::uint64_t scale_nanoseconds{0};
+  std::uint64_t composite_nanoseconds{0};
 };
 
 // Port: high quality rescaling of an RGBA picture (implemented over libswscale by the media
@@ -110,7 +117,8 @@ struct OfflineVideoRenderOptions {
 class OfflineVideoRenderer final {
 public:
   OfflineVideoRenderer(const ExportPlan& plan, OfflineVideoSourceFactory& source_factory,
-                       OfflineVideoRenderOptions options = {});
+                       OfflineVideoRenderOptions options = {},
+                       std::function<bool()> is_cancelled = {});
   ~OfflineVideoRenderer();
 
   OfflineVideoRenderer(const OfflineVideoRenderer&) = delete;
@@ -122,31 +130,21 @@ public:
 private:
   struct ActiveSource;
 
-  [[nodiscard]] OfflineVideoFrame black_frame(domain::FrameNumber frame_index,
-                                               domain::MediaTime timeline_time) const;
-  [[nodiscard]] OfflineVideoFrame compose_frame(domain::FrameNumber frame_index,
-                                                 domain::MediaTime timeline_time,
-                                                 const OfflineVideoSourceFrame& source_frame) const;
+  void compose_frame(composition::RgbaSurface& canvas, ActiveSource& active,
+                     const OfflineVideoSourceFrame& source_frame);
   [[nodiscard]] const OfflineVideoSourceFrame& select_source_frame(
-      const ResolvedClip& clip, domain::MediaTime source_time);
-  void open_source(const ResolvedClip& clip, domain::MediaTime source_time);
+      domain::TrackId track_id, const ResolvedClip& clip, domain::MediaTime source_time);
+  void open_source(domain::TrackId track_id, const ResolvedClip& clip, domain::MediaTime source_time);
   void update_live_frame_metric() noexcept;
+  void check_cancelled() const;
 
   const ExportPlan& plan_;
   OfflineVideoSourceFactory& source_factory_;
   OfflineVideoRenderOptions options_;
-  std::unique_ptr<ActiveSource> active_source_;
+  std::map<std::uint64_t, std::unique_ptr<ActiveSource>> active_sources_;
+  std::function<bool()> is_cancelled_;
   std::int64_t next_frame_index_{0};
   OfflineVideoRenderMetrics metrics_;
-  // The last scaled picture. A held frame (a photograph, a long pause) is scaled once, not once per
-  // output frame. Holding the source pointer keeps its identity from being reused.
-  struct ScaledCache {
-    std::shared_ptr<const OfflineVideoPixelBuffer> source;
-    std::int64_t width{0};
-    std::int64_t height{0};
-    OfflineVideoPixelBuffer scaled;
-  };
-  mutable std::optional<ScaledCache> scaled_cache_;
 };
 
 } // namespace pulsar::application::exporting

@@ -78,12 +78,15 @@ private:
 class VideoFactory final : public exporting::OfflineVideoSourceFactory {
 public:
   bool fail{false};
+  int fail_on_open{0};
+  int opens{0};
   std::filesystem::path last_locator;
 
   std::unique_ptr<exporting::OfflineVideoSource> open(const std::filesystem::path& locator,
                                                       int) override {
     last_locator = locator;
-    return std::make_unique<VideoSource>(fail);
+    ++opens;
+    return std::make_unique<VideoSource>(fail || opens == fail_on_open);
   }
 };
 
@@ -284,6 +287,43 @@ void failure_matrix_preserves_destination() {
   }
 }
 
+void auxiliary_failure_and_cancellation_are_atomic() {
+  auto multi = request();
+  domain::Track upper{domain::TrackId{9}, domain::TrackKind::Video};
+  upper.insert_clip(domain::Clip{domain::ClipId{9}, multi.snapshot.assets.front().id(),
+      {{0, {1, 1}}, {1, {1, 1}}}, domain::MediaTime::zero()});
+  multi.snapshot.timeline.add_track(std::move(upper));
+  multi.snapshot.visual_track_ids.push_back(domain::TrackId{9});
+  {
+    Fixture fixture;
+    fixture.video.fail_on_open = 2;
+    assert_error(fixture, multi, exporting::ExportErrorCode::DecodeFailed);
+    assert(fixture.video.opens == 2 && fixture.writers.video_writes == 0);
+  }
+  {
+    Fixture fixture;
+    bool cancelled = false;
+    try { (void)fixture.job.run(multi, [&] { return fixture.video.opens == 1; }); }
+    catch (const exporting::ExportError& error) {
+      cancelled = error.code() == exporting::ExportErrorCode::Cancelled;
+    }
+    assert(cancelled && fixture.writers.video_writes == 0);
+    assert(fixture.publisher.destination_content == "old");
+    assert(!fixture.publisher.temp_live && fixture.publisher.cleanup_count == 1);
+  }
+  {
+    Fixture fixture;
+    multi.snapshot.assets.clear();
+    bool rejected = false;
+    try { (void)fixture.job.run(multi); }
+    catch (const exporting::ExportError& error) {
+      rejected = error.code() == exporting::ExportErrorCode::MissingMedia;
+    }
+    assert(rejected && fixture.publisher.create_count == 0);
+    assert(fixture.publisher.destination_content == "old");
+  }
+}
+
 void cancellation_and_snapshot_are_safe() {
   Fixture fixture;
   bool saw_subunit_progress = false;
@@ -378,6 +418,7 @@ void rejects_reentrant_run_on_same_job() {
 } // namespace
 
 int main() {
+  auxiliary_failure_and_cancellation_are_atomic();
   success_is_incremental_and_progress_is_monotonic();
   failure_matrix_preserves_destination();
   cancellation_and_snapshot_are_safe();

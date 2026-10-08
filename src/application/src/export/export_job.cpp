@@ -18,6 +18,8 @@ namespace {
 
 [[nodiscard]] ExportErrorCode map_video_error(OfflineVideoRenderErrorCode code) noexcept {
   switch (code) {
+  case OfflineVideoRenderErrorCode::Cancelled:
+    return ExportErrorCode::Cancelled;
   case OfflineVideoRenderErrorCode::SourceOpenFailed:
     return ExportErrorCode::SourceOpenFailed;
   case OfflineVideoRenderErrorCode::DecodeFailed:
@@ -124,7 +126,7 @@ ExportResult ExportJob::run(const ExportRequest& request, CancelPredicate is_can
     }
     if (!writer) fail(ExportErrorCode::OutputOpenFailed, "writer factory returned no writer");
 
-    OfflineVideoRenderer video_renderer{*plan, video_sources_, request.render_options};
+    OfflineVideoRenderer video_renderer{*plan, video_sources_, request.render_options, is_cancelled};
     OfflineAudioRenderer audio_renderer{*plan, audio_sources_};
     std::int64_t audio_done = 0;
     auto report = [&] {

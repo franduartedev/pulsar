@@ -132,6 +132,11 @@ ExportPlan ExportPlan::build(const ProjectSnapshot& input, ExportProfile profile
     throw ExportPlanError{ExportPlanErrorCode::NoVideoMaster,
                           "project has no designated video track"};
   }
+  try {
+    validate_visual_track_ids(input.timeline, input.video_track_id, input.visual_track_ids);
+  } catch (const std::invalid_argument& error) {
+    throw ExportPlanError{ExportPlanErrorCode::InvalidProject, error.what()};
+  }
 
   const MediaAsset* master = pick_master_asset(
       video_track->clips(),
