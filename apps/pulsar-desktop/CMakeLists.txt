@@ -20,6 +20,12 @@ qt_add_executable(pulsar_desktop
   src/preview_image_provider.hpp
   src/thumbnail_service.cpp
   src/thumbnail_service.hpp
+  src/title_rasterizer.cpp
+  src/title_rasterizer.hpp
+  src/title_list_model.cpp
+  src/title_list_model.hpp
+  src/recovery_service.cpp
+  src/recovery_service.hpp
 )
 
 qt_add_resources(pulsar_desktop pulsar_desktop_qml
@@ -45,9 +51,11 @@ qt_add_resources(pulsar_desktop pulsar_desktop_qml
     qml/components/TimelinePane.qml
     qml/components/VideoTrack.qml
     qml/components/ClipBlock.qml
+    qml/components/TitleBlock.qml
     qml/components/Playhead.qml
     qml/components/ToolButton.qml
     qml/components/UnsavedChangesDialog.qml
+    qml/components/RecoveryDialog.qml
     qml/components/ClipContextMenu.qml
     qml/components/PathPromptDialog.qml
     qml/components/PSlider.qml
@@ -105,7 +113,7 @@ add_test(NAME pulsar.desktop.smoke
          COMMAND pulsar_desktop --smoke-exit-ms 250)
 set_tests_properties(pulsar.desktop.smoke
   PROPERTIES
-    ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;PULSAR_RECOVERY_DIR=${CMAKE_CURRENT_BINARY_DIR}/recovery-test"
 )
 
 add_executable(pulsar_desktop_export_tests
@@ -124,6 +132,12 @@ add_executable(pulsar_desktop_export_tests
   src/preview_image_provider.hpp
   src/thumbnail_service.cpp
   src/thumbnail_service.hpp
+  src/title_rasterizer.cpp
+  src/title_rasterizer.hpp
+  src/title_list_model.cpp
+  src/title_list_model.hpp
+  src/recovery_service.cpp
+  src/recovery_service.hpp
   src/builtin_sound_catalog.hpp
 )
 set_target_properties(pulsar_desktop_export_tests PROPERTIES AUTOMOC ON)
@@ -152,7 +166,7 @@ add_dependencies(pulsar_desktop_export_tests pulsar_desktop)  # stages assets/ n
 add_test(NAME pulsar.desktop.export_integration
          COMMAND pulsar_desktop_export_tests)
 set_tests_properties(pulsar.desktop.export_integration
-  PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+  PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;PULSAR_RECOVERY_DIR=${CMAKE_CURRENT_BINARY_DIR}/recovery-export")
 
 add_executable(pulsar_desktop_ingest_tests
   tests/desktop_controller_ingest_test.cpp
@@ -170,6 +184,12 @@ add_executable(pulsar_desktop_ingest_tests
   src/preview_image_provider.hpp
   src/thumbnail_service.cpp
   src/thumbnail_service.hpp
+  src/title_rasterizer.cpp
+  src/title_rasterizer.hpp
+  src/title_list_model.cpp
+  src/title_list_model.hpp
+  src/recovery_service.cpp
+  src/recovery_service.hpp
   src/builtin_sound_catalog.hpp
 )
 set_target_properties(pulsar_desktop_ingest_tests PROPERTIES AUTOMOC ON)
@@ -198,10 +218,10 @@ add_dependencies(pulsar_desktop_ingest_tests pulsar_desktop)
 add_test(NAME pulsar.desktop.ingest_integration
          COMMAND pulsar_desktop_ingest_tests)
 set_tests_properties(pulsar.desktop.ingest_integration
-  PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+  PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;PULSAR_RECOVERY_DIR=${CMAKE_CURRENT_BINARY_DIR}/recovery-ingest")
 
 # Release-safety desktop tests (same sources as the other controller tests).
-foreach(pair "safety|pulsar.desktop.safety" "shutdown|pulsar.desktop.shutdown")
+foreach(pair "safety|pulsar.desktop.safety" "shutdown|pulsar.desktop.shutdown" "batch|pulsar.desktop.batch" "title_parity|pulsar.desktop.title_parity" "recovery|pulsar.desktop.recovery" "dnd|pulsar.desktop.dnd" "gate100|pulsar.desktop.gate100")
   string(REPLACE "|" ";" parts "${pair}")
   list(GET parts 0 short)
   list(GET parts 1 test_name)
@@ -222,6 +242,12 @@ foreach(pair "safety|pulsar.desktop.safety" "shutdown|pulsar.desktop.shutdown")
     src/preview_image_provider.hpp
     src/thumbnail_service.cpp
     src/thumbnail_service.hpp
+    src/title_rasterizer.cpp
+    src/title_rasterizer.hpp
+    src/title_list_model.cpp
+    src/title_list_model.hpp
+    src/recovery_service.cpp
+    src/recovery_service.hpp
     src/builtin_sound_catalog.hpp
   )
   set_target_properties(${target} PROPERTIES AUTOMOC ON)
@@ -234,7 +260,7 @@ foreach(pair "safety|pulsar.desktop.safety" "shutdown|pulsar.desktop.shutdown")
   pulsar_apply_compiler_warnings(${target})
   add_dependencies(${target} pulsar_desktop)
   add_test(NAME ${test_name} COMMAND ${target})
-  set_tests_properties(${test_name} PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 300)
+  set_tests_properties(${test_name} PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;PULSAR_RECOVERY_DIR=${CMAKE_CURRENT_BINARY_DIR}/recovery-${short}" TIMEOUT 300)
 endforeach()
 endif()
 

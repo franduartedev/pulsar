@@ -1,5 +1,6 @@
 #pragma once
 
+#include <pulsar/application/composition/title_compositor.hpp>
 #include <pulsar/application/export/export_plan.hpp>
 #include <pulsar/application/timeline/timeline_clip_resolver.hpp>
 
@@ -96,9 +97,24 @@ struct OfflineVideoRenderMetrics {
   std::uint64_t peak_live_source_frames{0};
 };
 
+// Port: high quality rescaling of an RGBA picture (implemented over libswscale by the media
+// adapter). Without one the renderer falls back to its basic nearest-neighbour copy.
+class OfflineFrameScaler {
+public:
+  virtual ~OfflineFrameScaler() = default;
+  [[nodiscard]] virtual OfflineVideoPixelBuffer scale(const OfflineVideoPixelBuffer& source,
+                                                      int target_width, int target_height) = 0;
+};
+
+struct OfflineVideoRenderOptions {
+  OfflineFrameScaler* scaler{nullptr};              // non-owning
+  composition::TitleCompositor* titles{nullptr};    // non-owning; titles of the plan's snapshot
+};
+
 class OfflineVideoRenderer final {
 public:
-  OfflineVideoRenderer(const ExportPlan& plan, OfflineVideoSourceFactory& source_factory);
+  OfflineVideoRenderer(const ExportPlan& plan, OfflineVideoSourceFactory& source_factory,
+                       OfflineVideoRenderOptions options = {});
   ~OfflineVideoRenderer();
 
   OfflineVideoRenderer(const OfflineVideoRenderer&) = delete;
@@ -122,6 +138,7 @@ private:
 
   const ExportPlan& plan_;
   OfflineVideoSourceFactory& source_factory_;
+  OfflineVideoRenderOptions options_;
   std::unique_ptr<ActiveSource> active_source_;
   std::int64_t next_frame_index_{0};
   OfflineVideoRenderMetrics metrics_;

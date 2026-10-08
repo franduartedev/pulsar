@@ -133,6 +133,20 @@ bool scenario_thumbnails_done_then_destroy(Context& c) {
   return got;
 }
 
+// Batch import in flight when the controller dies (worker probing, results queued).
+bool scenario_batch_import_in_flight(Context& c) {
+  DesktopController controller{c.provider, {}};
+  QStringList files;
+  for (int i = 0; i < 12; ++i) {
+    const auto copy = c.project.parent_path() / ("batch_" + std::to_string(i) + ".mp4");
+    if (!fs::exists(copy)) fs::copy_file(c.video_a, copy);
+    files << q(copy);
+  }
+  controller.openPaths(files);
+  spin(40);
+  return true;
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -162,6 +176,7 @@ int main(int argc, char** argv) {
       {"export-running", scenario_export_running},
       {"export-cancelled", scenario_export_cancelled},
       {"open-project", scenario_open_project},
+      {"batch-import", scenario_batch_import_in_flight},
       {"thumbnails-in-flight", scenario_thumbnails_in_flight},
       {"thumbnails-many-clips", scenario_thumbnails_many_clips},
       {"thumbnails-done", scenario_thumbnails_done_then_destroy},

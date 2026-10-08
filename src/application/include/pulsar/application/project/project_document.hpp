@@ -29,6 +29,10 @@ public:
   [[nodiscard]] std::optional<MediaAsset> find_asset(domain::MediaId id) const;
   [[nodiscard]] const domain::Timeline& timeline() const noexcept { return timeline_; }
   [[nodiscard]] domain::ClipId next_clip_id() const;
+  // Titles are kept sorted by start and never overlap each other (one title track).
+  [[nodiscard]] const std::vector<domain::Title>& titles() const noexcept { return titles_; }
+  [[nodiscard]] const domain::Title* find_title(domain::TitleId id) const noexcept;
+  [[nodiscard]] domain::TitleId next_title_id() const { return allocator_.next_title(); }
 
   [[nodiscard]] ProjectSnapshot snapshot() const;
   [[nodiscard]] bool is_dirty() const noexcept {
@@ -61,6 +65,9 @@ private:
       return domain::TimelineId{state.next_timeline_id};
     }
     [[nodiscard]] domain::TrackId next_track() const { return domain::TrackId{state.next_track_id}; }
+    [[nodiscard]] domain::TitleId next_title() const { return domain::TitleId{state.next_title_id}; }
+    void ensure_title_consumable() const;
+    void consume_title();
 
     void ensure_media_consumable() const;
     void ensure_clip_consumable() const;
@@ -75,6 +82,9 @@ private:
                                        const MediaProbe& probe, domain::MediaId id) const;
   void add_asset_value(const MediaAsset& asset);
   void remove_asset_value(domain::MediaId id);
+  void add_title_value(const domain::Title& title);
+  void remove_title_value(domain::TitleId id);
+  void replace_title_value(const domain::Title& title);
   void validate_clip_for_track(domain::TrackId track_id, const domain::Clip& clip) const;
   [[nodiscard]] domain::Timeline& timeline_mutable() noexcept { return timeline_; }
   [[nodiscard]] HistoryStateId next_history_state_id() const noexcept {
@@ -89,6 +99,7 @@ private:
   domain::Timeline timeline_;
   domain::TrackId video_track_id_;
   std::vector<MediaAsset> assets_;
+  std::vector<domain::Title> titles_;
   std::uint64_t asset_revision_{0};
   HistoryStateId current_history_state_id_{1};
   HistoryStateId saved_history_state_id_{1};

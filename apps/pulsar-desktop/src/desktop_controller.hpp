@@ -17,7 +17,13 @@
 #include <QObject>
 #include <QTimer>
 
+#include "recovery_service.hpp"
 #include "thumbnail_service.hpp"
+#include "title_list_model.hpp"
+#include "title_rasterizer.hpp"
+
+#include <pulsar/application/composition/title_compositor.hpp>
+#include <pulsar/media/ffmpeg/ffmpeg_preview_converter.hpp>
 #include <QUrl>
 #include <QVariantList>
 
@@ -30,6 +36,7 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <deque>
 #include <thread>
 #include <unordered_set>
 #include <unordered_map>
@@ -55,6 +62,8 @@ class DesktopController final : public QObject {
   Q_PROPERTY(bool hasVideoMedia READ hasVideoMedia NOTIFY mediaChanged)
   Q_PROPERTY(bool playing READ playing NOTIFY playbackChanged)
   Q_PROPERTY(bool busy READ busy NOTIFY busyChanged)
+  Q_PROPERTY(int importPending READ importPending NOTIFY importProgressChanged)
+  Q_PROPERTY(int importTotal READ importTotal NOTIFY importProgressChanged)
   Q_PROPERTY(bool exportRunning READ exportRunning NOTIFY exportRunningChanged)
   Q_PROPERTY(double exportProgress READ exportProgress NOTIFY exportProgressChanged)
   Q_PROPERTY(QString exportStatus READ exportStatus NOTIFY exportStatusChanged)
@@ -63,7 +72,12 @@ class DesktopController final : public QObject {
   Q_PROPERTY(QString activeProjectPath READ activeProjectPath NOTIFY activeProjectPathChanged)
   Q_PROPERTY(bool previewLate READ previewLate NOTIFY technicalStatusChanged)
   Q_PROPERTY(QString debugMetrics READ debugMetrics NOTIFY diagnosticsChanged)
+  Q_PROPERTY(bool recoveryAvailable READ recoveryAvailable NOTIFY recoveryChanged)
+  Q_PROPERTY(QString recoveryDescription READ recoveryDescription NOTIFY recoveryChanged)
   Q_PROPERTY(QAbstractItemModel* timelineClips READ timelineClips NOTIFY timelineChanged)
+  Q_PROPERTY(QAbstractItemModel* timelineTitles READ timelineTitles NOTIFY timelineChanged)
+  Q_PROPERTY(QString selectedTitleKey READ selectedTitleKey NOTIFY timelineChanged)
+  Q_PROPERTY(QVariantMap selectedTitle READ selectedTitle NOTIFY timelineChanged)
   Q_PROPERTY(QVariantList timelineTracks READ timelineTracks NOTIFY timelineChanged)
   Q_PROPERTY(QString timelineDurationText READ timelineDurationText NOTIFY timelineChanged)
   Q_PROPERTY(QVariantList timelineRulerTicks READ timelineRulerTicks NOTIFY timelineChanged)
@@ -120,7 +134,14 @@ public:
   // percentiles from copied ring samples; call only for explicit reporting,
   // never on a hot path. Not a Q_PROPERTY, emits no signals.
   [[nodiscard]] QString performanceSnapshot() const;
+  [[nodiscard]] bool recoveryAvailable() const { return recovery_available_; }
+  [[nodiscard]] QString recoveryDescription() const { return recovery_description_; }
   [[nodiscard]] QAbstractItemModel* timelineClips() { return &timeline_model_; }
+  [[nodiscard]] QAbstractItemModel* timelineTitles() { return &title_model_; }
+  [[nodiscard]] QString selectedTitleKey() const;
+  [[nodiscard]] QVariantMap selectedTitle() const;
+  // Test hook: the first title of the document (nullptr when there is none).
+  [[nodiscard]] const pulsar::domain::Title* titleForTest() const { return active_session_ && !active_session_->titles().empty() ? &active_session_->titles().front() : nullptr; }
   [[nodiscard]] QVariantList timelineTracks() const { return timeline_tracks_; }
   [[nodiscard]] QString timelineDurationText() const { return timeline_duration_text_; }
   [[nodiscard]] QVariantList timelineRulerTicks() const { return timeline_ruler_ticks_; }
@@ -147,11 +168,18 @@ public:
   [[nodiscard]] bool canUndo() const { return active_session_ && active_session_->can_undo(); }
   [[nodiscard]] bool canRedo() const { return active_session_ && active_session_->can_redo(); }
   [[nodiscard]] QVariantList soundLibrary() const { return sound_library_; }
+  [[nodiscard]] int importPending() const { return std::max(0, import_total_ - import_done_); }
+  [[nodiscard]] int importTotal() const { return import_total_; }
   [[nodiscard]] QString appVersion() const;
   [[nodiscard]] std::shared_ptr<ThumbnailCache> thumbnailCache() const { return thumb_cache_; }
   [[nodiscard]] bool soundPackAvailable() const { return !sound_library_.isEmpty(); }
   Q_INVOKABLE void openPath(const QString& path);
   Q_INVOKABLE void openUrl(const QUrl& url);
+  // Batch import: every file is probed in order by the single import worker; assets appear
+  // one by one, a bad file never costs the others. Duplicates (same file) are skipped.
+  Q_INVOKABLE void openPaths(const QStringList& paths);
+  Q_INVOKABLE void openUrls(const QList<QUrl>& urls);
+  Q_INVOKABLE void cancelImport();
   Q_INVOKABLE void importRequested();
   Q_INVOKABLE void togglePlayback();
   Q_INVOKABLE void play();
@@ -183,6 +211,32 @@ public:
   Q_INVOKABLE void separateSelectedAudio();
   Q_INVOKABLE void setSelectedClipGainDb(double gain_db);
   Q_INVOKABLE void toggleSelectedClipMute();
+  // ---- Drag & drop from the library. `lane` is the index of the timeline track under the
+  // cursor, `pixel` the x inside the timeline area. The preview and the drop share one resolver,
+  // so what the ghost shows is exactly what lands (snapping included).
+  Q_INVOKABLE QVariantMap previewAssetDrop(const QString& media_id, int lane, double pixel, double width);
+  Q_INVOKABLE bool dropAsset(const QString& media_id, int lane, double pixel, double width);
+  // ---- Recovery (crash safety). A snapshot of unsaved work is kept apart from the .pulsar file.
+  Q_INVOKABLE bool restoreRecovery();     // opens the offered session (stays "unsaved")
+  Q_INVOKABLE void discardRecovery();     // forgets it
+  Q_INVOKABLE void autosaveNow();         // writes a recovery snapshot if there is unsaved work
+  Q_INVOKABLE void flushRecovery() { recovery_.flush(); }
+  [[nodiscard]] qulonglong recoveryWriteCount() const { return recovery_.writes_completed(); }
+  [[nodiscard]] QString recoveryDirectory() const { return QString::fromStdString(recovery_.store().directory().string()); }
+  // ---- Titles v0: static text over the video (see docs/release for scope) -------------------
+  Q_INVOKABLE void addTitle();                         // at the playhead
+  Q_INVOKABLE void selectTitle(const QString& key);
+  Q_INVOKABLE void deleteSelectedTitle();
+  Q_INVOKABLE void setSelectedTitleText(const QString& text);
+  // colour "#RRGGBB"; h: 0 left 1 centre 2 right; v: 0 top 1 middle 2 bottom; size in 2..20 % of the height
+  Q_INVOKABLE void setSelectedTitleStyle(int size_percent, const QString& color, int horizontal, int vertical, bool shadow);
+  Q_INVOKABLE QVariantMap previewTitleMove(const QString& key, double press, double current, double width);
+  Q_INVOKABLE void moveTitle(const QString& key, double press, double current, double width);
+  Q_INVOKABLE QVariantMap previewTitleTrim(const QString& key, bool trim_start, double pixel, double width);
+  Q_INVOKABLE void trimTitle(const QString& key, bool trim_start, double pixel, double width);
+  // Export with a size preset: "original" | "1080p" | "720p" (never enlarges the project).
+  Q_INVOKABLE void exportProjectWithPreset(const QString& path, const QString& preset);
+  Q_INVOKABLE QString exportSizeNote(const QString& preset) const;
   // "Eliminar y cerrar hueco" (see EditorSession::ripple_delete_selected) and its menu gate.
   Q_INVOKABLE void rippleDeleteSelectedClip();
   Q_INVOKABLE bool canRippleDelete() const { return active_session_ && active_session_->can_ripple_delete(); }
@@ -219,10 +273,11 @@ signals:
   void exportRunningChanged(); void exportProgressChanged(); void exportStatusChanged();
   void exportDestinationChanged();
   void projectDirtyChanged(); void activeProjectPathChanged();
-  void diagnosticsChanged(); void timelineChanged(); void timelinePlayheadChanged(); void timelineViewChanged(); void snapEnabledChanged(); void waveformPolicyChanged(); void editActionStateChanged(); void focusImportPathRequested();
+  void diagnosticsChanged(); void timelineChanged(); void timelinePlayheadChanged(); void timelineViewChanged(); void snapEnabledChanged(); void recoveryChanged(); void importProgressChanged(); void waveformPolicyChanged(); void editActionStateChanged(); void focusImportPathRequested();
   void soundLibraryChanged(); void assetsChanged();
 private:
-  struct WorkerCommand { std::filesystem::path path; std::uint64_t generation; };
+  struct WorkerCommand { std::filesystem::path path; std::uint64_t generation; bool auto_place{true}; };
+  static constexpr std::size_t kMaxQueuedImports = 500;
   struct WaveformItemStamp {
     std::optional<pulsar::domain::ClipId> clip_id;
     std::optional<pulsar::domain::MediaId> media_id;
@@ -238,10 +293,12 @@ private:
   };
   struct VisualIdentity { std::uint64_t session_epoch; std::uint64_t document_generation; pulsar::domain::ClipId clip_id; pulsar::domain::MediaId media_id; std::uint64_t source_epoch; std::uint64_t ordinal; };
   void workerLoop();
-  void exportLoop(pulsar::application::ProjectSnapshot snapshot,
+  void exportLoop(pulsar::application::ProjectSnapshot snapshot, QString preset,
                   std::filesystem::path destination, std::filesystem::path project_file,
                   std::uint64_t generation);
-  void postOpen(std::filesystem::path path, std::uint64_t generation);
+  void postOpen(std::filesystem::path path, bool auto_place);
+  void resetImportQueue();
+  void finishImportItem(bool ok, const std::filesystem::path& path);
   [[nodiscard]] std::unique_ptr<pulsar::desktop::EditorSession> makeEditorSession();
   // Worker factory bound to one mailbox, measuring construction for D3
   // evidence. An empty project_file leaves authored locators unchanged;
@@ -252,7 +309,6 @@ private:
       std::filesystem::path project_file);
   [[nodiscard]] pulsar::application::AudioPlaybackSourceFactory makeAudioSourceFactory(
       std::filesystem::path project_file);
-  void enqueue(WorkerCommand command);
   void updateTick();
   void updatePositionProperties();
   void updateDiagnostics();
@@ -271,7 +327,7 @@ private:
   void refreshWaveformItems();
   void loadSoundLibrary();
   void refreshWaveformItem(WaveformQuickItem* item);
-  void installTimelineAsset(const pulsar::application::MediaProbeResult&);
+  bool installTimelineAsset(const pulsar::application::MediaProbeResult&, bool auto_place = true);
   void presentTimeline(const pulsar::application::TimelinePresentation&);
   void clearProgram(QString state);
   void displayLease(const pulsar::application::TimelinePresentSample&);
@@ -308,7 +364,10 @@ private:
   std::unique_ptr<pulsar::desktop::EditorSession> active_session_;
   std::uint64_t editor_session_epoch_{1};
   std::uint64_t import_request_generation_{0};
-  std::thread worker_; mutable std::mutex mutex_; std::condition_variable wake_; bool stop_worker_{false}; std::optional<WorkerCommand> pending_command_;
+  // Main-thread bookkeeping of the current import batch (reset when the queue drains/cancels).
+  int import_total_{0}; int import_done_{0}; int import_failed_{0}; int import_skipped_{0};
+  QString import_first_failure_;
+  std::thread worker_; mutable std::mutex mutex_; std::condition_variable wake_; bool stop_worker_{false}; std::deque<WorkerCommand> import_queue_;
   std::thread export_thread_;
   std::atomic_bool export_cancel_requested_{false};
   std::uint64_t export_generation_{0};
@@ -320,6 +379,26 @@ private:
   std::unordered_set<std::string> thumb_pending_;
   std::unordered_set<std::string> thumb_failed_;
   QTimer thumb_refresh_timer_;
+  RecoveryService recovery_{RecoveryStore::default_directory()};
+  QTimer autosave_timer_;
+  std::uint64_t recovery_last_history_{0};
+  bool recovery_available_{false};
+  QString recovery_description_;
+  void checkRecoveryAtStartup();
+  bool openProjectImpl(const QString& path, std::optional<pulsar::application::ProjectRestoreState> restored);
+  // Titles: the same rasteriser + compositor logic serves the preview (here) and the export.
+  TitleListModel title_model_;
+  std::shared_ptr<pulsar::application::composition::TitleRasterizer> title_rasterizer_{std::make_shared<QtTitleRasterizer>()};
+  pulsar::application::composition::TitleCompositor title_compositor_{title_rasterizer_};
+  QString title_gap_key_;   // identity of the "title over black" picture currently shown
+  [[nodiscard]] std::optional<std::pair<int, int>> projectCanvasSize() const;
+  void composeTitlesOnPreview(pulsar::media::ffmpeg::FFmpegPreviewFrame& frame, pulsar::domain::MediaTime time);
+  bool showTitleOverGap();
+  [[nodiscard]] std::vector<pulsar::domain::MediaTime> titleSnapEdges(std::optional<pulsar::domain::TitleId> exclude) const;
+  void commitTitle(pulsar::domain::Title title);
+  struct DropResolution { bool valid{false}; QString reason; pulsar::domain::MediaId media{1}; pulsar::domain::TrackId track{1};
+                          bool video{false}; pulsar::domain::MediaTime start{pulsar::domain::MediaTime::zero()}; pulsar::domain::MediaTime duration{pulsar::domain::MediaTime::zero()}; };
+  [[nodiscard]] DropResolution resolveAssetDrop(const QString& media_id, int lane, double pixel, double width) const;
   MediaAssetListModel asset_model_;
   QString selected_asset_id_;
   std::uint64_t asset_model_epoch_{0};

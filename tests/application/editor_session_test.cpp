@@ -1573,6 +1573,59 @@ void select_adjacent_clip_follows_editorial_order() {
   assert(session.processor().undo_size() > 0);   // selection never enters history
 }
 
+void titles_in_the_session_and_ripple() {
+  EditorSession session;
+  const auto media = session.processor().import_asset("v.mp4", SecondsProbe{60});
+  const auto a = session.processor().add_clip(media, TimeRange{MediaTime::zero(), secs(10)}, MediaTime::zero());
+  const auto b = session.processor().add_clip(media, TimeRange{MediaTime::zero(), secs(10)}, secs(10));
+  (void)a;
+  session.synchronize_document_state();
+  // No title where there is no video; at the playhead otherwise, shortened to the free room.
+  EditorSession empty;
+  bool no_video = false;
+  try { (void)empty.add_title_at_playhead(); } catch (const desktop::TitleException& e) { no_video = e.code() == desktop::TitleError::NoVideo; }
+  assert(no_video);
+  session.seek(secs(2));
+  const auto first = session.add_title_at_playhead();
+  assert(session.titles().size() == 1 && session.titles()[0].start() == secs(2) && session.titles()[0].end() == secs(5));
+  assert(session.selected_title() == std::optional<domain::TitleId>{first} && !session.selected_clip().has_value());
+  session.seek(secs(3));
+  bool no_space = false;
+  try { (void)session.add_title_at_playhead(); } catch (const desktop::TitleException& e) { no_space = e.code() == desktop::TitleError::NoSpace; }
+  assert(no_space);
+  session.seek(secs(18));
+  const auto second = session.add_title_at_playhead();                  // clamped to the end of the video (20 s)
+  assert(session.document().find_title(second)->end() == secs(20));
+  // Selecting a clip deselects the title and vice versa; undo of an add drops the selection.
+  session.select_clip(b);
+  assert(!session.selected_title().has_value());
+  session.select_title(second);
+  assert(session.selected_title() == std::optional<domain::TitleId>{second} && !session.selected_clip().has_value());
+  session.replace_title(session.document().find_title(second)->with_text("Cierre"));
+  assert(session.document().find_title(second)->text() == "Cierre");
+  assert(session.undo() && session.document().find_title(second)->text() == "Título");
+  assert(session.undo() && session.document().find_title(second) == nullptr && !session.selected_title().has_value());
+  assert(session.redo() && session.redo());
+
+  // Ripple: deleting clip a (0..10) moves the title that starts after it, keeps earlier ones.
+  const auto a_id = session.document().timeline().find_track(session.document().video_track_id())->clips().front().id();
+  session.select_clip(a_id);
+  const auto before = layout_signature(session);
+  session.ripple_delete_selected();
+  assert(session.document().find_title(first)->start() == secs(2));          // started before the cut end: stays
+  assert(session.document().find_title(second)->start() == secs(8) && session.document().find_title(second)->end() == secs(10));
+  assert(session.undo());
+  assert(session.document().find_title(second)->start() == secs(18) && layout_signature(session) == before);
+  assert(session.redo() && session.document().find_title(second)->start() == secs(8));
+  assert(session.undo());
+
+  // Refused when a shifted title would land on one that stays: nothing changes.
+  session.select_title(first);
+  session.replace_title(session.document().find_title(first)->with_range(TimeRange{secs(9), secs(15)}));
+  session.select_clip(a_id);
+  assert(!session.can_ripple_delete());
+}
+
 int main() {
   viewport_is_exactly_guarded();
   zoom_and_pan_preserve_editorial_time_mapping();
@@ -1624,5 +1677,6 @@ int main() {
   failed_oversize_group_rolls_back_completely();
   trim_to_playhead_q_and_w();
   select_adjacent_clip_follows_editorial_order();
+  titles_in_the_session_and_ripple();
   return 0;
 }

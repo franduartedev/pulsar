@@ -100,6 +100,9 @@ Item {
                     ctx.moveTo(w * 0.90, h * 0.38); ctx.lineTo(w * 0.64, h * 0.62)
                     ctx.stroke()
                 }
+            } else if (glyph.kind === "title") {
+                ctx.fillRect(w * 0.20, h * 0.20, w * 0.60, h * 0.14)
+                ctx.fillRect(w * 0.43, h * 0.20, w * 0.14, h * 0.62)
             } else if (glyph.kind === "magnet") {
                 // Horseshoe magnet: U shape with two pole tips.
                 ctx.lineWidth = 2.6

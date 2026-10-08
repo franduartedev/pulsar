@@ -21,6 +21,8 @@ struct ExportRequest {
   ProjectSnapshot snapshot;
   std::filesystem::path destination;
   ExportProfile profile{ExportProfile::beta_v01()};
+  // Non-owning; must outlive run(). Scaler and title compositor of the desktop adapter.
+  OfflineVideoRenderOptions render_options{};
 };
 
 struct ExportProgress {

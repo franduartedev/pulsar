@@ -70,9 +70,9 @@ Window {
     function askSavePath(purpose) {
         pathPurpose = purpose
         if (purpose === "export") {
-            pathPrompt.title = "Exportar vídeo"; pathPrompt.confirmText = "Exportar"; pathPrompt.extension = ".mp4"
+            pathPrompt.title = "Exportar vídeo"; pathPrompt.confirmText = "Exportar"; pathPrompt.extension = ".mp4"; pathPrompt.showPresets = true
         } else {
-            pathPrompt.title = "Guardar proyecto"; pathPrompt.confirmText = "Guardar"; pathPrompt.extension = ".pulsar"
+            pathPrompt.title = "Guardar proyecto"; pathPrompt.confirmText = "Guardar"; pathPrompt.extension = ".pulsar"; pathPrompt.showPresets = false
         }
         pathPrompt.openWith(controller.suggestedPath(purpose))
     }
@@ -91,24 +91,31 @@ Window {
     Shortcut { sequence: "Shift+Z"; onActivated: controller.fitTimeline() }
     // Single-key editing shortcuts never fire while typing in a field or inside a dialog.
     readonly property bool typing: !!root.activeFocusItem && typeof root.activeFocusItem.cursorPosition !== "undefined"
-    readonly property bool shortcutsBlocked: typing || pathPrompt.visible || unsavedDialog.visible
+    readonly property bool shortcutsBlocked: typing || pathPrompt.visible || unsavedDialog.visible || recoveryDialog.visible
     Shortcut { sequence: "M"; enabled: !root.shortcutsBlocked; onActivated: controller.toggleSelectedClipMute() }
     Shortcut { sequence: "Shift+Delete"; enabled: !root.shortcutsBlocked; onActivated: controller.rippleDeleteSelectedClip() }
     Shortcut { sequence: "Q"; enabled: !root.shortcutsBlocked; onActivated: controller.trimSelectedStartToPlayhead() }
     Shortcut { sequence: "W"; enabled: !root.shortcutsBlocked; onActivated: controller.trimSelectedEndToPlayhead() }
     Shortcut { sequence: "Alt+Right"; enabled: !root.shortcutsBlocked; onActivated: controller.selectNextClip() }
     Shortcut { sequence: "Alt+Left"; enabled: !root.shortcutsBlocked; onActivated: controller.selectPreviousClip() }
+    Shortcut { sequence: "T"; enabled: !root.shortcutsBlocked; onActivated: controller.addTitle() }
     Shortcut { sequence: "N"; enabled: !root.shortcutsBlocked; onActivated: controller.snapEnabled = !controller.snapEnabled }
 
     FileDialog {
         id: fileDialog
-        title: "Importar medio"
-        fileMode: FileDialog.OpenFile
+        title: "Importar medios"
+        fileMode: FileDialog.OpenFiles
         nameFilters: [
             "Medios (*.mp4 *.mov *.mkv *.avi *.webm *.wav *.mp3 *.m4a *.aac *.flac)",
             "Todos los archivos (*)"
         ]
-        onAccepted: controller.openUrl(selectedFile)
+        onAccepted: controller.openUrls(selectedFiles)
+    }
+
+    FolderDialog {
+        id: folderDialog
+        title: "Importar una carpeta"
+        onAccepted: controller.openUrls([selectedFolder])
     }
 
     FileDialog {
@@ -123,7 +130,7 @@ Window {
         anchors.fill: parent
         onDropped: function(drop) {
             if (drop.hasUrls && drop.urls.length > 0) {
-                controller.openUrl(drop.urls[0])
+                controller.openUrls(drop.urls)
                 drop.acceptProposedAction()
             }
         }
@@ -152,6 +159,26 @@ Window {
         anchors.bottomMargin: root.gap
         width: root.mediaWidth
         onImportRequested: fileDialog.open()
+        onImportFolderRequested: folderDialog.open()
+        onAssetDragStarted: function(mediaId, name, isVideo) { dragGhost.label = name; dragGhost.visible = true }
+        onAssetDragMoved: function(mediaId, sx, sy) {
+            var p = root.contentItem.mapFromItem(null, sx, sy)
+            dragGhost.x = p.x + 12; dragGhost.y = p.y + 8
+            timelinePane.updateDrop(mediaId, sx, sy)
+        }
+        onAssetDragEnded: function(mediaId, sx, sy) { dragGhost.visible = false; timelinePane.commitDrop(mediaId, sx, sy) }
+    }
+
+    // Floating label while an item is dragged from the library.
+    Rectangle {
+        id: dragGhost
+        property string label: ""
+        visible: false
+        z: 2000
+        width: Math.min(220, ghostText.implicitWidth + 20); height: 26
+        radius: Theme.radiusM
+        color: Theme.bgElevated; border.color: Theme.accent
+        Text { id: ghostText; anchors.centerIn: parent; width: parent.width - 16; text: dragGhost.label; color: Theme.textPrimary; font.pixelSize: Theme.fontSizeS; elide: Text.ElideMiddle }
     }
 
     InspectorPanel {
@@ -218,15 +245,22 @@ Window {
     UnsavedChangesDialog {
         id: unsavedDialog
         onSaveRequested: root.saveThenContinue()
-        onDiscardRequested: root.finishPending()
+        onDiscardRequested: { controller.discardRecovery(); root.finishPending() }
         onCancelRequested: { root.pendingAction = ""; unsavedDialog.close() }
     }
+
+    RecoveryDialog {
+        id: recoveryDialog
+        onRecoverRequested: { recoveryDialog.close(); controller.restoreRecovery() }
+        onDiscardRequested: { recoveryDialog.close(); controller.discardRecovery() }
+    }
+    Component.onCompleted: if (controller.recoveryAvailable) recoveryDialog.open()
 
     PathPromptDialog {
         id: pathPrompt
         onAccepted: function(path) {
             if (root.pathPurpose === "export") {
-                controller.exportProject(path)
+                controller.exportProjectWithPreset(path, pathPrompt.preset)
             } else {
                 var ok = controller.saveProject(path)
                 var continuing = root.savingForAction

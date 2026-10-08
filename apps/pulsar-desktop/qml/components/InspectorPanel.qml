@@ -109,12 +109,104 @@ Panel {
             spacing: Theme.spaceL
 
             Text {
-                visible: controller.selectedClipKey.length === 0 && inspector.summary.length === 0
+                visible: controller.selectedClipKey.length === 0 && controller.selectedTitleKey.length === 0 && inspector.summary.length === 0
                 width: parent.width
                 wrapMode: Text.WordWrap
                 text: "Seleccioná un clip en la timeline o importá un medio."
                 color: Theme.textMuted
                 font.pixelSize: Theme.fontSizeS
+            }
+
+            // ---- TÍTULO (static text over the video) -----------------------
+            Column {
+                id: titleSection
+                visible: controller.selectedTitleKey.length > 0
+                width: parent.width
+                spacing: Theme.spaceM
+                readonly property var info: controller.selectedTitle
+                function style(size, color, h, v, shadow) { controller.setSelectedTitleStyle(size, color, h, v, shadow) }
+                SectionLabel { text: "TÍTULO" }
+                Rectangle {
+                    width: parent.width; height: 74
+                    radius: Theme.radiusM; color: Theme.bgInput
+                    border.width: 1; border.color: titleEdit.activeFocus ? Theme.focus : Theme.borderStrong
+                    TextEdit {
+                        id: titleEdit
+                        anchors.fill: parent; anchors.margins: 8
+                        wrapMode: TextEdit.Wrap
+                        color: Theme.textPrimary
+                        selectionColor: Theme.accent
+                        selectedTextColor: Theme.textOnAccent
+                        font.pixelSize: Theme.fontSizeM
+                        clip: true
+                        text: titleSection.info && titleSection.info.text !== undefined ? titleSection.info.text : ""
+                        // Applied when you leave the box or press Ctrl+Enter (one undo step).
+                        onActiveFocusChanged: if (!activeFocus) controller.setSelectedTitleText(text)
+                        Keys.onPressed: function(event) {
+                            if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter) && (event.modifiers & Qt.ControlModifier)) {
+                                controller.setSelectedTitleText(text); event.accepted = true
+                            } else if (event.key === Qt.Key_Escape) {
+                                text = titleSection.info.text; focus = false; event.accepted = true
+                            }
+                        }
+                    }
+                }
+                Text { width: parent.width; text: "Ctrl+Enter aplica el texto"; color: Theme.textMuted; font.pixelSize: Theme.fontSizeXS }
+                Row {
+                    width: parent.width; spacing: 6
+                    Text { width: 52; anchors.verticalCenter: parent.verticalCenter; text: "Tamaño"; color: Theme.textSecondary; font.pixelSize: Theme.fontSizeS }
+                    PButton { width: 28; height: Theme.controlHeightSmall; text: "−"; onClicked: titleSection.style(titleSection.info.size - 1, titleSection.info.color, titleSection.info.horizontal, titleSection.info.vertical, titleSection.info.shadow) }
+                    Text { width: 40; horizontalAlignment: Text.AlignHCenter; anchors.verticalCenter: parent.verticalCenter; text: titleSection.info && titleSection.info.size !== undefined ? titleSection.info.size + " %" : ""; color: Theme.textPrimary; font.family: Theme.mono; font.pixelSize: Theme.fontSizeM }
+                    PButton { width: 28; height: Theme.controlHeightSmall; text: "+"; onClicked: titleSection.style(titleSection.info.size + 1, titleSection.info.color, titleSection.info.horizontal, titleSection.info.vertical, titleSection.info.shadow) }
+                }
+                Row {
+                    width: parent.width; spacing: 6
+                    Text { width: 52; anchors.verticalCenter: parent.verticalCenter; text: "Color"; color: Theme.textSecondary; font.pixelSize: Theme.fontSizeS }
+                    Repeater {
+                        model: ["#FFFFFF", "#FFD84D", "#FF5A5A", "#59D9FF", "#6BE38B", "#000000"]
+                        delegate: Rectangle {
+                            width: 22; height: 22; radius: 11
+                            color: modelData
+                            border.width: titleSection.info && titleSection.info.color === modelData ? 2 : 1
+                            border.color: titleSection.info && titleSection.info.color === modelData ? Theme.accent : Theme.borderStrong
+                            MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: titleSection.style(titleSection.info.size, modelData, titleSection.info.horizontal, titleSection.info.vertical, titleSection.info.shadow) }
+                        }
+                    }
+                }
+                Row {
+                    width: parent.width; spacing: 4
+                    Text { width: 52; anchors.verticalCenter: parent.verticalCenter; text: "Horiz."; color: Theme.textSecondary; font.pixelSize: Theme.fontSizeS }
+                    Repeater {
+                        model: ["Izq.", "Centro", "Der."]
+                        delegate: PButton {
+                            width: 56; height: Theme.controlHeightSmall; text: modelData
+                            primary: titleSection.info && titleSection.info.horizontal === index
+                            onClicked: titleSection.style(titleSection.info.size, titleSection.info.color, index, titleSection.info.vertical, titleSection.info.shadow)
+                        }
+                    }
+                }
+                Row {
+                    width: parent.width; spacing: 4
+                    Text { width: 52; anchors.verticalCenter: parent.verticalCenter; text: "Vert."; color: Theme.textSecondary; font.pixelSize: Theme.fontSizeS }
+                    Repeater {
+                        model: ["Arriba", "Medio", "Abajo"]
+                        delegate: PButton {
+                            width: 56; height: Theme.controlHeightSmall; text: modelData
+                            primary: titleSection.info && titleSection.info.vertical === index
+                            onClicked: titleSection.style(titleSection.info.size, titleSection.info.color, titleSection.info.horizontal, index, titleSection.info.shadow)
+                        }
+                    }
+                }
+                Row {
+                    width: parent.width; spacing: 6
+                    Text { width: 52; anchors.verticalCenter: parent.verticalCenter; text: "Sombra"; color: Theme.textSecondary; font.pixelSize: Theme.fontSizeS }
+                    Rectangle {
+                        width: 38; height: 20; radius: 10
+                        color: titleSection.info && titleSection.info.shadow ? Theme.accent : Theme.track
+                        Rectangle { y: 2; x: titleSection.info && titleSection.info.shadow ? parent.width - width - 2 : 2; width: 16; height: 16; radius: 8; color: Theme.textPrimary }
+                        MouseArea { anchors.fill: parent; onClicked: titleSection.style(titleSection.info.size, titleSection.info.color, titleSection.info.horizontal, titleSection.info.vertical, !titleSection.info.shadow) }
+                    }
+                }
             }
 
             // ---- CLIP (editable context) -------------------------------

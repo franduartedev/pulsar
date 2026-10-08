@@ -19,6 +19,7 @@ add_library(pulsar_media_ffmpeg
   src/ffmpeg_waveform_source.cpp
   src/ffmpeg_video_decode_session.cpp
   src/ffmpeg_offline_video_source.cpp
+  src/ffmpeg_offline_frame_scaler.cpp
   src/ffmpeg_media_probe.cpp
   src/ffmpeg_playback_worker.cpp
   src/ffmpeg_playback_visual_mailbox.cpp

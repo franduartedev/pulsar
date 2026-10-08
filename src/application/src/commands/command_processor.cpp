@@ -78,6 +78,16 @@ domain::ClipId CommandProcessor::add_clip(domain::TrackId track_id, domain::Medi
   return id;
 }
 
+domain::TitleId CommandProcessor::add_title(domain::Title title) {
+  const auto id = title.id();
+  execute(AddTitleCommand{std::move(title)});
+  return id;
+}
+
+void CommandProcessor::replace_title(domain::Title title) { execute(ReplaceTitleCommand{std::move(title)}); }
+
+void CommandProcessor::remove_title(domain::TitleId id) { execute(RemoveTitleCommand{id}); }
+
 void CommandProcessor::remove_clip(domain::ClipId clip_id) {
   execute(RemoveClipCommand{clip_id});
 }
@@ -294,6 +304,19 @@ void CommandProcessor::apply(ProjectDocument& document, const Command& command, 
           }
         } else if constexpr (std::is_same_v<CommandType, RemoveAssetCommand>) {
           document.remove_asset_value(concrete_command.media_id);
+        } else if constexpr (std::is_same_v<CommandType, AddTitleCommand>) {
+          if (mode == ApplyMode::NewEdit) {
+            if (concrete_command.title.id() != document.allocator_.next_title()) {
+              throw std::invalid_argument{"new title id is not the next document id"};
+            }
+            document.allocator_.ensure_title_consumable();
+          }
+          document.add_title_value(concrete_command.title);
+          if (mode == ApplyMode::NewEdit) document.allocator_.consume_title();
+        } else if constexpr (std::is_same_v<CommandType, RemoveTitleCommand>) {
+          document.remove_title_value(concrete_command.title_id);
+        } else if constexpr (std::is_same_v<CommandType, ReplaceTitleCommand>) {
+          document.replace_title_value(concrete_command.title);
         }
       },
       command);
@@ -328,6 +351,16 @@ Command CommandProcessor::build_inverse(const ProjectDocument& document, const C
                              std::is_same_v<CommandType, SetClipMutedCommand>) {
           const ClipLocation location = find_clip_location(document, concrete_command.clip_id);
           return RestoreClipCommand{location.track_id, location.clip};
+        } else if constexpr (std::is_same_v<CommandType, AddTitleCommand>) {
+          return RemoveTitleCommand{concrete_command.title.id()};
+        } else if constexpr (std::is_same_v<CommandType, RemoveTitleCommand>) {
+          const auto* existing = document.find_title(concrete_command.title_id);
+          if (existing == nullptr) throw std::invalid_argument{"title does not exist in document"};
+          return AddTitleCommand{*existing};
+        } else if constexpr (std::is_same_v<CommandType, ReplaceTitleCommand>) {
+          const auto* existing = document.find_title(concrete_command.title.id());
+          if (existing == nullptr) throw std::invalid_argument{"title does not exist in document"};
+          return ReplaceTitleCommand{*existing};
         } else if constexpr (std::is_same_v<CommandType, ImportAssetCommand>) {
           return RemoveAssetCommand{concrete_command.asset.id()};
         } else {

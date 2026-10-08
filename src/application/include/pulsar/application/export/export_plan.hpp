@@ -26,6 +26,16 @@ enum class ExportPresentationMetadataPolicy { RejectUnsupported };
 class ExportProfile final {
 public:
   [[nodiscard]] static ExportProfile beta_v01() noexcept;
+  // "1080p" / "720p": the output is the project size reduced to fit inside this box, aspect
+  // preserved. A project already smaller than the box is NEVER enlarged. 0 = project size.
+  [[nodiscard]] ExportProfile with_max_output(std::int32_t max_width, std::int32_t max_height) const noexcept {
+    ExportProfile copy = *this;
+    copy.max_output_width_ = max_width;
+    copy.max_output_height_ = max_height;
+    return copy;
+  }
+  [[nodiscard]] std::int32_t max_output_width() const noexcept { return max_output_width_; }
+  [[nodiscard]] std::int32_t max_output_height() const noexcept { return max_output_height_; }
 
   [[nodiscard]] ExportContainer container() const noexcept { return container_; }
   [[nodiscard]] ExportVideoCodec video_codec() const noexcept { return video_codec_; }
@@ -54,6 +64,8 @@ private:
   std::int32_t audio_sample_rate_{48'000};
   std::int32_t audio_channels_{2};
   std::int32_t audio_bitrate_{192'000};
+  std::int32_t max_output_width_{0};
+  std::int32_t max_output_height_{0};
   ExportVideoGapPolicy video_gap_policy_{ExportVideoGapPolicy::Black};
   ExportAudioGapPolicy audio_gap_policy_{ExportAudioGapPolicy::Silence};
   ExportMissingMediaPolicy missing_media_policy_{ExportMissingMediaPolicy::Fail};

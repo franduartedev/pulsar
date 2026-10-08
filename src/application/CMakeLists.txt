@@ -15,6 +15,7 @@ add_library(pulsar_application
   src/project/project_document.cpp
   src/project/project_codec.cpp
   src/timeline/timeline_clip_resolver.cpp
+  src/composition/title_compositor.cpp
   src/export/export_plan.cpp
   src/export/export_job.cpp
   src/export/offline_video_renderer.cpp

@@ -6,6 +6,7 @@ add_library(pulsar_domain
   src/time/rational.cpp
   src/time/time_range.cpp
   src/timeline/clip.cpp
+  src/timeline/title.cpp
   src/timeline/timeline.cpp
   src/timeline/track.cpp
 )

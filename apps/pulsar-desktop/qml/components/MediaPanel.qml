@@ -5,6 +5,11 @@ import "../theme/Theme.js" as Theme
 // icon, name and short secondary info. Technical detail lives in the Inspector.
 Panel {
     signal importRequested()
+    signal importFolderRequested()
+    // Drag from the library towards the timeline (scene coordinates; Main hosts the ghost).
+    signal assetDragStarted(string mediaId, string name, bool isVideo)
+    signal assetDragMoved(string mediaId, real sx, real sy)
+    signal assetDragEnded(string mediaId, real sx, real sy)
     id: mediaPanel
 
     function focusPath() {
@@ -19,14 +24,26 @@ Panel {
         id: importButton
         anchors.left: parent.left; anchors.right: parent.right; anchors.top: title.bottom
         anchors.leftMargin: Theme.spaceM; anchors.rightMargin: Theme.spaceM; anchors.topMargin: Theme.spaceM
-        primary: true; text: "+  Importar medio"
-        onClicked: mediaPanel.importRequested()
+        primary: controller.importPending === 0
+        text: controller.importPending > 1 ? "Importando " + (controller.importTotal - controller.importPending + 1) + " de " + controller.importTotal + "…  Cancelar" : "+  Importar medio"
+        onClicked: controller.importPending > 1 ? controller.cancelImport() : mediaPanel.importRequested()
+    }
+
+    PButton {
+        id: folderButton
+        flat: true
+        visible: controller.importPending === 0
+        anchors.left: parent.left; anchors.right: parent.right; anchors.top: importButton.bottom
+        anchors.leftMargin: Theme.spaceM; anchors.rightMargin: Theme.spaceM; anchors.topMargin: 2
+        height: 24
+        text: "Importar una carpeta entera…"
+        onClicked: mediaPanel.importFolderRequested()
     }
 
     // Underline tabs.
     Item {
         id: tabs
-        anchors.left: parent.left; anchors.right: parent.right; anchors.top: importButton.bottom
+        anchors.left: parent.left; anchors.right: parent.right; anchors.top: folderButton.bottom
         anchors.leftMargin: Theme.spaceM; anchors.rightMargin: Theme.spaceM; anchors.topMargin: Theme.spaceM
         height: 32
         Rectangle { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; height: 1; color: Theme.borderSubtle }
@@ -72,9 +89,29 @@ Panel {
                 id: rowMouse
                 anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top; height: 52
                 hoverEnabled: true
-                onClicked: controller.selectAsset(model.mediaId)
+                preventStealing: true
+                property real pressX: 0
+                property real pressY: 0
+                property bool dragging: false
+                property bool wasDragged: false
+                onPressed: function(mouse) { pressX = mouse.x; pressY = mouse.y; dragging = false; wasDragged = false }
+                onPositionChanged: function(mouse) {
+                    if (!pressed) return
+                    if (!dragging && model.available && Math.abs(mouse.x - pressX) + Math.abs(mouse.y - pressY) > 10) {
+                        dragging = true
+                        mediaPanel.assetDragStarted(model.mediaId, model.name, assetRow.isVideo)
+                    }
+                    if (dragging) { var p = rowMouse.mapToItem(null, mouse.x, mouse.y); mediaPanel.assetDragMoved(model.mediaId, p.x, p.y) }
+                }
+                onReleased: function(mouse) {
+                    if (!dragging) return
+                    var p = rowMouse.mapToItem(null, mouse.x, mouse.y)
+                    dragging = false; wasDragged = true
+                    mediaPanel.assetDragEnded(model.mediaId, p.x, p.y)
+                }
+                onClicked: if (!wasDragged) controller.selectAsset(model.mediaId)
                 // Same action as the Insertar button.
-                onDoubleClicked: { controller.selectAsset(model.mediaId); if (assetRow.isVideo && model.available) controller.insertAssetAtPlayhead(model.mediaId) }
+                onDoubleClicked: { wasDragged = false; controller.selectAsset(model.mediaId); if (assetRow.isVideo && model.available) controller.insertAssetAtPlayhead(model.mediaId) }
             }
             Rectangle { visible: assetRow.current; anchors.left: parent.left; anchors.top: parent.top; anchors.topMargin: 10; width: 2; height: 32; radius: 1; color: Theme.accent }
             Rectangle {
@@ -148,7 +185,7 @@ Panel {
     }
 
     // ---- Open by path (secondary) -------------------------------------
-    Text { id: pathLabel; visible: pathRow.visible; anchors.left: parent.left; anchors.leftMargin: Theme.spaceM; anchors.bottom: pathRow.top; anchors.bottomMargin: 6; text: "Abrir por ruta"; color: Theme.textMuted; font.pixelSize: Theme.fontSizeXS }
+    Text { id: pathLabel; visible: pathRow.visible; anchors.left: parent.left; anchors.leftMargin: Theme.spaceM; anchors.bottom: pathRow.top; anchors.bottomMargin: 6; text: "Archivo o carpeta (ruta)"; color: Theme.textMuted; font.pixelSize: Theme.fontSizeXS }
     Row {
         id: pathRow
         visible: !mediaPanel.soundsTab && parent.height > 400

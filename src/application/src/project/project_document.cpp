@@ -39,6 +39,16 @@ void ProjectDocument::IdAllocator::ensure_track_consumable() const {
   }
 }
 
+void ProjectDocument::IdAllocator::ensure_title_consumable() const {
+  if (state.next_title_id == std::numeric_limits<std::uint64_t>::max()) {
+    throw std::overflow_error{"cannot allocate another title id"};
+  }
+}
+
+void ProjectDocument::IdAllocator::consume_title() {
+  increment_checked(state.next_title_id, "title id");
+}
+
 void ProjectDocument::IdAllocator::consume_media() {
   increment_checked(state.next_media_id, "media id");
 }
@@ -155,6 +165,26 @@ ProjectDocument ProjectDocument::restore(const ProjectRestoreState& state) {
     throw std::invalid_argument{"invalid next track allocator high-water mark"};
   }
 
+  // Titles: unique ids, no overlap between them, allocator above every id.
+  std::vector<domain::Title> titles = state.titles;
+  std::sort(titles.begin(), titles.end(), [](const domain::Title& a, const domain::Title& b) { return a.start() < b.start(); });
+  std::unordered_set<std::uint64_t> title_ids;
+  std::uint64_t max_title_id = 0;
+  for (std::size_t i = 0; i < titles.size(); ++i) {
+    if (!title_ids.insert(titles[i].id().value()).second) {
+      throw std::invalid_argument{"duplicate title id in project restore state"};
+    }
+    if (i > 0 && titles[i].start() < titles[i - 1].end()) {
+      throw std::invalid_argument{"titles overlap in project restore state"};
+    }
+    max_title_id = std::max(max_title_id, titles[i].id().value());
+  }
+  if (state.allocator_state.next_title_id == 0 || state.allocator_state.next_title_id <= max_title_id ||
+      state.allocator_state.next_title_id == std::numeric_limits<std::uint64_t>::max()) {
+    throw std::invalid_argument{"invalid next title allocator high-water mark"};
+  }
+
+  restored.titles_ = std::move(titles);
   restored.timeline_ = std::move(timeline);
   restored.video_track_id_ = state.video_track_id;
   restored.assets_ = state.assets;
@@ -164,6 +194,40 @@ ProjectDocument ProjectDocument::restore(const ProjectRestoreState& state) {
   restored.next_history_state_id_ = 2;
   restored.document_generation_ = 0;
   return restored;
+}
+
+const domain::Title* ProjectDocument::find_title(domain::TitleId id) const noexcept {
+  for (const auto& title : titles_) {
+    if (title.id() == id) return &title;
+  }
+  return nullptr;
+}
+
+void ProjectDocument::add_title_value(const domain::Title& title) {
+  if (find_title(title.id()) != nullptr) throw std::invalid_argument{"title id already exists in document"};
+  for (const auto& other : titles_) {
+    if (title.range().overlaps(other.range())) throw std::invalid_argument{"title overlaps another title"};
+  }
+  titles_.push_back(title);
+  std::sort(titles_.begin(), titles_.end(), [](const domain::Title& a, const domain::Title& b) { return a.start() < b.start(); });
+}
+
+void ProjectDocument::remove_title_value(domain::TitleId id) {
+  const auto found = std::find_if(titles_.begin(), titles_.end(), [id](const domain::Title& t) { return t.id() == id; });
+  if (found == titles_.end()) throw std::invalid_argument{"title does not exist in document"};
+  titles_.erase(found);
+}
+
+void ProjectDocument::replace_title_value(const domain::Title& title) {
+  const auto found = std::find_if(titles_.begin(), titles_.end(), [&](const domain::Title& t) { return t.id() == title.id(); });
+  if (found == titles_.end()) throw std::invalid_argument{"title does not exist in document"};
+  for (const auto& other : titles_) {
+    if (other.id() != title.id() && title.range().overlaps(other.range())) {
+      throw std::invalid_argument{"title overlaps another title"};
+    }
+  }
+  *found = title;
+  std::sort(titles_.begin(), titles_.end(), [](const domain::Title& a, const domain::Title& b) { return a.start() < b.start(); });
 }
 
 std::optional<MediaAsset> ProjectDocument::find_asset(domain::MediaId id) const {
@@ -273,7 +337,7 @@ void ProjectDocument::validate_clip_for_track(domain::TrackId track_id,
 ProjectSnapshot ProjectDocument::snapshot() const {
   return ProjectSnapshot{timeline_, assets_, video_track_id_, allocator_.state,
                          current_history_state_id_, saved_history_state_id_, next_history_state_id_,
-                         document_generation_};
+                         document_generation_, titles_};
 }
 
 void ProjectDocument::ensure_new_edit_possible() const {

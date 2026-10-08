@@ -11,6 +11,8 @@ Item {
     property string extension: ""       // ".pulsar" / ".mp4": appended when the name has none
     property string problem: ""
     property string notice: ""
+    property bool showPresets: false      // export only: size preset
+    property string preset: "1080p"
     signal accepted(string path)
     signal rejected()
 
@@ -80,6 +82,16 @@ Item {
                     Keys.onEscapePressed: { dialog.close(); dialog.rejected() }
                 }
             }
+            Row {
+                visible: dialog.showPresets
+                spacing: Theme.spaceS
+                Text { anchors.verticalCenter: parent.verticalCenter; text: "Tamaño"; color: Theme.textSecondary; font.pixelSize: Theme.fontSizeS; rightPadding: 4 }
+                Repeater {
+                    model: [{id: "original", label: "Original"}, {id: "1080p", label: "1080p"}, {id: "720p", label: "720p"}]
+                    delegate: PButton { height: 30; text: modelData.label; primary: dialog.preset === modelData.id; onClicked: dialog.preset = modelData.id }
+                }
+            }
+            Text { visible: dialog.showPresets; width: parent.width; wrapMode: Text.WordWrap; text: dialog.showPresets ? controller.exportSizeNote(dialog.preset) : ""; color: Theme.textMuted; font.pixelSize: Theme.fontSizeXS }
             Text { visible: dialog.problem.length > 0; width: parent.width; wrapMode: Text.WordWrap; text: dialog.problem; color: Theme.error; font.pixelSize: Theme.fontSizeS }
             Text { visible: dialog.notice.length > 0; width: parent.width; wrapMode: Text.WordWrap; text: dialog.notice; color: Theme.warning; font.pixelSize: Theme.fontSizeS }
             Item { width: 1; height: Theme.spaceS }

@@ -62,8 +62,9 @@ struct OfflineVideoRenderer::ActiveSource {
 };
 
 OfflineVideoRenderer::OfflineVideoRenderer(const ExportPlan& plan,
-                                           OfflineVideoSourceFactory& source_factory)
-    : plan_{plan}, source_factory_{source_factory} {}
+                                           OfflineVideoSourceFactory& source_factory,
+                                           OfflineVideoRenderOptions options)
+    : plan_{plan}, source_factory_{source_factory}, options_{options} {}
 
 OfflineVideoRenderer::~OfflineVideoRenderer() = default;
 
@@ -228,33 +229,48 @@ OfflineVideoFrame OfflineVideoRenderer::compose_frame(
 
   const auto output_width = plan_.output_width();
   const auto output_height = plan_.output_height();
-  const bool width_limited = static_cast<WideInt>(output_width) * source.height <=
-                             static_cast<WideInt>(output_height) * source.width;
-  const auto scaled_width = width_limited
-                                ? output_width
-                                : scaled_dimension(output_height * source.width, source.height);
-  const auto scaled_height = width_limited
-                                 ? scaled_dimension(output_width * source.height, source.width)
-                                 : output_height;
-  const auto offset_x = (output_width - scaled_width) / 2;
-  const auto offset_y = (output_height - scaled_height) / 2;
+  const auto geometry = composition::fit_geometry(source.width, source.height, static_cast<int>(output_width),
+                                                  static_cast<int>(output_height));
+  const auto scaled_width = static_cast<std::int64_t>(geometry.scaled_width);
+  const auto scaled_height = static_cast<std::int64_t>(geometry.scaled_height);
+  const auto offset_x = static_cast<std::int64_t>(geometry.offset_x);
+  const auto offset_y = static_cast<std::int64_t>(geometry.offset_y);
   const int output_stride = checked_rgba_stride(output_width);
   const auto output_size = checked_buffer_size(static_cast<int>(output_width),
                                                static_cast<int>(output_height), output_stride);
   std::vector<std::uint8_t> pixels(output_size, 0);
   for (std::size_t offset = 3; offset < pixels.size(); offset += 4) pixels[offset] = 255;
 
-  for (std::int64_t y = 0; y < scaled_height; ++y) {
-    const auto source_y = static_cast<std::int64_t>(
-        (static_cast<WideInt>(y) * source.height) / scaled_height);
-    for (std::int64_t x = 0; x < scaled_width; ++x) {
-      const auto source_x = static_cast<std::int64_t>(
-          (static_cast<WideInt>(x) * source.width) / scaled_width);
-      const auto source_offset = static_cast<std::size_t>(source_y) * source.stride_bytes +
-                                 static_cast<std::size_t>(source_x) * 4;
-      const auto destination_offset = static_cast<std::size_t>(offset_y + y) * output_stride +
-                                      static_cast<std::size_t>(offset_x + x) * 4;
-      std::copy_n(source.pixels.data() + source_offset, 4, pixels.data() + destination_offset);
+  // Same size: straight row copy. Different size: the media adapter's scaler (bicubic/lanczos
+  // through libswscale) when provided, otherwise the basic nearest-neighbour fallback.
+  const OfflineVideoPixelBuffer* placed = &source;
+  OfflineVideoPixelBuffer scaled_storage;
+  if (scaled_width != source.width || scaled_height != source.height) {
+    if (options_.scaler != nullptr) {
+      scaled_storage = options_.scaler->scale(source, static_cast<int>(scaled_width), static_cast<int>(scaled_height));
+      placed = &scaled_storage;
+    } else {
+      for (std::int64_t y = 0; y < scaled_height; ++y) {
+        const auto source_y = static_cast<std::int64_t>((static_cast<WideInt>(y) * source.height) / scaled_height);
+        for (std::int64_t x = 0; x < scaled_width; ++x) {
+          const auto source_x = static_cast<std::int64_t>((static_cast<WideInt>(x) * source.width) / scaled_width);
+          const auto source_offset = static_cast<std::size_t>(source_y) * source.stride_bytes + static_cast<std::size_t>(source_x) * 4;
+          const auto destination_offset = static_cast<std::size_t>(offset_y + y) * output_stride + static_cast<std::size_t>(offset_x + x) * 4;
+          std::copy_n(source.pixels.data() + source_offset, 4, pixels.data() + destination_offset);
+        }
+      }
+      placed = nullptr;
+    }
+  }
+  if (placed != nullptr) {
+    if (placed->width != scaled_width || placed->height != scaled_height || placed->pixels.size() < static_cast<std::size_t>(placed->stride_bytes) * placed->height) {
+      throw OfflineVideoRenderError{OfflineVideoRenderErrorCode::ConversionFailed, "offline frame scaler returned an unexpected picture"};
+    }
+    for (std::int64_t y = 0; y < scaled_height; ++y) {
+      const auto* from = placed->pixels.data() + static_cast<std::size_t>(y) * placed->stride_bytes;
+      auto* to = pixels.data() + static_cast<std::size_t>(offset_y + y) * output_stride + static_cast<std::size_t>(offset_x) * 4;
+      std::copy_n(from, static_cast<std::size_t>(scaled_width) * 4, to);
+      for (std::int64_t x = 0; x < scaled_width; ++x) to[x * 4 + 3] = 255;
     }
   }
 
@@ -308,6 +324,11 @@ OfflineVideoFrame OfflineVideoRenderer::render_frame(domain::FrameNumber frame_i
         }
         },
         outcome);
+    if (options_.titles != nullptr && !plan_.snapshot().titles.empty()) {
+      // Titles ride on the finished output frame: the same compositor the preview uses.
+      options_.titles->composite(composition::RgbaCanvas{output.width, output.height, output.stride_bytes, output.pixels.data()},
+                                 plan_.snapshot().titles, timeline_time);
+    }
     ++next_frame_index_;
     ++metrics_.output_frames;
     return output;

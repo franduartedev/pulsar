@@ -34,6 +34,10 @@ public:
                                          domain::TimeRange source_range,
                                          domain::MediaTime timeline_start);
   void remove_clip(domain::ClipId clip_id);
+  // Titles: the new title must carry document.next_title_id(). Overlap with another title throws.
+  domain::TitleId add_title(domain::Title title);
+  void replace_title(domain::Title title);
+  void remove_title(domain::TitleId id);
   void move_clip(domain::ClipId clip_id, domain::TrackId destination_track_id,
                  domain::MediaTime timeline_start);
   void trim_clip_start(domain::ClipId clip_id, domain::MediaTime timeline_start);

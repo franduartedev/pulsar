@@ -8,9 +8,43 @@ Panel {
     property real gutterWidth: Math.max(88, Math.min(120, width * 0.095))
     readonly property real timelineWidth: Math.max(1, width - gutterWidth)
     // Lanes use the room they are given (more waveform to read) within sane bounds.
-    property real trackLaneHeight: Math.max(52, Math.min(104, Math.floor(trackArea.height / Math.max(2, controller.timelineTracks.length))))
+    // The title track sits above VIDEO 1 and only appears once there is something to caption.
+    readonly property real titleLaneH: controller.hasMedia ? 34 : 0
+    property real trackLaneHeight: Math.max(52, Math.min(104, Math.floor((trackArea.height - titleLaneH) / Math.max(2, controller.timelineTracks.length))))
     // x (timeline pixels) of the magnetic edge being snapped to, or -1.
     property real snapGuideX: -1
+    // ---- Drag & drop from the library ----------------------------------------------------
+    // Ghost = where the item would land (green) or why it cannot (red); computed by the same
+    // controller resolver that performs the drop.
+    property bool dropVisible: false
+    property bool dropValid: false
+    property int dropLane: -1
+    property real dropStartPx: 0
+    property real dropWidthPx: 0
+    property string dropReason: ""
+    function laneAtScene(sx, sy) {
+        var p = trackScroll.mapFromItem(null, sx, sy)
+        if (p.x < pane.gutterWidth || p.x > trackScroll.width || p.y < 0 || p.y > trackScroll.height) return null
+        var lane = Math.floor((p.y + trackScroll.contentY - pane.titleLaneH) / pane.trackLaneHeight)
+        if (lane < 0 || lane >= controller.timelineTracks.length) return null
+        return { lane: lane, pixel: p.x - pane.gutterWidth }
+    }
+    function updateDrop(mediaId, sx, sy) {
+        var hit = laneAtScene(sx, sy)
+        if (hit === null) { dropVisible = false; return }
+        var r = controller.previewAssetDrop(mediaId, hit.lane, hit.pixel, pane.timelineWidth)
+        dropLane = hit.lane; dropValid = r.valid; dropReason = r.reason
+        dropStartPx = r.valid ? r.startPx : Math.max(0, hit.pixel - 24)
+        dropWidthPx = r.valid ? Math.max(6, r.widthPx) : 48
+        dropVisible = true
+    }
+    function commitDrop(mediaId, sx, sy) {
+        var hit = laneAtScene(sx, sy)
+        dropVisible = false
+        if (hit !== null) controller.dropAsset(mediaId, hit.lane, hit.pixel, pane.timelineWidth)
+    }
+    function clearDrop() { dropVisible = false }
+
     // Right click on a clip: window coordinates for the context menu (hosted by Main).
     signal clipContextRequested(real sx, real sy)
 
@@ -43,7 +77,8 @@ Panel {
             Text { anchors.verticalCenter: parent.verticalCenter; text: "Timeline"; color: Theme.textPrimary; font.pixelSize: Theme.fontSizeL; font.bold: true; rightPadding: Theme.spaceM }
             ToolButton { glyph: "split"; text: "Cortar"; tip: "Cortar en el cabezal (S)"; enabled: controller.canSplit; onClicked: controller.splitSelectedClip() }
             ToolButton { glyph: "audio"; text: "Separar audio"; tip: "Separar el audio del clip de video"; enabled: controller.canSeparateAudio; onClicked: controller.separateSelectedAudio() }
-            ToolButton { glyph: "trash"; text: "Borrar"; tip: "Borrar clip (Supr)"; enabled: controller.selectedClipKey.length > 0; onClicked: controller.deleteSelectedClip() }
+            ToolButton { glyph: "trash"; text: "Borrar"; tip: "Borrar (Supr)"; enabled: controller.selectedClipKey.length > 0 || controller.selectedTitleKey.length > 0; onClicked: controller.deleteSelectedClip() }
+            ToolButton { glyph: "title"; text: "Título"; tip: "Agregar un título en el cabezal (T)"; enabled: controller.hasMedia; onClicked: controller.addTitle() }
             Rectangle { anchors.verticalCenter: parent.verticalCenter; width: 1; height: 16; color: Theme.borderStrong }
             ToolButton { glyph: "magnet"; text: "Snap"; toggle: true; tip: controller.snapEnabled ? "Imán activado: se ajusta a bordes y cabezal (N)" : "Imán desactivado (N)"; checked: controller.snapEnabled; onClicked: controller.snapEnabled = !controller.snapEnabled }
             Rectangle { anchors.verticalCenter: parent.verticalCenter; width: 1; height: 16; color: Theme.borderStrong }
@@ -63,20 +98,20 @@ Panel {
                 value: Math.log(controller.timelineZoom) / Math.LN10 / 7
                 onMoved: function(v) { controller.setTimelineZoom(Math.pow(10, 7 * v)) }
             }
-            Item { visible: pane.width > 1100; width: Theme.spaceS; height: 1 }
-            Text { visible: pane.width > 1100; anchors.verticalCenter: parent.verticalCenter; text: "Pan"; color: controller.timelineZoom > 1.0 ? Theme.textSecondary : Theme.textMuted; font.pixelSize: Theme.fontSizeXS }
+            Item { visible: pane.width > 1500; width: Theme.spaceS; height: 1 }
+            Text { visible: pane.width > 1500; anchors.verticalCenter: parent.verticalCenter; text: "Pan"; color: controller.timelineZoom > 1.0 ? Theme.textSecondary : Theme.textMuted; font.pixelSize: Theme.fontSizeXS }
             PSlider {
-                visible: pane.width > 1100
+                visible: pane.width > 1500
                 anchors.verticalCenter: parent.verticalCenter; width: 72
                 enabled: controller.timelineZoom > 1.0
                 fill: Theme.textSecondary
                 value: controller.timelineScroll
                 onMoved: function(v) { controller.setTimelineScroll(v) }
             }
-            Item { visible: pane.width > 1100; width: Theme.spaceS; height: 1 }
-            Text { visible: pane.width > 1100; anchors.verticalCenter: parent.verticalCenter; text: "Onda"; color: Theme.textSecondary; font.pixelSize: Theme.fontSizeXS }
+            Item { visible: pane.width > 1500; width: Theme.spaceS; height: 1 }
+            Text { visible: pane.width > 1500; anchors.verticalCenter: parent.verticalCenter; text: "Onda"; color: Theme.textSecondary; font.pixelSize: Theme.fontSizeXS }
             PSlider {
-                visible: pane.width > 1100
+                visible: pane.width > 1500
                 anchors.verticalCenter: parent.verticalCenter; width: 56
                 fill: Theme.waveform
                 value: (controller.waveformDensity - 0.5) / 1.5
@@ -136,7 +171,7 @@ Panel {
             id: trackScroll
             anchors.fill: parent
             contentWidth: width
-            contentHeight: Math.max(height, controller.timelineTracks.length * pane.trackLaneHeight)
+            contentHeight: Math.max(height, pane.titleLaneH + controller.timelineTracks.length * pane.trackLaneHeight)
             clip: true
             boundsBehavior: Flickable.StopAtBounds
             Item {
@@ -155,7 +190,7 @@ Panel {
                 Repeater {
                     model: controller.timelineTracks
                     delegate: Item {
-                        y: modelData.index * pane.trackLaneHeight
+                        y: pane.titleLaneH + modelData.index * pane.trackLaneHeight
                         width: contentArea.width
                         height: pane.trackLaneHeight
                         // Lane (empty space is real background) + header gutter.
@@ -180,7 +215,7 @@ Panel {
                         delegate: ClipBlock {
                             z: model.selected ? 3 : 2
                             visible: model.inViewport
-                            y: model.trackIndex * pane.trackLaneHeight + 6
+                            y: pane.titleLaneH + model.trackIndex * pane.trackLaneHeight + 6
                             canonicalStartX: model.startProgress * pane.timelineWidth
                             canonicalWidth: Math.max(3, (model.endProgress - model.startProgress) * pane.timelineWidth)
                             height: pane.trackLaneHeight - 12
@@ -200,6 +235,54 @@ Panel {
                             onActivated: controller.selectTimelineClip(clipKey)
                             onMuteToggled: { controller.selectTimelineClip(clipKey); controller.toggleSelectedClipMute() }
                             onContextRequested: function(sx, sy) { controller.selectTimelineClip(clipKey); pane.clipContextRequested(sx, sy) }
+                            onSnapGuide: function(x) { pane.snapGuideX = x }
+                        }
+                    }
+                }
+                // Drop ghost.
+                Rectangle {
+                    visible: pane.dropVisible
+                    z: 12
+                    x: pane.gutterWidth + pane.dropStartPx
+                    y: pane.titleLaneH + pane.dropLane * pane.trackLaneHeight + 6
+                    width: pane.dropWidthPx; height: pane.trackLaneHeight - 12
+                    radius: Theme.radiusS
+                    color: pane.dropValid ? "#4433cc88" : "#44f26d6d"
+                    border.width: 2; border.color: pane.dropValid ? Theme.success : Theme.error
+                    Text { visible: !pane.dropValid && pane.dropReason.length > 0; anchors.left: parent.left; anchors.leftMargin: 6; anchors.verticalCenter: parent.verticalCenter
+                           width: Math.max(parent.width, 220); text: pane.dropReason; color: Theme.textPrimary; font.pixelSize: Theme.fontSizeXS; font.bold: true }
+                }
+                // ---- Title track -----------------------------------------------------
+                Item {
+                    visible: pane.titleLaneH > 0
+                    width: contentArea.width; height: pane.titleLaneH
+                    Rectangle { anchors.fill: parent; color: Theme.laneTitle }
+                    Rectangle { width: pane.gutterWidth; anchors.top: parent.top; anchors.bottom: parent.bottom; color: Theme.bgElevated }
+                    Rectangle { width: 3; anchors.left: parent.left; anchors.top: parent.top; anchors.bottom: parent.bottom; color: Theme.titleSelected; opacity: 0.9 }
+                    Text { x: 14; anchors.verticalCenter: parent.verticalCenter; text: "Títulos"; color: Theme.textPrimary; font.pixelSize: Theme.fontSizeS; elide: Text.ElideRight; width: pane.gutterWidth - 22 }
+                    Rectangle { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; height: 1; color: Theme.bgRoot }
+                    Text { visible: controller.timelineTitles.rowCount() === 0 && pane.width > 700; x: pane.gutterWidth + 10; anchors.verticalCenter: parent.verticalCenter
+                           text: "Sin títulos · botón Título o tecla T"; color: Theme.textMuted; font.pixelSize: Theme.fontSizeXS }
+                }
+                Item {
+                    id: titleLayer
+                    visible: pane.titleLaneH > 0
+                    x: pane.gutterWidth; z: 2
+                    width: pane.timelineWidth; height: pane.titleLaneH
+                    clip: true
+                    Repeater {
+                        model: controller.timelineTitles
+                        delegate: TitleBlock {
+                            visible: model.inViewport
+                            y: 4; height: pane.titleLaneH - 8
+                            canonicalStartX: model.startProgress * pane.timelineWidth
+                            canonicalWidth: Math.max(6, (model.endProgress - model.startProgress) * pane.timelineWidth)
+                            timelineWidth: pane.timelineWidth
+                            timelineOffset: 0
+                            titleKey: model.titleKey
+                            titleText: model.titleText
+                            selected: model.selected
+                            onActivated: controller.selectTitle(titleKey)
                             onSnapGuide: function(x) { pane.snapGuideX = x }
                         }
                     }

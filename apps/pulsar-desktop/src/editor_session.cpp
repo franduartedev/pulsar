@@ -132,6 +132,36 @@ domain::MediaTime EditorSession::video_track_end() const {
   return end;
 }
 
+domain::ClipId EditorSession::insert_audio_asset(domain::MediaId media, domain::TrackId audio_track,
+                                                 domain::MediaTime timeline_start) {
+  const auto asset = document_.find_asset(media);
+  if (!asset.has_value()) throw VideoIngestException{VideoIngestError::UnknownAsset, "unknown media asset"};
+  if (asset->has_video() || !asset->audio().has_value()) {
+    throw VideoIngestException{VideoIngestError::NotAudioAsset, "only audio-only media can be dropped on an audio track"};
+  }
+  if (asset->availability() != application::MediaAvailability::Available) {
+    throw VideoIngestException{VideoIngestError::UnavailableAsset, "media asset is unavailable"};
+  }
+  const auto* track = document_.timeline().find_track(audio_track);
+  if (track == nullptr || track->kind() != domain::TrackKind::Audio) {
+    throw VideoIngestException{VideoIngestError::NotAnAudioTrack, "destination is not an audio track"};
+  }
+  const auto duration = asset->audio()->duration.has_value() ? *asset->audio()->duration : asset->playable_duration();
+  if (duration <= domain::MediaTime::zero() || timeline_start < domain::MediaTime::zero()) {
+    throw VideoIngestException{VideoIngestError::InvalidDuration, "media has no usable duration or start is negative"};
+  }
+  const domain::TimeRange destination{timeline_start, timeline_start + duration};
+  for (const auto& clip : track->clips()) {
+    if (destination.overlaps(clip.timeline_range())) {
+      throw VideoIngestException{VideoIngestError::NoSpace, "not enough room on the audio track"};
+    }
+  }
+  const auto clip = processor_.add_clip(audio_track, media, domain::TimeRange{domain::MediaTime::zero(), duration}, timeline_start);
+  selected_clip_ = clip;
+  synchronize_document_state();
+  return clip;
+}
+
 domain::ClipId EditorSession::insert_video_asset_at_playhead(domain::MediaId media) {
   return insert_video_asset(media, playback_position());
 }
@@ -230,6 +260,7 @@ void EditorSession::rebuild_read_model() {
       views_.push_back(std::move(view));
     }
   }
+  if (selected_title_.has_value() && document_.find_title(*selected_title_) == nullptr) selected_title_.reset();
   if (selected_clip_.has_value() &&
       std::none_of(views_.begin(), views_.end(), [this](const auto& view) {
         return view.id == selected_clip_.value();
@@ -449,6 +480,55 @@ domain::ClipId EditorSession::split_selected_at_playhead() {
   return right;
 }
 
+void EditorSession::select_title(std::optional<domain::TitleId> title) {
+  if (title.has_value() && document_.find_title(*title) == nullptr) title.reset();
+  const bool changed = selected_title_ != title || (title.has_value() && selected_clip_.has_value());
+  selected_title_ = title;
+  if (title.has_value() && selected_clip_.has_value()) {
+    selected_clip_.reset();
+    rebuild_read_model();
+  } else if (changed) {
+    ++read_model_generation_;
+  }
+}
+
+domain::TitleId EditorSession::add_title_at_playhead() {
+  const auto total = timeline_duration();
+  const auto start = playback_position();
+  if (total <= domain::MediaTime::zero() || start >= total) {
+    throw TitleException{TitleError::NoVideo, "there is no video at the playhead"};
+  }
+  auto end = start + domain::MediaTime{3, domain::Rational{1, 1}};
+  if (end > total) end = total;
+  for (const auto& other : document_.titles()) {
+    if (other.range().contains(start)) throw TitleException{TitleError::NoSpace, "playhead is inside another title"};
+    if (other.start() > start && other.start() < end) end = other.start();
+  }
+  if (end - start < domain::MediaTime{1, domain::Rational{1, 4}}) {
+    throw TitleException{TitleError::NoSpace, "no room for a title here"};
+  }
+  const auto id = document_.next_title_id();
+  const auto created = processor_.add_title(domain::Title{id, "Título", domain::TimeRange{start, end}});
+  selected_title_ = created;
+  selected_clip_.reset();
+  synchronize_document_state();
+  rebuild_read_model();
+  return created;
+}
+
+void EditorSession::replace_title(domain::Title title) {
+  if (document_.find_title(title.id()) == nullptr) throw TitleException{TitleError::Unknown, "unknown title"};
+  processor_.replace_title(std::move(title));
+  synchronize_document_state();
+}
+
+void EditorSession::delete_selected_title() {
+  if (!selected_title_.has_value()) throw TitleException{TitleError::Unknown, "no title selected"};
+  processor_.remove_title(*selected_title_);
+  selected_title_.reset();
+  synchronize_document_state();
+}
+
 void EditorSession::delete_selected() {
   if (!selected_clip_.has_value()) throw std::invalid_argument{"no clip selected"};
   processor_.remove_clip(*selected_clip_);
@@ -465,6 +545,7 @@ struct RippleMove {
 struct RipplePlan {
   domain::ClipId removed;
   std::vector<RippleMove> moves;  // ascending timeline start within each track
+  std::vector<domain::Title> shifted_titles;  // titles that start at/after the cut, already moved
 };
 }
 
@@ -473,7 +554,7 @@ static RipplePlan plan_ripple(const application::ProjectDocument& document, doma
   if (removed == nullptr) throw RippleDeleteException{RippleDeleteError::NothingSelected, "no clip selected"};
   const auto t1 = removed->timeline_range().end();
   const auto duration = t1 - removed->timeline_start();
-  RipplePlan plan{removed_id, {}};
+  RipplePlan plan{removed_id, {}, {}};
   for (const auto& track : document.timeline().tracks()) {
     struct Span { domain::MediaTime start; domain::MediaTime end; };
     std::vector<Span> final_layout;
@@ -498,6 +579,28 @@ static RipplePlan plan_ripple(const application::ProjectDocument& document, doma
               [](const RippleMove& a, const RippleMove& b) { return a.new_start < b.new_start; });
     plan.moves.insert(plan.moves.end(), track_moves.begin(), track_moves.end());
   }
+  // The title track follows the same rule: titles that start at/after the cut move with it.
+  {
+    struct Span { domain::MediaTime start; domain::MediaTime end; };
+    std::vector<Span> final_layout;
+    for (const auto& title : document.titles()) {
+      if (title.start() >= t1) {
+        const auto moved = title.with_range(domain::TimeRange{title.start() - duration, title.end() - duration});
+        plan.shifted_titles.push_back(moved);
+        final_layout.push_back(Span{moved.start(), moved.end()});
+      } else {
+        final_layout.push_back(Span{title.start(), title.end()});
+      }
+    }
+    std::sort(final_layout.begin(), final_layout.end(), [](const Span& a, const Span& b) { return a.start < b.start; });
+    for (std::size_t i = 1; i < final_layout.size(); ++i) {
+      if (final_layout[i].start < final_layout[i - 1].end) {
+        throw RippleDeleteException{RippleDeleteError::WouldOverlap, "closing the gap would overlap a title"};
+      }
+    }
+    std::sort(plan.shifted_titles.begin(), plan.shifted_titles.end(),
+              [](const domain::Title& a, const domain::Title& b) { return a.start() < b.start(); });
+  }
   return plan;
 }
 
@@ -519,6 +622,7 @@ void EditorSession::ripple_delete_selected() {
   processor_.run_as_one_edit([&] {
     processor_.remove_clip(plan.removed);
     for (const auto& move : plan.moves) processor_.move_clip(move.clip, move.track, move.new_start);
+    for (const auto& title : plan.shifted_titles) processor_.replace_title(title);
   });
   selected_clip_.reset();
   synchronize_document_state();
@@ -654,6 +758,7 @@ bool EditorSession::redo() {
 }
 
 void EditorSession::select_clip(std::optional<domain::ClipId> clip) {
+  if (clip.has_value()) selected_title_.reset();   // one selection at a time
   if (selected_clip_ == clip) return;
   selected_clip_ = clip;
   rebuild_read_model();

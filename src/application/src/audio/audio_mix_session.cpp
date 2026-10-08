@@ -2,6 +2,7 @@
 
 #include <pulsar/application/audio/audio_converter.hpp>
 #include <pulsar/application/audio/clip_gain.hpp>
+#include <pulsar/application/audio/output_stage.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -641,11 +642,11 @@ AudioMixRenderResult AudioMixSession::render(domain::MediaTime timeline_position
                                                 domain::Rational{1, format_.sample_rate}};
   }
 
-  // Preview policy: deterministic hard clipping only after summation. There
-  // is no hidden per-track normalization, AGC, limiter, or contributor-count
-  // attenuation.
+  // Master output stage after summation (shared with the exporter): untouched below the knee,
+  // a soft bend above it. There is no hidden per-track normalization, AGC or
+  // contributor-count attenuation.
   for (float& sample : result.block.samples_mutable()) {
-    sample = std::clamp(sample, -1.0F, 1.0F);
+    sample = soft_output_stage(sample);
   }
   result.clock = result.usable_contributors == 0 ? AudioMixClockRecommendation::Software
                                                   : AudioMixClockRecommendation::Device;

@@ -1,6 +1,7 @@
 #include <pulsar/application/export/offline_audio_renderer.hpp>
 
 #include <pulsar/application/audio/clip_gain.hpp>
+#include <pulsar/application/audio/output_stage.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -389,8 +390,9 @@ std::optional<OfflineAudioBlock> OfflineAudioRenderer::render_next_block() {
       left += value[0];
       right += value[1];
     }
-    samples[offset * 2] = static_cast<float>(left);
-    samples[offset * 2 + 1] = static_cast<float>(right);
+    // Same master stage as the preview mixer.
+    samples[offset * 2] = soft_output_stage(static_cast<float>(left));
+    samples[offset * 2 + 1] = soft_output_stage(static_cast<float>(right));
   }
   next_sample_index_ += static_cast<std::int64_t>(frame_count);
   metrics_.output_samples += frame_count;

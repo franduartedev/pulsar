@@ -18,8 +18,13 @@ an export you can trust.
 - Save and reopen projects (`.pulsar`)
 - Export to **H.264 / AAC (MP4)**
 
-Not in this beta: Windows/macOS, multiple video tracks, transitions, effects, titles,
-subtitles, color tools, proxies, autosave/recovery. See the
+- **Titles**: static text on its own track, same look in preview and export (bundled Inter Bold)
+- **Import** several files or a whole folder; **drag** media from the library onto the timeline
+- **Autosave and recovery** after a crash
+- Export presets **Original / 1080p / 720p** (real scaling, never enlarges)
+
+Not in this beta: Windows/macOS, multiple video tracks, transitions, effects, subtitles,
+color tools, proxies. See the
 [release notes](docs/release/0.1.0-beta.md) for the full list of known limitations.
 
 ## Run it

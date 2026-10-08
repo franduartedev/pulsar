@@ -1,4 +1,5 @@
 #include <pulsar/application/export/export_plan.hpp>
+#include <pulsar/application/composition/title_compositor.hpp>
 
 #include <pulsar/domain/timeline/track_kind.hpp>
 
@@ -146,8 +147,15 @@ ExportPlan ExportPlan::build(const ProjectSnapshot& input, ExportProfile profile
   }
 
   const auto frame_rate = require_frame_rate(*master);
-  const auto width = checked_even_dimension(master->metadata().width);
-  const auto height = checked_even_dimension(master->metadata().height);
+  auto width = checked_even_dimension(master->metadata().width);
+  auto height = checked_even_dimension(master->metadata().height);
+  if (profile.max_output_width() > 0 && profile.max_output_height() > 0 &&
+      (width > profile.max_output_width() || height > profile.max_output_height())) {
+    const auto fit = composition::fit_geometry(static_cast<int>(width), static_cast<int>(height),
+                                               profile.max_output_width(), profile.max_output_height());
+    width = checked_even_dimension(fit.scaled_width);
+    height = checked_even_dimension(fit.scaled_height);
+  }
   const auto editorial_duration = input.timeline.duration();
   const auto frame_count = output_frame_count(editorial_duration, frame_rate);
   if (frame_count <= 0) {

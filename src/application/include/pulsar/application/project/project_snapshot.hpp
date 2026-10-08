@@ -3,6 +3,7 @@
 #include <pulsar/application/project/media_asset.hpp>
 #include <pulsar/domain/ids/ids.hpp>
 #include <pulsar/domain/timeline/timeline.hpp>
+#include <pulsar/domain/timeline/title.hpp>
 
 #include <cstdint>
 #include <vector>
@@ -16,6 +17,7 @@ struct ProjectAllocatorState {
   std::uint64_t next_clip_id{1};
   std::uint64_t next_timeline_id{1};
   std::uint64_t next_track_id{1};
+  std::uint64_t next_title_id{1};
 };
 
 struct ProjectSnapshot {
@@ -27,6 +29,7 @@ struct ProjectSnapshot {
   HistoryStateId saved_history_state_id;
   HistoryStateId next_history_state_id;
   std::uint64_t document_generation;
+  std::vector<domain::Title> titles{};
 };
 
 } // namespace pulsar::application

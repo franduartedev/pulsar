@@ -72,6 +72,8 @@ enum class VideoIngestError {
   UnavailableAsset,
   InvalidDuration,
   NoSpace,
+  NotAudioAsset,
+  NotAnAudioTrack,
 };
 
 class VideoIngestException final : public std::invalid_argument {
@@ -131,6 +133,21 @@ public:
 
 private:
   RippleDeleteError code_;
+};
+
+enum class TitleError {
+  NoVideo,     // nothing to put a title on yet
+  NoSpace,     // the playhead is inside another title / no room before the next one
+  Unknown,
+};
+
+class TitleException final : public std::invalid_argument {
+public:
+  TitleException(TitleError code, const char* message) : std::invalid_argument{message}, code_{code} {}
+  [[nodiscard]] TitleError code() const noexcept { return code_; }
+
+private:
+  TitleError code_;
 };
 
 class EditorSession final {
@@ -194,6 +211,15 @@ public:
   [[nodiscard]] bool can_split() const;
   [[nodiscard]] domain::ClipId split_selected_at_playhead();
   void delete_selected();
+
+  // ---- Titles (static text over the video; one title track, titles never overlap) -------
+  [[nodiscard]] const std::vector<domain::Title>& titles() const noexcept { return document_.titles(); }
+  [[nodiscard]] std::optional<domain::TitleId> selected_title() const noexcept { return selected_title_; }
+  void select_title(std::optional<domain::TitleId> title);   // selecting a title deselects the clip
+  // New title at the playhead: up to 3 s, shortened to the free room and to the end of the video.
+  domain::TitleId add_title_at_playhead();
+  void replace_title(domain::Title title);                    // text / time / style: ONE undo step
+  void delete_selected_title();
   // "Eliminar y cerrar hueco": removes the selected clip (t0..t1) and moves EVERY clip of
   // any track that starts at or after t1 earlier by exactly t1 - t0. Clips that start
   // before t1 stay, nothing is trimmed, nothing may overlap afterwards (otherwise
@@ -225,6 +251,10 @@ public:
   [[nodiscard]] domain::ClipId insert_video_asset(domain::MediaId media,
                                                   domain::MediaTime timeline_start);
   [[nodiscard]] domain::ClipId insert_video_asset_at_playhead(domain::MediaId media);
+  // Drag & drop of an audio-only library item onto an AUDIO track at `timeline_start`.
+  // Same contract as the video ingest: overlap throws NoSpace and changes nothing.
+  [[nodiscard]] domain::ClipId insert_audio_asset(domain::MediaId media, domain::TrackId audio_track,
+                                                  domain::MediaTime timeline_start);
   // Appends right after the last clip of VIDEO 1 (zero when it is empty).
   [[nodiscard]] domain::ClipId append_video_asset(domain::MediaId media);
   // End of the last clip on VIDEO 1: the authority for "append", independent of
@@ -255,6 +285,7 @@ private:
   std::unique_ptr<application::AudioOutput> audio_output_;
   application::TimelinePlaybackCoordinator coordinator_;
   std::optional<domain::ClipId> selected_clip_;
+  std::optional<domain::TitleId> selected_title_;
   std::vector<TimelineClipView> views_;
   std::vector<TimelineTrackView> track_views_;
   std::uint64_t read_model_generation_{0};

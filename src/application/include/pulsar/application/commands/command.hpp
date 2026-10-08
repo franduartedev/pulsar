@@ -4,6 +4,7 @@
 #include <pulsar/domain/ids/ids.hpp>
 #include <pulsar/domain/time/media_time.hpp>
 #include <pulsar/domain/timeline/clip.hpp>
+#include <pulsar/domain/timeline/title.hpp>
 #include <pulsar/domain/timeline/track_kind.hpp>
 
 #include <variant>
@@ -80,9 +81,23 @@ struct RemoveAssetCommand {
   domain::MediaId media_id;
 };
 
+struct AddTitleCommand {
+  domain::Title title;
+};
+
+struct RemoveTitleCommand {
+  domain::TitleId title_id;
+};
+
+// Replaces the title with the same id (text, time range, style): one command for every edit.
+struct ReplaceTitleCommand {
+  domain::Title title;
+};
+
 using Command = std::variant<AddTrackCommand, RemoveTrackCommand, AddClipCommand, RemoveClipCommand, MoveClipCommand,
                              TrimClipStartCommand, TrimClipEndCommand, SplitClipCommand,
                              SetClipAudioGainCommand, SetClipMutedCommand, RestoreClipCommand,
-                             RestoreSplitCommand, ImportAssetCommand, RemoveAssetCommand>;
+                             RestoreSplitCommand, ImportAssetCommand, RemoveAssetCommand,
+                             AddTitleCommand, RemoveTitleCommand, ReplaceTitleCommand>;
 
 } // namespace pulsar::application

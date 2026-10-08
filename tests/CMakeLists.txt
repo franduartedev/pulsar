@@ -568,3 +568,11 @@ pulsar_apply_compiler_warnings(pulsar_playback_diagnostics_tests)
 
 add_test(NAME pulsar.media.playback_diagnostics
          COMMAND pulsar_playback_diagnostics_tests)
+
+add_executable(pulsar_title_tests
+  application/title_test.cpp
+)
+target_link_libraries(pulsar_title_tests PRIVATE pulsar::application pulsar::domain)
+pulsar_apply_project_options(pulsar_title_tests)
+pulsar_apply_compiler_warnings(pulsar_title_tests)
+add_test(NAME pulsar.application.titles COMMAND pulsar_title_tests)

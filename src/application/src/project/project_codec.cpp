@@ -191,14 +191,16 @@ std::vector<const domain::Track*> sorted_tracks(const domain::Timeline& timeline
 
 std::string ProjectCodec::encode(const ProjectSnapshot& snapshot) {
   const std::size_t record_count = 1 + 1 + snapshot.timeline.tracks().size() + 1 +
-                                   snapshot.assets.size();
+                                   snapshot.assets.size() + snapshot.titles.size();
   std::size_t clip_count = 0;
   for (const auto& track : snapshot.timeline.tracks()) clip_count += track.clips().size();
   if (record_count + clip_count + 2 > max_records) {
     throw ProjectCodecError{"project exceeds record limit"};
   }
   std::ostringstream output;
-  output << "PULSAR_PROJECT 2\n";
+  // Files without titles stay byte-compatible version 2; titles need version 3.
+  const bool has_titles = !snapshot.titles.empty() || snapshot.allocator_state.next_title_id != 1;
+  output << (has_titles ? "PULSAR_PROJECT 3\n" : "PULSAR_PROJECT 2\n");
   output << "TIMELINE " << snapshot.timeline.id().value() << "\n";
   const auto tracks = sorted_tracks(snapshot.timeline);
   for (const auto* track : tracks) {
@@ -280,10 +282,22 @@ std::string ProjectCodec::encode(const ProjectSnapshot& snapshot) {
     }
   }
 
+  for (const auto& title : snapshot.titles) {
+    output << "TITLE " << title.id().value() << ' ';
+    append_time(output, title.start());
+    output << ' ';
+    append_time(output, title.end());
+    output << ' ' << title.size_permille() << ' ' << title.color_rgba() << ' '
+           << static_cast<int>(title.horizontal()) << ' ' << static_cast<int>(title.vertical()) << ' '
+           << (title.shadow() ? 1 : 0) << ' ' << quote(title.text()) << "\n";
+  }
+
   output << "ALLOCATOR " << snapshot.allocator_state.next_media_id << ' '
          << snapshot.allocator_state.next_clip_id << ' '
          << snapshot.allocator_state.next_timeline_id << ' '
-         << snapshot.allocator_state.next_track_id << "\nEND\n";
+         << snapshot.allocator_state.next_track_id;
+  if (has_titles) output << ' ' << snapshot.allocator_state.next_title_id;
+  output << "\nEND\n";
   const std::string encoded = output.str();
   std::size_t offset = 0;
   while (offset < encoded.size()) {
@@ -303,7 +317,7 @@ ProjectRestoreState ProjectCodec::decode(std::string_view bytes) {
   bool video_track = false;
   bool allocator = false;
   bool ended = false;
-  enum class Section { Header, Timeline, Tracks, VideoTrack, Assets, Clips, Allocator, End };
+  enum class Section { Header, Timeline, Tracks, VideoTrack, Assets, Clips, Titles, Allocator, End };
   Section section = Section::Header;
   std::size_t line_number = 0;
   std::size_t records = 0;
@@ -335,7 +349,7 @@ ProjectRestoreState ProjectCodec::decode(std::string_view bytes) {
 
     try {
       if (tokens[0].text == "PULSAR_PROJECT") {
-        if (header || tokens.size() != 2 || (tokens[1].text != "1" && tokens[1].text != "2")) {
+        if (header || tokens.size() != 2 || (tokens[1].text != "1" && tokens[1].text != "2" && tokens[1].text != "3")) {
           parse_fail(line_number, "invalid header/version");
         }
         header = true;
@@ -496,8 +510,32 @@ ProjectRestoreState ProjectCodec::decode(std::string_view bytes) {
           parse_fail(line_number, error.what());
         }
         section = Section::Clips;
+      } else if (tokens[0].text == "TITLE") {
+        if (!video_track || (section != Section::Assets && section != Section::Clips && section != Section::Titles) || tokens.size() != 14)
+          parse_fail(line_number, "invalid TITLE");
+        std::size_t i = 1;
+        const auto title_id = domain::TitleId{unsigned_number(tokens[i++], line_number, "title id")};
+        const auto start = media_time(tokens, i, line_number, "title start");
+        const auto end = media_time(tokens, i, line_number, "title end");
+        const auto size = int_number(tokens[i++], line_number, "title size");
+        const auto color = unsigned_number(tokens[i++], line_number, "title colour");
+        const auto horizontal = unsigned_number(tokens[i++], line_number, "title horizontal alignment");
+        const auto vertical = unsigned_number(tokens[i++], line_number, "title vertical alignment");
+        const auto shadow = unsigned_number(tokens[i++], line_number, "title shadow");
+        if (color > 0xFFFFFFFFull || horizontal > 2 || vertical > 2 || shadow > 1) parse_fail(line_number, "invalid TITLE value");
+        if (i + 1 != tokens.size() || !tokens[i].quoted) parse_fail(line_number, "title text must be quoted");
+        try {
+          state.titles.emplace_back(title_id, tokens[i].text, domain::TimeRange{start, end}, size,
+                                    static_cast<std::uint32_t>(color), static_cast<domain::TitleHAlign>(horizontal),
+                                    static_cast<domain::TitleVAlign>(vertical), shadow == 1);
+        } catch (const std::exception& error) {
+          parse_fail(line_number, error.what());
+        }
+        section = Section::Titles;
       } else if (tokens[0].text == "ALLOCATOR") {
-        if (allocator || !video_track || (section != Section::Clips && section != Section::Assets) || tokens.size() != 5) parse_fail(line_number, "invalid ALLOCATOR");
+        if (allocator || !video_track || (section != Section::Clips && section != Section::Assets && section != Section::Titles) ||
+            (tokens.size() != 5 && tokens.size() != 6)) parse_fail(line_number, "invalid ALLOCATOR");
+        if (tokens.size() == 6) state.allocator_state.next_title_id = unsigned_number(tokens[5], line_number, "next title id");
         state.allocator_state.next_media_id = unsigned_number(tokens[1], line_number, "next media id");
         state.allocator_state.next_clip_id = unsigned_number(tokens[2], line_number, "next clip id");
         state.allocator_state.next_timeline_id = unsigned_number(tokens[3], line_number, "next timeline id");

@@ -1,5 +1,6 @@
 #include <pulsar/application/audio/audio_contributor_resolver.hpp>
 #include <pulsar/application/audio/audio_mix_session.hpp>
+#include <pulsar/application/audio/output_stage.hpp>
 #include <pulsar/application/project/media_asset.hpp>
 #include <pulsar/domain/timeline/clip.hpp>
 #include <pulsar/domain/timeline/timeline.hpp>
@@ -238,7 +239,8 @@ void mix_alignment_gain_mute_and_clipping() {
   clipping.configure(snapshot({audio_asset(1, "a"), audio_asset(2, "b")}, std::nullopt,
                               {{{1, 1, 0, 0, 1024}}, {{2, 2, 0, 0, 1024}}}));
   const auto clipped = clipping.render(frames(0), 1024);
-  assert_near(left(clipped.block, 10), 1.0F);
+  assert_near(left(clipped.block, 10), application::soft_output_stage(1.5F));   // bent, not chopped
+  assert(left(clipped.block, 10) < 1.0F && left(clipped.block, 10) > application::kOutputKnee);
 }
 
 void mute_preserves_decode_and_clock_contract() {
@@ -286,7 +288,7 @@ void mute_transitions_reanchor_to_current_truth_without_replay() {
   const auto unmuted = mixer.render(frames(256), 256);
   assert(unmuted.usable_contributors == 1);
   assert(unmuted.mixed_contributors == 1);
-  assert_near(left(unmuted.block, 44), 1.0F);
+  assert_near(left(unmuted.block, 44), application::soft_output_stage(1.0F));
   assert_near(left(unmuted.block, 0), 0.2F);
 
   mixer.configure(snapshot({audio_asset(1, "signal")}, std::nullopt,
@@ -343,7 +345,7 @@ void nonzero_source_trim_split_and_gap_mapping() {
   mixer.configure(snapshot({audio_asset(1, "impulse")}, std::nullopt,
                            {{{1, 1, 0, 500, 512}, {2, 1, 768, 1012, 256}}}));
   const auto first = mixer.render(frames(0), 1024);
-  assert_near(left(first.block, 100), 1.0F);
+  assert_near(left(first.block, 100), application::soft_output_stage(1.0F));
   assert_near(left(first.block, 600), 0.0F);
   assert_near(left(first.block, 700), 0.0F);
   assert(first.clock == application::AudioMixClockRecommendation::Device);
@@ -380,7 +382,7 @@ void editorial_split_is_pcm_equivalent_to_unsplit_source() {
   actual.insert(actual.end(), first_half.begin(), first_half.end());
   actual.insert(actual.end(), second_half.begin(), second_half.end());
   assert(expected == actual);
-  assert_near(actual[1024 * 2], 1.0F);
+  assert_near(actual[1024 * 2], application::soft_output_stage(1.0F));
   assert(split_bank.opens == 1);
   assert(split.metrics().source_opens == 1);
 }
