@@ -121,6 +121,11 @@ Rectangle {
 
     // Waveform lane. Audio-only clips use the whole body; video clips keep the
     // upper part free (future thumbnails) and place the audio in the lower zone.
+    Rectangle {
+        // Dark inset: the waveform reads against a constant backdrop whatever the clip colour.
+        x: waveform.x; y: waveform.y; width: waveform.width; height: waveform.height
+        visible: waveform.visible; radius: 3; color: Theme.waveformWell
+    }
     WaveformItem {
         id: waveform
         readonly property real zoneTop: block.nameStripHeight + 3

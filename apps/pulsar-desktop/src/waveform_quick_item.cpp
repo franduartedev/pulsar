@@ -12,19 +12,23 @@
 namespace {
 
 // Child layout (draw order): 0 body fill, 1 envelope edges, 2 centre axis,
-// 3 pending hatch, 4 unavailable hatch.
+// 3 pending hatch, 4 unavailable hatch, 5 bright core (mass at the loud centre).
 constexpr int kBodyNode = 0;
 constexpr int kEdgeNode = 1;
 constexpr int kAxisNode = 2;
 constexpr int kPendingNode = 3;
 constexpr int kUnavailableNode = 4;
+constexpr int kCoreNode = 5;
+// The core covers this fraction of the envelope's half-height around the axis.
+constexpr qreal kCoreFraction = 0.55;
 
 QSGGeometryNode* child_node(QSGNode* root, int child_index) {
   while (root->childCount() <= child_index) {
     auto* node = new QSGGeometryNode;
     auto* geometry = new QSGGeometry{QSGGeometry::defaultAttributes_Point2D(), 0};
-    geometry->setDrawingMode(root->childCount() == kBodyNode ? QSGGeometry::DrawTriangles
-                                                             : QSGGeometry::DrawLines);
+    const int index = root->childCount();
+    geometry->setDrawingMode(index == kBodyNode || index == kCoreNode ? QSGGeometry::DrawTriangles
+                                                                      : QSGGeometry::DrawLines);
     geometry->setLineWidth(1.0f);
     node->setGeometry(geometry);
     node->setFlag(QSGNode::OwnsGeometry);
@@ -191,7 +195,9 @@ QSGNode* WaveformQuickItem::updatePaintNode(QSGNode* old_node, UpdatePaintNodeDa
   // per-column extrema. Muted drops saturation instead of only fading.
   QColor edge_color = selected_ ? selected_color_ : normal_color_;
   QColor fill_color = edge_color;
-  fill_color.setAlphaF(selected_ ? 0.88 : 0.74);
+  fill_color.setAlphaF(selected_ ? 0.95 : 0.86);
+  QColor core_color = blend(edge_color, QColor{255, 255, 255}, selected_ ? 0.45 : 0.3);
+  core_color.setAlphaF(selected_ ? 0.9 : 0.75);
   QColor axis_color = baseline_color_;
   axis_color.setAlphaF(axis_color.alphaF() * 0.5);
   if (muted_) {
@@ -199,6 +205,8 @@ QSGNode* WaveformQuickItem::updatePaintNode(QSGNode* old_node, UpdatePaintNodeDa
     edge_color.setAlphaF(edge_color.alphaF() * 0.6);
     fill_color = blend(fill_color, QColor{0x8a, 0x93, 0xa0}, 0.8);
     fill_color.setAlphaF(fill_color.alphaF() * 0.35);
+    core_color = blend(core_color, QColor{0x8a, 0x93, 0xa0}, 0.8);
+    core_color.setAlphaF(0.22);
     axis_color.setAlphaF(axis_color.alphaF() * 0.6);
   }
 
@@ -208,15 +216,22 @@ QSGNode* WaveformQuickItem::updatePaintNode(QSGNode* old_node, UpdatePaintNodeDa
   build_envelope_runs(geometry_->segments, height(), envelope, run_starts);
   run_starts.push_back(envelope.size());
   std::vector<QPointF> body;
+  std::vector<QPointF> core;
   std::vector<QPointF> edges;
   body.reserve(envelope.size() * 6U);
   edges.reserve(envelope.size() * 4U);
+  core.reserve(envelope.size() * 6U);
+  // Same envelope pulled toward the axis: loud passages get a bright heart, quiet ones stay a thin line.
+  const qreal axis_y = height() / 2.0;
+  const auto toward_axis = [axis_y](qreal y) { return axis_y + (y - axis_y) * kCoreFraction; };
   for (std::size_t run = 0; run + 1 < run_starts.size(); ++run) {
     for (std::size_t k = run_starts[run]; k + 1 < run_starts[run + 1]; ++k) {
       const auto& p = envelope[k];
       const auto& q = envelope[k + 1];
       body.emplace_back(p.x, p.top);    body.emplace_back(p.x, p.bottom);  body.emplace_back(q.x, q.top);
       body.emplace_back(q.x, q.top);    body.emplace_back(p.x, p.bottom);  body.emplace_back(q.x, q.bottom);
+      core.emplace_back(p.x, toward_axis(p.top));    core.emplace_back(p.x, toward_axis(p.bottom)); core.emplace_back(q.x, toward_axis(q.top));
+      core.emplace_back(q.x, toward_axis(q.top));    core.emplace_back(p.x, toward_axis(p.bottom)); core.emplace_back(q.x, toward_axis(q.bottom));
       edges.emplace_back(p.x, p.top);   edges.emplace_back(q.x, q.top);
       edges.emplace_back(p.x, p.bottom); edges.emplace_back(q.x, q.bottom);
     }
@@ -253,5 +268,6 @@ QSGNode* WaveformQuickItem::updatePaintNode(QSGNode* old_node, UpdatePaintNodeDa
     unavailable.emplace_back(std::clamp(x + 1.5, left_edge, right_edge), state_bottom);
   }
   set_lines(child_node(root, kUnavailableNode), unavailable, unavailable_color_);
+  set_lines(child_node(root, kCoreNode), core, core_color);
   return root;
 }
