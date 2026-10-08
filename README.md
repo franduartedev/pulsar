@@ -1,52 +1,70 @@
-# PULSAR
+<p align="center">
+  <img src="docs/media/pulse-arc-mark.png" alt="PULSAR" width="140">
+</p>
 
-Lightweight video editor built for fast, predictable editing.
+<h1 align="center">PULSAR</h1>
 
-> **Beta — PULSAR 0.1.0-beta** · Linux (x86_64) only · interface in Spanish
+<p align="center">
+  <strong>A native video editor for Linux: local, fast and predictable.</strong><br>
+  Import, cut, add titles and sound, and export an MP4 you can upload. No account, no watermark.
+</p>
 
-PULSAR is a desktop video editor written in C++ with Qt 6 and FFmpeg. It aims at a
-small, fast, predictable editing workflow: exact timing, no surprises on undo, and
-an export you can trust.
+<p align="center">
+  <img src="https://img.shields.io/badge/version-0.1.0--beta-4d8dff" alt="version 0.1.0-beta">
+  <img src="https://img.shields.io/badge/platform-Linux%20x86__64-lightgrey" alt="Linux x86_64">
+  <img src="https://img.shields.io/badge/C%2B%2B20-Qt%206%20%C2%B7%20FFmpeg-06d6a0" alt="C++20, Qt 6, FFmpeg">
+</p>
 
-## What it does today
+<p align="center">
+  <img src="docs/media/workspace.jpg" alt="PULSAR editing a 2:38 project: library, viewer, inspector and a multi-track timeline" width="100%">
+</p>
 
-- Multi-video timeline on one video track: import, **Insert** at the playhead, **Add to end** (gapless)
-- Split, trim and move clips, with **magnetic snapping**
-- Undo / redo
-- Independent audio tracks, **detach audio** from a video clip, built-in sound effects (25 original SFX)
-- Per-clip gain and mute, waveforms
-- Save and reopen projects (`.pulsar`)
-- Export to **H.264 / AAC (MP4)**
+> **Beta.** PULSAR 0.1.0-beta is for people who want to try it on real footage and tell us what is missing.
+> The interface is in Spanish. [Español →](README.es.md)
 
-- **Titles**: static text on its own track, with an optional background box and opacity, same look in preview and export (bundled Inter Bold)
-- **Photos and colour cards** (PNG, JPEG, WebP) as clips, **audio fades**, **duplicate**, **frame step**
-- A media bin with filters and search, and 37 original sound effects you can audition
-- **Import** several files or a whole folder; **drag** media from the library onto the timeline
-- **Autosave and recovery** after a crash
-- Export presets **Original / 1080p / 720p** (real scaling, never enlarges)
+## Why PULSAR
 
-Not in this beta: Windows/macOS, multiple video tracks, overlays/logos, transitions, effects, subtitles,
-color tools, proxies. See the
-[release notes](docs/release/0.1.0-beta.md) for the full list of known limitations.
+- **Finish a whole video in one tool.** Footage, photos, colour cards, music, sound effects and titles on a multi-track timeline, then export H.264 / AAC.
+- **What you see is what you export.** Titles, fades, scaling and audio levels go through the same code in the preview and in the final file; this is checked by tests.
+- **Exact and undoable.** Time is exact rational arithmetic, so frame steps and cuts land where you put them, and every edit is one undo step.
+- **Safe by default.** Autosave and crash recovery, an audio output stage that cannot clip, projects saved atomically.
+- **Light and local.** Native C++ / Qt 6 / FFmpeg, no account and no network access. Projects with 100 clips stay interactive.
+
+## What you can do today
+
+| | |
+|---|---|
+| **Edit** | Insert at the playhead or add to the end, split, trim, move with magnetic snapping, ripple delete, duplicate, frame step, undo / redo. |
+| **Media bin** | Import files or a whole folder, drag clips onto the timeline, thumbnails, filters and search. Video, photos (PNG, JPEG, WebP), colour cards and audio. |
+| **Titles** | Text on its own track, size, colour, shadow, optional box and opacity, and **free placement by dragging in the viewer**. |
+| **Sound** | Separate audio tracks, detach audio from a video, per-clip gain and mute, **fade in / out**, waveforms and 37 original sound effects you can audition first. |
+| **Export** | Original / 1080p / 720p H.264 + AAC in an MP4, with real scaling that never enlarges. |
+| **Projects** | Save and reopen `.pulsar` files; recover an unsaved session after a crash. |
+
+<p align="center">
+  <img src="docs/media/title-inspector.jpg" alt="Title selected: position pad and style controls in the Inspector" width="49%">
+  <img src="docs/media/sound-library.jpg" alt="Sound library with categories and audition buttons" width="49%">
+</p>
+<p align="center"><sub>Screenshots use generated test footage.</sub></p>
+
+Not in this beta: Windows / macOS, multiple video tracks, PNG / logo overlays, transitions, effects, subtitles, colour tools,
+proxies. The [roadmap](docs/release/roadmap.md) says what comes next and the
+[release notes](docs/release/0.1.0-beta.md) list every known limitation.
 
 ## Run it
 
-1. Download `PULSAR-0.1.0-beta-linux-x86_64.tar.gz` (or the AppImage) from the release page.
+1. Download `PULSAR-0.1.0-beta-linux-x86_64.tar.gz` (or the AppImage) from the Releases page.
 2. `tar xzf PULSAR-0.1.0-beta-linux-x86_64.tar.gz && cd PULSAR-0.1.0-beta`
 3. `./pulsar`
 
-No Qt or FFmpeg installation is needed. It was tested on Ubuntu 24.04; the bundle needs
-glibc 2.39 or newer (see the release notes). `./pulsar --version` prints the version.
+No Qt or FFmpeg installation is needed. Tested on Ubuntu 24.04; the bundle needs glibc 2.39 or newer.
+`./pulsar --version` prints the version. The AppImage needs FUSE 2 or `--appimage-extract-and-run`.
 
-## Report a bug
+## Try it and tell us
 
-Open an issue using the **Bug report** template and include your PULSAR version
-(`./pulsar --version`), distro, and the steps to reproduce.
-
-## Roadmap
-
-Post-beta plans live in [`docs/release/roadmap.md`](docs/release/roadmap.md) and
-the changes of each release in [`CHANGELOG.md`](CHANGELOG.md).
+The most useful thing you can do is **edit a real video** and tell us where you got stuck:
+[`docs/release/creator-test.md`](docs/release/creator-test.md). Found a bug? Open an issue with the **Bug report** template
+(include `./pulsar --version`, your distro, and the steps). Missing something? Use **Feature request**.
 
 ## Build from source
 
@@ -79,5 +97,9 @@ and the ADRs in [`docs/adr`](docs/adr/README.md).
 
 ## Contributing
 
-Run the tests before sending changes and keep modules' dependency direction. The
-engineering rules are in [`docs/development/engineering.md`](docs/development/engineering.md).
+See [`CONTRIBUTING.md`](CONTRIBUTING.md). The engineering rules are in
+[`docs/development/engineering.md`](docs/development/engineering.md), the change history in [`CHANGELOG.md`](CHANGELOG.md).
+
+## License
+
+Not yet specified: the author has to choose a license before the code can be reused by others.

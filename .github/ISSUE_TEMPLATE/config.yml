@@ -1,1 +1,5 @@
 blank_issues_enabled: true
+contact_links:
+  - name: Roadmap
+    url: https://github.com/franduartedev/pulsar/blob/main/docs/release/roadmap.md
+    about: What is planned after 0.1.0-beta. Check it before asking for a feature.
