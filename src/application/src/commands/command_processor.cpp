@@ -121,6 +121,15 @@ void CommandProcessor::set_clip_muted(domain::ClipId clip_id, bool muted) {
   execute(SetClipMutedCommand{clip_id, muted});
 }
 
+void CommandProcessor::set_clip_fades(domain::ClipId clip_id, domain::MediaTime fade_in,
+                                      domain::MediaTime fade_out) {
+  if (const auto* clip = document_.timeline().find_clip(clip_id);
+      clip != nullptr && clip->fade_in() == fade_in && clip->fade_out() == fade_out) {
+    return;
+  }
+  execute(SetClipFadesCommand{clip_id, fade_in, fade_out});
+}
+
 domain::ClipId CommandProcessor::split_clip(domain::ClipId clip_id,
                                              domain::MediaTime split_timeline_position) {
   const domain::ClipId right_id = document_.next_clip_id();
@@ -285,6 +294,8 @@ void CommandProcessor::apply(ProjectDocument& document, const Command& command, 
           timeline.set_clip_audio_gain(concrete_command.clip_id, concrete_command.gain_db);
         } else if constexpr (std::is_same_v<CommandType, SetClipMutedCommand>) {
           timeline.set_clip_muted(concrete_command.clip_id, concrete_command.muted);
+        } else if constexpr (std::is_same_v<CommandType, SetClipFadesCommand>) {
+          timeline.set_clip_fades(concrete_command.clip_id, concrete_command.fade_in, concrete_command.fade_out);
         } else if constexpr (std::is_same_v<CommandType, RestoreClipCommand>) {
           document.validate_clip_for_track(concrete_command.track_id, concrete_command.clip);
           timeline.restore_clip(concrete_command.track_id, concrete_command.clip);
@@ -348,7 +359,8 @@ Command CommandProcessor::build_inverse(const ProjectDocument& document, const C
           return RestoreSplitCommand{location.track_id, location.clip,
                                      concrete_command.right_clip_id};
         } else if constexpr (std::is_same_v<CommandType, SetClipAudioGainCommand> ||
-                             std::is_same_v<CommandType, SetClipMutedCommand>) {
+                             std::is_same_v<CommandType, SetClipMutedCommand> ||
+                             std::is_same_v<CommandType, SetClipFadesCommand>) {
           const ClipLocation location = find_clip_location(document, concrete_command.clip_id);
           return RestoreClipCommand{location.track_id, location.clip};
         } else if constexpr (std::is_same_v<CommandType, AddTitleCommand>) {

@@ -200,7 +200,17 @@ std::string ProjectCodec::encode(const ProjectSnapshot& snapshot) {
   std::ostringstream output;
   // Files without titles stay byte-compatible version 2; titles need version 3.
   const bool has_titles = !snapshot.titles.empty() || snapshot.allocator_state.next_title_id != 1;
-  output << (has_titles ? "PULSAR_PROJECT 3\n" : "PULSAR_PROJECT 2\n");
+  bool needs_v4 = false;
+  for (const auto& title : snapshot.titles) {
+    if (title.background() != domain::TitleBackground::None || title.opacity_percent() != 100) needs_v4 = true;   // newer features share version 4
+  }
+  for (const auto& track : snapshot.timeline.tracks()) {
+    for (const auto& clip : track.clips()) {
+      if (clip.fade_in() > domain::MediaTime::zero() || clip.fade_out() > domain::MediaTime::zero()) needs_v4 = true;
+    }
+  }
+  // Version 4 adds clip fades; every file that does not need a newer feature keeps its old version.
+  output << (needs_v4 ? "PULSAR_PROJECT 4\n" : has_titles ? "PULSAR_PROJECT 3\n" : "PULSAR_PROJECT 2\n");
   output << "TIMELINE " << snapshot.timeline.id().value() << "\n";
   const auto tracks = sorted_tracks(snapshot.timeline);
   for (const auto* track : tracks) {
@@ -274,9 +284,16 @@ std::string ProjectCodec::encode(const ProjectSnapshot& snapshot) {
       append_time(output, clip.source_range().end());
       output << ' ';
       append_time(output, clip.timeline_start());
-      if (clip.audio_gain_db() != 0.0 || clip.muted()) {
+      const bool clip_needs_v4 = clip.fade_in() > domain::MediaTime::zero() || clip.fade_out() > domain::MediaTime::zero();
+      if (clip.audio_gain_db() != 0.0 || clip.muted() || clip_needs_v4) {
         output << " CLIP_AUDIO " << std::setprecision(17) << clip.audio_gain_db() << ' '
                << (clip.muted() ? 1 : 0);
+      }
+      if (clip_needs_v4) {
+        output << " CLIP_FADE ";
+        append_time(output, clip.fade_in());
+        output << ' ';
+        append_time(output, clip.fade_out());
       }
       output << "\n";
     }
@@ -290,6 +307,10 @@ std::string ProjectCodec::encode(const ProjectSnapshot& snapshot) {
     output << ' ' << title.size_permille() << ' ' << title.color_rgba() << ' '
            << static_cast<int>(title.horizontal()) << ' ' << static_cast<int>(title.vertical()) << ' '
            << (title.shadow() ? 1 : 0) << ' ' << quote(title.text()) << "\n";
+    if (title.background() != domain::TitleBackground::None || title.opacity_percent() != 100) {
+      output << "TITLE_LOOK " << title.id().value() << ' ' << static_cast<int>(title.background()) << ' '
+             << title.opacity_percent() << "\n";
+    }
   }
 
   output << "ALLOCATOR " << snapshot.allocator_state.next_media_id << ' '
@@ -349,7 +370,7 @@ ProjectRestoreState ProjectCodec::decode(std::string_view bytes) {
 
     try {
       if (tokens[0].text == "PULSAR_PROJECT") {
-        if (header || tokens.size() != 2 || (tokens[1].text != "1" && tokens[1].text != "2" && tokens[1].text != "3")) {
+        if (header || tokens.size() != 2 || (tokens[1].text != "1" && tokens[1].text != "2" && tokens[1].text != "3" && tokens[1].text != "4")) {
           parse_fail(line_number, "invalid header/version");
         }
         header = true;
@@ -473,7 +494,7 @@ ProjectRestoreState ProjectCodec::decode(std::string_view bytes) {
         section = Section::Assets;
       } else if (tokens[0].text == "CLIP") {
         if (!video_track || (section != Section::Assets && section != Section::Clips) ||
-            (tokens.size() != 13 && tokens.size() != 16))
+            (tokens.size() != 13 && tokens.size() != 16 && tokens.size() != 23))
           parse_fail(line_number, "invalid CLIP");
         std::size_t i = 1;
         const auto clip_id = domain::ClipId{unsigned_number(tokens[i++], line_number, "clip id")};
@@ -484,7 +505,9 @@ ProjectRestoreState ProjectCodec::decode(std::string_view bytes) {
         const auto timeline_start = media_time(tokens, i, line_number, "timeline start");
         double audio_gain_db = 0.0;
         bool muted = false;
-        if (tokens.size() == 16) {
+        auto fade_in = domain::MediaTime::zero();
+        auto fade_out = domain::MediaTime::zero();
+        if (tokens.size() >= 16) {
           if (tokens[i].quoted || tokens[i].text != "CLIP_AUDIO") {
             parse_fail(line_number, "invalid CLIP audio properties");
           }
@@ -493,6 +516,12 @@ ProjectRestoreState ProjectCodec::decode(std::string_view bytes) {
           const auto mute_value = unsigned_number(tokens[i++], line_number, "clip mute");
           if (mute_value > 1) parse_fail(line_number, "invalid clip mute");
           muted = mute_value != 0;
+        }
+        if (tokens.size() == 23) {
+          if (tokens[i].quoted || tokens[i].text != "CLIP_FADE") parse_fail(line_number, "invalid CLIP fade properties");
+          ++i;
+          fade_in = media_time(tokens, i, line_number, "clip fade in");
+          fade_out = media_time(tokens, i, line_number, "clip fade out");
         }
         if (i != tokens.size()) parse_fail(line_number, "extra CLIP fields");
         const auto track = std::find_if(state.tracks.begin(), state.tracks.end(),
@@ -505,7 +534,7 @@ ProjectRestoreState ProjectCodec::decode(std::string_view bytes) {
         try {
           track->clips.emplace_back(clip_id, media_id,
                                    domain::TimeRange{source_start, source_end}, timeline_start,
-                                   audio_gain_db, muted);
+                                   audio_gain_db, muted, fade_in, fade_out);
         } catch (const std::exception& error) {
           parse_fail(line_number, error.what());
         }
@@ -532,6 +561,19 @@ ProjectRestoreState ProjectCodec::decode(std::string_view bytes) {
           parse_fail(line_number, error.what());
         }
         section = Section::Titles;
+      } else if (tokens[0].text == "TITLE_LOOK") {
+        if (section != Section::Titles || tokens.size() != 4) parse_fail(line_number, "invalid TITLE_LOOK");
+        const auto title_id = domain::TitleId{unsigned_number(tokens[1], line_number, "title id")};
+        const auto background = unsigned_number(tokens[2], line_number, "title background");
+        const auto opacity = int_number(tokens[3], line_number, "title opacity");
+        const auto found = std::find_if(state.titles.begin(), state.titles.end(),
+                                        [title_id](const auto& item) { return item.id() == title_id; });
+        if (found == state.titles.end() || background > 2) parse_fail(line_number, "invalid TITLE_LOOK value");
+        try {
+          *found = found->with_look(static_cast<domain::TitleBackground>(background), opacity);
+        } catch (const std::exception& error) {
+          parse_fail(line_number, error.what());
+        }
       } else if (tokens[0].text == "ALLOCATOR") {
         if (allocator || !video_track || (section != Section::Clips && section != Section::Assets && section != Section::Titles) ||
             (tokens.size() != 5 && tokens.size() != 6)) parse_fail(line_number, "invalid ALLOCATOR");

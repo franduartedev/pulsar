@@ -44,6 +44,8 @@ public:
   void trim_clip_end(domain::ClipId clip_id, domain::MediaTime timeline_end);
   void set_clip_audio_gain(domain::ClipId clip_id, double gain_db);
   void set_clip_muted(domain::ClipId clip_id, bool muted);
+  // Linear audio fades at the clip start / end (zero = none); one undo step. No-op when unchanged.
+  void set_clip_fades(domain::ClipId clip_id, domain::MediaTime fade_in, domain::MediaTime fade_out);
   [[nodiscard]] domain::ClipId split_clip(domain::ClipId clip_id,
                                            domain::MediaTime split_timeline_position);
   [[nodiscard]] domain::MediaId import_asset(const std::filesystem::path& source_locator,

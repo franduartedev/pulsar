@@ -74,6 +74,10 @@ int main(int argc, char** argv) {
     c.addTitle();
     c.autosaveNow(); c.flushRecovery();
     REQUIRE(7, c.recoveryWriteCount() == 2);                              // new edit -> new snapshot
+    c.createColorCard(QStringLiteral("#336699"));                         // a generated card and a fade must survive a crash too
+    c.selectTimelineClip(c.timelineClips()->index(0, 0).data(TimelineClipListModel::ClipKeyRole).toString());
+    c.setSelectedClipFades(0.5, 1.0);
+    c.autosaveNow(); c.flushRecovery();
     // The controller is destroyed WITHOUT a clean shutdown of the project: a "crash".
   }
   {  // Restart: the session is offered and comes back unsaved, titles included.
@@ -81,7 +85,11 @@ int main(int argc, char** argv) {
     auto& c = *s.controller;
     REQUIRE(8, c.recoveryAvailable() && c.recoveryDescription().contains(QStringLiteral("sin título")));
     REQUIRE(9, c.restoreRecovery());
-    REQUIRE(10, clips(c) == 1 && c.timelineTitles()->rowCount() == 1 && c.projectDirty() && c.activeProjectPath().isEmpty());
+    REQUIRE(10, clips(c) == 2 && c.timelineTitles()->rowCount() == 1 && c.projectDirty() && c.activeProjectPath().isEmpty());
+    c.selectTimelineClip(c.timelineClips()->index(0, 0).data(TimelineClipListModel::ClipKeyRole).toString());
+    REQUIRE(110, c.selectedClipFadeIn() == 0.5 && c.selectedClipFadeOut() == 1.0);
+    c.selectTimelineClip(c.timelineClips()->index(1, 0).data(TimelineClipListModel::ClipKeyRole).toString());
+    REQUIRE(111, c.selectedClipKind() == QStringLiteral("color"));
     REQUIRE(11, has_files(recovery) && !c.recoveryAvailable());           // kept until saved or discarded
     // A normal save makes the snapshot unnecessary.
     REQUIRE(12, c.saveProject(q(root / "work.pulsar")));

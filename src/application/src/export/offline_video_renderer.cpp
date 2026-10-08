@@ -36,19 +36,6 @@ using WideInt = __int128_t;
   return static_cast<int>(width * 4);
 }
 
-[[nodiscard]] std::int64_t scaled_dimension(std::int64_t numerator, std::int64_t denominator) {
-  if (numerator <= 0 || denominator <= 0) {
-    throw OfflineVideoRenderError{OfflineVideoRenderErrorCode::UnsupportedFrame,
-                                  "source aspect ratio is invalid"};
-  }
-  const WideInt value = static_cast<WideInt>(numerator) / static_cast<WideInt>(denominator);
-  if (value <= 0 || value > std::numeric_limits<std::int64_t>::max()) {
-    throw OfflineVideoRenderError{OfflineVideoRenderErrorCode::ConversionFailed,
-                                  "scaled video dimension is invalid"};
-  }
-  return static_cast<std::int64_t>(value);
-}
-
 } // namespace
 
 struct OfflineVideoRenderer::ActiveSource {
@@ -247,8 +234,12 @@ OfflineVideoFrame OfflineVideoRenderer::compose_frame(
   OfflineVideoPixelBuffer scaled_storage;
   if (scaled_width != source.width || scaled_height != source.height) {
     if (options_.scaler != nullptr) {
-      scaled_storage = options_.scaler->scale(source, static_cast<int>(scaled_width), static_cast<int>(scaled_height));
-      placed = &scaled_storage;
+      if (!scaled_cache_ || scaled_cache_->source != source_frame.image || scaled_cache_->width != scaled_width ||
+          scaled_cache_->height != scaled_height) {
+        scaled_cache_ = ScaledCache{source_frame.image, scaled_width, scaled_height,
+                                    options_.scaler->scale(source, static_cast<int>(scaled_width), static_cast<int>(scaled_height))};
+      }
+      placed = &scaled_cache_->scaled;
     } else {
       for (std::int64_t y = 0; y < scaled_height; ++y) {
         const auto source_y = static_cast<std::int64_t>((static_cast<WideInt>(y) * source.height) / scaled_height);

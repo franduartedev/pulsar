@@ -113,7 +113,9 @@ int main(int argc, char** argv) {
 
   if (initial_path.has_value()) {
     QTimer::singleShot(0, &controller, [&controller, initial_path] {
-      controller.openPath(*initial_path);
+      // A project file (double-click, "Open with", the command line) opens as a project.
+      if (initial_path->endsWith(QStringLiteral(".pulsar"), Qt::CaseInsensitive)) controller.openProject(*initial_path);
+      else controller.openPath(*initial_path);
     });
   }
   if (smoke_exit_ms.has_value()) {

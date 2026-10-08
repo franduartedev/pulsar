@@ -164,6 +164,17 @@ void Timeline::set_clip_muted(domain::ClipId clip_id, bool muted) {
   throw std::invalid_argument{"clip id does not exist in timeline"};
 }
 
+void Timeline::set_clip_fades(domain::ClipId clip_id, MediaTime fade_in, MediaTime fade_out) {
+  for (std::size_t i = 0; i < tracks_.size(); ++i) {
+    if (tracks_[i].find_clip(clip_id) == nullptr) continue;
+    Track replacement = tracks_[i];
+    replacement.set_clip_fades(clip_id, fade_in, fade_out);
+    tracks_[i] = std::move(replacement);
+    return;
+  }
+  throw std::invalid_argument{"clip id does not exist in timeline"};
+}
+
 void Timeline::restore_clip(TrackId track_id, Clip clip) {
   const std::size_t track_index = find_track_index(track_id);
   for (std::size_t index = 0; index < tracks_.size(); ++index) {

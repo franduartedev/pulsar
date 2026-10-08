@@ -26,7 +26,8 @@ Panel {
         var p = trackScroll.mapFromItem(null, sx, sy)
         if (p.x < pane.gutterWidth || p.x > trackScroll.width || p.y < 0 || p.y > trackScroll.height) return null
         var lane = Math.floor((p.y + trackScroll.contentY - pane.titleLaneH) / pane.trackLaneHeight)
-        if (lane < 0 || lane >= controller.timelineTracks.length) return null
+        // lane === length is the empty space under the last track: audio dropped there gets a new track.
+        if (lane < 0 || lane > controller.timelineTracks.length) return null
         return { lane: lane, pixel: p.x - pane.gutterWidth }
     }
     function updateDrop(mediaId, sx, sy) {
@@ -78,6 +79,7 @@ Panel {
             ToolButton { glyph: "split"; text: "Cortar"; tip: "Cortar en el cabezal (S)"; enabled: controller.canSplit; onClicked: controller.splitSelectedClip() }
             ToolButton { glyph: "audio"; text: "Separar audio"; tip: "Separar el audio del clip de video"; enabled: controller.canSeparateAudio; onClicked: controller.separateSelectedAudio() }
             ToolButton { glyph: "trash"; text: "Borrar"; tip: "Borrar (Supr)"; enabled: controller.selectedClipKey.length > 0 || controller.selectedTitleKey.length > 0; onClicked: controller.deleteSelectedClip() }
+            ToolButton { glyph: "duplicate"; text: "Duplicar"; tip: "Duplicar el clip o título seleccionado, justo después (Ctrl+D)"; enabled: controller.canDuplicate; onClicked: controller.duplicateSelected() }
             ToolButton { glyph: "title"; text: "Título"; tip: "Agregar un título en el cabezal (T)"; enabled: controller.hasMedia; onClicked: controller.addTitle() }
             Rectangle { anchors.verticalCenter: parent.verticalCenter; width: 1; height: 16; color: Theme.borderStrong }
             ToolButton { glyph: "magnet"; text: "Snap"; toggle: true; tip: controller.snapEnabled ? "Imán activado: se ajusta a bordes y cabezal (N)" : "Imán desactivado (N)"; checked: controller.snapEnabled; onClicked: controller.snapEnabled = !controller.snapEnabled }
@@ -153,7 +155,8 @@ Panel {
             anchors.fill: parent
             enabled: controller.hasMedia
             cursorShape: Qt.PointingHandCursor
-            onPressed: function(mouse) { controller.seekTimelineAt(mouse.x - pane.gutterWidth, pane.timelineWidth) }
+            // Working on the timeline takes the keyboard away from any text box (title, path, search).
+            onPressed: function(mouse) { pane.forceActiveFocus(); controller.seekTimelineAt(mouse.x - pane.gutterWidth, pane.timelineWidth) }
             onPositionChanged: function(mouse) { if (pressed) controller.seekTimelineAt(mouse.x - pane.gutterWidth, pane.timelineWidth) }
         }
     }
@@ -231,8 +234,11 @@ Panel {
                             audioClip: model.audioTrack
                             hasAudio: model.hasAudio
                             thumbSource: model.thumbSource
+                            kind: model.kind
+                            fadeIn: model.fadeIn
+                            fadeOut: model.fadeOut
                             clipKey: model.clipKey
-                            onActivated: controller.selectTimelineClip(clipKey)
+                            onActivated: { pane.forceActiveFocus(); controller.selectTimelineClip(clipKey) }
                             onMuteToggled: { controller.selectTimelineClip(clipKey); controller.toggleSelectedClipMute() }
                             onContextRequested: function(sx, sy) { controller.selectTimelineClip(clipKey); pane.clipContextRequested(sx, sy) }
                             onSnapGuide: function(x) { pane.snapGuideX = x }
@@ -249,6 +255,8 @@ Panel {
                     radius: Theme.radiusS
                     color: pane.dropValid ? "#4433cc88" : "#44f26d6d"
                     border.width: 2; border.color: pane.dropValid ? Theme.success : Theme.error
+                    Text { visible: pane.dropValid && pane.dropLane === controller.timelineTracks.length; anchors.left: parent.left; anchors.leftMargin: 8; anchors.verticalCenter: parent.verticalCenter
+                           width: Math.max(parent.width, 160); text: "Nueva pista de audio"; color: Theme.textPrimary; font.pixelSize: Theme.fontSizeXS; font.bold: true }
                     Text { visible: !pane.dropValid && pane.dropReason.length > 0; anchors.left: parent.left; anchors.leftMargin: 6; anchors.verticalCenter: parent.verticalCenter
                            width: Math.max(parent.width, 220); text: pane.dropReason; color: Theme.textPrimary; font.pixelSize: Theme.fontSizeXS; font.bold: true }
                 }
@@ -282,7 +290,7 @@ Panel {
                             titleKey: model.titleKey
                             titleText: model.titleText
                             selected: model.selected
-                            onActivated: controller.selectTitle(titleKey)
+                            onActivated: { pane.forceActiveFocus(); controller.selectTitle(titleKey) }
                             onSnapGuide: function(x) { pane.snapGuideX = x }
                         }
                     }
@@ -293,6 +301,7 @@ Panel {
                     z: 1
                     acceptedButtons: Qt.LeftButton
                     onPressed: function(mouse) {
+                        pane.forceActiveFocus()
                         controller.selectTimelineClip("")
                         controller.seekTimelineAt(mouse.x - pane.gutterWidth, pane.timelineWidth)
                     }
@@ -322,7 +331,7 @@ Panel {
             height: pane.trackLaneHeight - 12
             horizontalAlignment: Text.AlignHCenter
             verticalAlignment: Text.AlignVCenter
-            text: "Importá un medio y usá Insertar para empezar a editar"
+            text: "Arrastrá clips desde la Biblioteca hasta acá, o hacé doble clic en uno para insertarlo"
             color: Theme.textMuted
             font.pixelSize: Theme.fontSizeS
         }

@@ -40,7 +40,44 @@ SOUNDS = [
     ("transition_tick", "Transition Tick", "TRANSITIONS", 0.2, "tick"),
     ("room_tone_synthetic", "Room Tone Synthetic", "AMBIENCE", 2.0, "room"),
     ("low_hum", "Low Hum", "AMBIENCE", 1.5, "hum"),
+    # Added after V1: appended so the seeds (and therefore the bytes) of every earlier sound stay identical.
+    ("pop_soft", "Pop Soft", "POPS", 0.18, "pop"),
+    ("pop_bubble", "Pop Bubble", "POPS", 0.3, "bubble"),
+    ("pop_double", "Pop Double", "POPS", 0.35, "pop_double"),
+    ("ding_bright", "Ding Bright", "ALERTS", 0.9, "ding"),
+    ("ding_soft", "Ding Soft", "UI", 0.7, "ding_soft"),
+    ("alert_triple", "Alert Triple", "ALERTS", 0.6, "triple_beep"),
+    ("shutter", "Shutter", "CLICKS", 0.25, "shutter"),
+    ("click_double", "Click Double", "CLICKS", 0.22, "click_double"),
+    ("whoosh_long", "Whoosh Long", "WHOOSHES", 1.4, "whoosh"),
+    ("boom_deep", "Boom Deep", "IMPACTS", 1.2, "boom"),
+    ("sparkle_up", "Sparkle Up", "TRANSITIONS", 0.8, "sparkle"),
+    ("swell_soft", "Swell Soft", "CINEMATIC", 1.6, "swell"),
 ]
+
+# Category of each sound for the library (the id order above must not change; categories may).
+CATEGORY_OVERRIDES = {
+    "click_soft": "CLICKS", "click_hard": "CLICKS", "digital_tick": "CLICKS",
+    "notification": "ALERTS", "error": "ALERTS", "beep_short": "ALERTS", "beep_double": "ALERTS",
+}
+
+# Spanish names and categories shown in the interface (ids and files stay English).
+SPANISH = {
+    "click_soft": "Clic suave", "click_hard": "Clic fuerte", "confirm": "Confirmar", "cancel": "Cancelar",
+    "notification": "Notificación", "error": "Error", "impact_soft": "Impacto suave", "impact_medium": "Impacto medio",
+    "impact_heavy": "Impacto fuerte", "thump": "Golpe grave", "whoosh_short": "Whoosh corto", "whoosh_medium": "Whoosh medio",
+    "whoosh_reverse": "Whoosh inverso", "beep_short": "Pitido corto", "beep_double": "Pitido doble", "digital_tick": "Tic digital",
+    "glitch_short": "Glitch corto", "riser_short": "Subida corta", "drop_short": "Caída corta", "pulse": "Pulso",
+    "sweep_soft": "Barrido suave", "sweep_fast": "Barrido rápido", "transition_tick": "Tic de transición",
+    "room_tone_synthetic": "Ambiente de sala", "low_hum": "Zumbido grave", "pop_soft": "Pop suave", "pop_bubble": "Pop burbuja",
+    "pop_double": "Pop doble", "ding_bright": "Ding brillante", "ding_soft": "Ding suave", "alert_triple": "Alerta triple",
+    "shutter": "Obturador", "click_double": "Doble clic", "whoosh_long": "Whoosh largo", "boom_deep": "Boom profundo",
+    "sparkle_up": "Destello", "swell_soft": "Crescendo suave",
+}
+CATEGORY_SPANISH = {
+    "UI": "Interfaz", "CLICKS": "Clics", "IMPACTS": "Impactos", "WHOOSHES": "Whoosh", "POPS": "Pops",
+    "TRANSITIONS": "Transiciones", "ALERTS": "Alertas", "TECHNOLOGY": "Tecnología", "CINEMATIC": "Cine", "AMBIENCE": "Ambiente",
+}
 
 def envelope(i: int, n: int, attack: float = 0.01, release: float = 0.04) -> float:
     # i is a sample index; convert it to seconds exactly once.  The previous
@@ -78,6 +115,40 @@ def render(kind: str, seconds: float, rng: random.Random) -> list[float]:
             u = t / seconds
             f = 180.0 + 3000.0 * (u if rising else 1.0 - u)
             out[i] = .32 * math.sin(2 * math.pi * f * t) * (u if rising else 1 - u) * e
+        elif kind in ("pop", "bubble", "pop_double"):
+            # A short pitched blip that drops in frequency; the double repeats it a little later.
+            local = t if kind != "pop_double" or t < seconds / 2 else t - seconds / 2
+            f0, f1 = (900.0, 260.0) if kind != "bubble" else (320.0, 1100.0)
+            freq = f1 + (f0 - f1) * math.exp(-34 * local)
+            out[i] = 0.5 * math.sin(2 * math.pi * freq * local) * math.exp(-26 * local) * e
+        elif kind in ("ding", "ding_soft"):
+            base = 1318.5 if kind == "ding" else 880.0
+            decay = 5.5 if kind == "ding" else 7.0
+            out[i] = (0.4 * math.sin(2 * math.pi * base * t) + 0.18 * math.sin(2 * math.pi * base * 2.76 * t)) * math.exp(-decay * t) * e
+        elif kind == "triple_beep":
+            slot = int(t / (seconds / 3))
+            local = t - slot * seconds / 3
+            gate = 1.0 if local < seconds / 3 * 0.6 else 0.0
+            out[i] = 0.32 * math.sin(2 * math.pi * (740.0 + 160.0 * slot) * t) * gate * e
+        elif kind == "shutter":
+            first = rng.uniform(-1, 1) * math.exp(-90 * t)
+            second_t = max(0.0, t - 0.09)
+            second = rng.uniform(-1, 1) * math.exp(-70 * second_t) if t >= 0.09 else 0.0
+            out[i] = 0.4 * (first + 0.8 * second) * e
+        elif kind == "click_double":
+            local = t if t < 0.09 else t - 0.09
+            out[i] = 0.42 * math.sin(2 * math.pi * 1500.0 * local) * math.exp(-60 * local) * e
+        elif kind == "boom":
+            out[i] = 0.6 * (math.sin(2 * math.pi * (55 - 20 * min(t, 1.0)) * t) + 0.12 * rng.uniform(-1, 1) * math.exp(-8 * t)) * math.exp(-3.2 * t) * e
+        elif kind == "sparkle":
+            notes = (1568.0, 1976.0, 2349.0, 2637.0, 3136.0)
+            step = seconds / len(notes)
+            slot = min(len(notes) - 1, int(t / step))
+            local = t - slot * step
+            out[i] = 0.28 * math.sin(2 * math.pi * notes[slot] * t) * math.exp(-9 * local) * e
+        elif kind == "swell":
+            u = t / seconds
+            out[i] = 0.3 * (math.sin(2 * math.pi * 220.0 * t) + 0.6 * math.sin(2 * math.pi * 330.0 * t)) * math.sin(math.pi * u) ** 2 * e
         elif kind == "glitch":
             out[i] = .24 * rng.uniform(-1, 1) * (1.0 if (i // 96) % 3 else .2) * e
         elif kind == "pulse":
@@ -103,8 +174,10 @@ def main() -> None:
     for index, (sid, name, category, duration, kind) in enumerate(SOUNDS):
         path = OUT / f"{sid}.wav"
         write_wav(path, render(kind, duration, random.Random(SEED + index)))
+        category = CATEGORY_OVERRIDES.get(sid, category)
         entries.append({
             "id": sid, "name": name, "category": category,
+            "name_es": SPANISH[sid], "category_es": CATEGORY_SPANISH[category],
             "path": f"sounds/{path.name}", "duration": duration,
             "duration_frames": round(duration * RATE),
             "sample_rate": RATE, "channels": 1,

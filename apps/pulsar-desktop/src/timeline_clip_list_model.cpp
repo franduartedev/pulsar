@@ -31,6 +31,9 @@ QVariant TimelineClipListModel::data(const QModelIndex& index, int role) const {
   case AudioTrackRole: return row.audio_track;
   case HasAudioRole: return row.has_audio;
   case ThumbSourceRole: return row.thumb_source;
+  case KindRole: return row.kind;
+  case FadeInRole: return row.fade_in;
+  case FadeOutRole: return row.fade_out;
   default: return {};
   }
 }
@@ -41,7 +44,8 @@ QHash<int, QByteArray> TimelineClipListModel::roleNames() const {
           {SelectedRole, "selected"}, {MutedRole, "muted"}, {GainDbRole, "gainDb"},
           {StartProgressRole, "startProgress"}, {EndProgressRole, "endProgress"},
           {InViewportRole, "inViewport"}, {TrackIndexRole, "trackIndex"},
-          {AudioTrackRole, "audioTrack"}, {HasAudioRole, "hasAudio"}, {ThumbSourceRole, "thumbSource"}};
+          {AudioTrackRole, "audioTrack"}, {HasAudioRole, "hasAudio"}, {ThumbSourceRole, "thumbSource"},
+          {KindRole, "kind"}, {FadeInRole, "fadeIn"}, {FadeOutRole, "fadeOut"}};
 }
 
 void TimelineClipListModel::refresh(const pulsar::desktop::EditorSession& session,
@@ -73,6 +77,17 @@ void TimelineClipListModel::refresh(const pulsar::desktop::EditorSession& sessio
     row.track_index = static_cast<int>(view.track_index);
     row.audio_track = view.track_kind == pulsar::domain::TrackKind::Audio;
     row.has_audio = view.has_audio;
+    {
+      const auto asset = session.document().find_asset(clip->media_id());
+      row.kind = view.track_kind == pulsar::domain::TrackKind::Audio ? QStringLiteral("audio")
+                 : (asset && asset->is_color_card()) ? QStringLiteral("color")
+                 : (asset && asset->is_still()) ? QStringLiteral("image") : QStringLiteral("video");
+      const double length = static_cast<double>(clip->duration());
+      if (length > 0.0 && view.has_audio) {          // fades only exist for clips with sound
+        row.fade_in = std::clamp(static_cast<double>(clip->fade_in()) / length, 0.0, 1.0);
+        row.fade_out = std::clamp(static_cast<double>(clip->fade_out()) / length, 0.0, 1.0 - row.fade_in);
+      }
+    }
     if (thumbnails && view.track_kind == pulsar::domain::TrackKind::Video && !view.missing) row.thumb_source = thumbnails(*clip);
     desired.push_back(std::move(row));
   }
@@ -121,6 +136,7 @@ void TimelineClipListModel::refresh(const pulsar::desktop::EditorSession& sessio
                                                      : row.thumb_source != next.thumb_source;
       changed = changed || role_changed;
     }
+    changed = changed || row.kind != next.kind || row.fade_in != next.fade_in || row.fade_out != next.fade_out;
     if (changed) {
       row = next;
       const auto model_index = index(static_cast<int>(row_index), 0);

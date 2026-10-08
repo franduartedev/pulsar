@@ -6,7 +6,7 @@ implemented unless it appears in the [CHANGELOG](../../CHANGELOG.md).
 | Version | Theme | Main items |
 |---|---|---|
 | 0.1.x | Beta feedback | Crash/bug fixes from testers; relink of missing media; native-looking file dialogs; look-ahead limiter; title animation and more fonts; performance counters for large projects. |
-| 0.2 | Editing comfort | Drag from library, track-level gain/mute, ripple edit, multi-select, faster asset lookup and waveform cache for 100+ clips, memory budget. |
+| 0.2 | Editing comfort | PNG/logo overlay with alpha (needs an alpha-keeping asset role + compositor lane), video fade, track-level gain/mute/solo, multi-select, `.pulsar` MIME registration, native-looking file dialogs, memory budget. |
 | 0.3–0.5 | Preview and media | Proxies / lower-resolution preview, hardware-adaptive decoding, optional GPU preview and encode, export presets, more input/output formats. |
 | 1.0 | Stable editor | A second video track with a compositor, basic transforms, keyframes, transitions, titles, subtitles, simple colour; stable project format with migration; Windows build. |
 | 1.x | Platforms | Windows and macOS packaging; installer/AppImage updates. |

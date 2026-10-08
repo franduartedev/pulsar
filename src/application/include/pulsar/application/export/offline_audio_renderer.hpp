@@ -112,7 +112,8 @@ private:
   [[nodiscard]] float sample_at_channel(ContributorState& state,
                                         domain::MediaTime relative_time, int channel);
   [[nodiscard]] std::array<float, 2> contributor_sample(ContributorState& state,
-                                                         domain::MediaTime timeline_time);
+                                                         domain::MediaTime timeline_time,
+                                                         std::int64_t output_frame);
   [[nodiscard]] static float channel_sample(const SourceBlock& block, std::int64_t index,
                                             int channel);
   [[nodiscard]] static std::string render_context(const ContributorState& state,

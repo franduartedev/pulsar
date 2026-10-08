@@ -57,6 +57,9 @@ qt_add_resources(pulsar_desktop pulsar_desktop_qml
     qml/components/UnsavedChangesDialog.qml
     qml/components/RecoveryDialog.qml
     qml/components/ClipContextMenu.qml
+    qml/components/ColorCardMenu.qml
+    qml/components/BrandMark.qml
+    qml/components/AboutDialog.qml
     qml/components/PathPromptDialog.qml
     qml/components/PSlider.qml
 )
@@ -221,7 +224,7 @@ set_tests_properties(pulsar.desktop.ingest_integration
   PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;PULSAR_RECOVERY_DIR=${CMAKE_CURRENT_BINARY_DIR}/recovery-ingest")
 
 # Release-safety desktop tests (same sources as the other controller tests).
-foreach(pair "safety|pulsar.desktop.safety" "shutdown|pulsar.desktop.shutdown" "batch|pulsar.desktop.batch" "title_parity|pulsar.desktop.title_parity" "recovery|pulsar.desktop.recovery" "dnd|pulsar.desktop.dnd" "gate100|pulsar.desktop.gate100")
+foreach(pair "safety|pulsar.desktop.safety" "shutdown|pulsar.desktop.shutdown" "batch|pulsar.desktop.batch" "title_parity|pulsar.desktop.title_parity" "recovery|pulsar.desktop.recovery" "dnd|pulsar.desktop.dnd" "gate100|pulsar.desktop.gate100" "stills|pulsar.desktop.stills" "polish|pulsar.desktop.polish")
   string(REPLACE "|" ";" parts "${pair}")
   list(GET parts 0 short)
   list(GET parts 1 test_name)

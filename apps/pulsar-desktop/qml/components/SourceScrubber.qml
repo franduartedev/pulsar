@@ -41,7 +41,7 @@ Item {
             anchors.fill: parent
             hoverEnabled: true
             enabled: track.interactive
-            onPressed: function(mouse) { seek(mouse.x) }
+            onPressed: function(mouse) { track.forceActiveFocus(); seek(mouse.x) }
             onPositionChanged: function(mouse) { if (pressed) seek(mouse.x) }
             function seek(px) {
                 controller.seekNormalized(Math.max(0, Math.min(1, px / Math.max(1, track.width))))

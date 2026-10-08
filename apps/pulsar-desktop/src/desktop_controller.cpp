@@ -3,6 +3,7 @@
 #include <pulsar/media/ffmpeg/ffmpeg_offline_frame_scaler.hpp>
 #include "builtin_sound_catalog.hpp"
 #include <QColor>
+#include <QSoundEffect>
 #include <cctype>
 #include <QFileInfo>
 #include <QDir>
@@ -305,11 +306,17 @@ void DesktopController::loadSoundLibrary() {
     BuiltinSound sound{id, object.value("name").toString().toStdString(),
                        object.value("category").toString().toStdString(), duration};
     builtin_sounds_.emplace(id, sound);
+    // The interface speaks Spanish; the manifest keeps the English ids/names for the files.
+    const auto name_es = object.value("name_es").toString();
+    const auto category_es = object.value("category_es").toString();
+    const double seconds = static_cast<double>(duration) / 48'000.0;
     QVariantMap row;
     row.insert("id", QString::fromStdString(sound.id));
-    row.insert("name", QString::fromStdString(sound.name));
-    row.insert("category", QString::fromStdString(sound.category));
+    row.insert("name", name_es.isEmpty() ? QString::fromStdString(sound.name) : name_es);
+    row.insert("category", category_es.isEmpty() ? QString::fromStdString(sound.category) : category_es);
+    row.insert("duration", QStringLiteral("%1 s").arg(seconds, 0, 'f', 1).replace(QLatin1Char('.'), QLatin1Char(',')));
     sound_library_.push_back(row);
+    pulsar::desktop::register_builtin_sound_display_name(sound.id, row.value("name").toString().toStdString());
   }
   emit soundLibraryChanged();
 }
@@ -360,7 +367,7 @@ void DesktopController::openPaths(const QStringList& paths) {
   // A folder means "everything media-like inside it" (name order, not recursive): the way to bring
   // in a whole shoot at once where the file dialog can only pick one file.
   {
-    static const std::unordered_set<std::string> media_extensions{".mp4", ".mov", ".mkv", ".avi", ".webm", ".m4v", ".wav", ".mp3", ".m4a", ".aac", ".flac"};
+    static const std::unordered_set<std::string> media_extensions{".mp4", ".mov", ".mkv", ".avi", ".webm", ".m4v", ".wav", ".mp3", ".m4a", ".aac", ".flac", ".png", ".jpg", ".jpeg", ".webp"};
     std::vector<std::filesystem::path> expanded;
     for (auto& file : files) {
       std::error_code error;
@@ -1021,13 +1028,18 @@ bool DesktopController::installTimelineAsset(const pulsar::application::MediaPro
     selected_asset_id_ = QString::number(media.value());
     if (!result.video_streams.empty()) {
       const auto& stream = result.video_streams.front();
-      const auto duration = stream.duration ? stream.duration : result.duration;
+      const auto imported = active_session_->document().find_asset(media);
+      // A still has no real length: it gets the default 5 s, not its "playable" span.
+      const auto duration = imported ? std::optional<MediaTime>{imported->default_clip_duration()}
+                                     : (stream.duration ? stream.duration : result.duration);
+      const bool still = imported && imported->is_still();
       const auto* video_track = active_session_->document().timeline().find_track(
           active_session_->document().video_track_id());
       const bool video_track_empty = video_track == nullptr || video_track->clips().empty();
       // Audio tracks may keep the global timeline non-empty while VIDEO 1 is
-      // empty. Auto-place imported video only according to VIDEO 1 occupancy.
-      if (duration && *duration > MediaTime::zero() && video_track_empty) {
+      // empty. Auto-place imported video only according to VIDEO 1 occupancy; a photo from a
+      // batch stays in the library (only a deliberate single import places it).
+      if (duration && *duration > MediaTime::zero() && video_track_empty && (!still || auto_place)) {
         (void)active_session_->processor().add_clip(
             media, pulsar::domain::TimeRange{MediaTime::zero(), *duration}, MediaTime::zero());
       }
@@ -1117,7 +1129,9 @@ void DesktopController::applyAssetSelection(const QString& media_id) {
   const auto asset = active_session_->document().find_asset(pulsar::domain::MediaId{value});
   if (!asset.has_value()) return;
   selected_asset_id_ = media_id;
-  media_name_ = QString::fromStdString(asset->source_locator().filename().string());
+  media_name_ = asset->is_color_card()
+                    ? QStringLiteral("Color #%1").arg(QString::fromStdString(asset->source_locator().generic_string().substr(pulsar::application::color_card_locator_prefix.size())).toUpper())
+                    : QString::fromStdString(asset->source_locator().filename().string());
   metadata_ = assetMetadataText(*asset);
   emit mediaChanged();
 }
@@ -1141,7 +1155,12 @@ void DesktopController::ingestVideoAsset(const QString& media_id, bool append) {
   }
   const pulsar::domain::MediaId media{value};
   try {
-    if (append) (void)active_session_->append_video_asset(media);
+    const auto candidate = active_session_->document().find_asset(media);
+    if (candidate && !candidate->has_video() && candidate->audio().has_value()) {
+      // Music / sounds: the first audio track with room at the playhead, or a new one.
+      (void)active_session_->insert_audio_asset_auto(media, append ? MediaTime::zero() : active_session_->playback_position());
+      setStatus(QStringLiteral("Audio agregado"));
+    } else if (append) (void)active_session_->append_video_asset(media);
     else (void)active_session_->insert_video_asset_at_playhead(media);
   } catch (const pulsar::desktop::VideoIngestException& error) {
     // Nothing was changed: no history entry, no dirty change, no republish.
@@ -1177,6 +1196,56 @@ void DesktopController::ingestVideoAsset(const QString& media_id, bool append) {
   publishTimeline();
 }
 
+// "+ Crear > Color": a colour card is a generated still (no file). It goes in at the playhead when
+// there is room, otherwise at the end of VIDEO 1, and is a normal clip from then on.
+void DesktopController::createColorCard(const QString& color) {
+  if (!active_session_) return;
+  const QColor parsed{color};
+  if (!parsed.isValid()) {
+    setError(QStringLiteral("Color no válido."));
+    return;
+  }
+  const auto rgb = (static_cast<std::uint32_t>(parsed.red()) << 16) | (static_cast<std::uint32_t>(parsed.green()) << 8) |
+                   static_cast<std::uint32_t>(parsed.blue());
+  const auto locator = pulsar::application::color_card_locator(rgb);
+  try {
+    std::optional<pulsar::domain::MediaId> media;
+    for (const auto& asset : active_session_->document().asset_list()) {
+      if (asset.source_locator().generic_string() == locator) { media = asset.id(); break; }   // one asset per colour
+    }
+    // Registering the colour and placing the card are ONE undo step.
+    active_session_->processor().run_as_one_edit([&] {
+      if (!media) {
+        pulsar::application::MediaProbeResult result;
+        result.path = locator;
+        result.container_name = std::string{pulsar::application::color_card_container};
+        result.duration = pulsar::application::still_playable_duration();
+        result.video_streams.push_back(pulsar::application::VideoStreamInfo{
+            0, "pulsar-color", pulsar::application::still_canvas_max_width, pulsar::application::still_canvas_max_height,
+            Rational{1, 1000}, pulsar::application::still_playable_duration(), pulsar::application::still_frame_rate()});
+        media = active_session_->processor().import_asset(locator, StaticProbe{std::move(result)});
+      }
+      try {
+        (void)active_session_->insert_video_asset_at_playhead(*media);
+      } catch (const pulsar::desktop::VideoIngestException& error) {
+        if (error.code() != pulsar::desktop::VideoIngestError::NoSpace) throw;
+        (void)active_session_->append_video_asset(*media);
+      }
+    });
+    applyAssetSelection(QString::number(media->value()));
+  } catch (const std::exception&) {
+    setError(QStringLiteral("No se pudo crear la placa de color."));
+    return;
+  }
+  clearError();
+  has_media_ = active_session_->timeline_duration() > MediaTime::zero();
+  duration_text_ = formatTime(active_session_->timeline_duration());
+  setStatus(QStringLiteral("Placa de color agregada"));
+  clearProgram("loading");
+  publishTimeline();
+  emit mediaChanged();
+}
+
 void DesktopController::separateSelectedAudio() {
   if (!active_session_ || !active_session_->selected_clip()) {
     setError(QStringLiteral("Seleccioná un clip de video."));
@@ -1208,7 +1277,22 @@ void DesktopController::separateSelectedAudio() {
   publishTimeline();
 }
 
-void DesktopController::selectTimelineClip(const QString& key) { if (!active_session_) return; if (key.isEmpty()) { active_session_->select_title(std::nullopt); active_session_->select_clip(std::nullopt); } else { bool ok=false; auto value=key.toULongLong(&ok); if (ok && value) active_session_->select_clip(pulsar::domain::ClipId{value}); } publishTimeline(); }
+void DesktopController::selectTimelineClip(const QString& key) { if (!active_session_) return; if (key.isEmpty()) { active_session_->select_title(std::nullopt); active_session_->select_clip(std::nullopt); } else { bool ok=false; auto value=key.toULongLong(&ok); if (ok && value) {
+      active_session_->select_clip(pulsar::domain::ClipId{value});
+      // The Inspector's MEDIO block follows the clip you picked, not the last library item.
+      if (const auto* clip = active_session_->document().timeline().find_clip(pulsar::domain::ClipId{value}); clip != nullptr &&
+          QString::number(clip->media_id().value()) != selected_asset_id_ && asset_model_.contains(QString::number(clip->media_id().value()))) {
+        applyAssetSelection(QString::number(clip->media_id().value()));
+        emit assetsChanged();
+      } else if (clip != nullptr && !asset_model_.contains(QString::number(clip->media_id().value()))) {
+        // A built-in sound is not a library item: do not keep describing an unrelated asset.
+        selected_asset_id_.clear();
+        media_name_.clear();
+        metadata_.clear();
+        emit mediaChanged();
+        emit assetsChanged();
+      }
+    } } publishTimeline(); }
 double DesktopController::selectedClipGainDb() const {
   if (!active_session_ || !active_session_->selected_clip()) return 0.0;
   const auto* clip = active_session_->document().timeline().find_clip(*active_session_->selected_clip());
@@ -1219,12 +1303,135 @@ bool DesktopController::selectedClipMuted() const {
   const auto* clip = active_session_->document().timeline().find_clip(*active_session_->selected_clip());
   return clip != nullptr && clip->muted();
 }
+namespace {
+MediaTime seconds_to_time(double seconds) {
+  // Milliseconds are the finest fade the UI offers; the stored value is exact.
+  return MediaTime{static_cast<std::int64_t>(std::llround(std::max(0.0, seconds) * 1000.0)), Rational{1, 1000}};
+}
+}
+QString DesktopController::selectedClipKind() const {
+  if (!active_session_ || !active_session_->selected_clip()) return {};
+  const auto* clip = active_session_->document().timeline().find_clip(*active_session_->selected_clip());
+  if (clip == nullptr) return {};
+  const auto asset = active_session_->document().find_asset(clip->media_id());
+  if (!asset) return {};
+  return asset->is_color_card() ? QStringLiteral("color") : asset->is_still() ? QStringLiteral("image")
+         : asset->has_video() ? QStringLiteral("video") : QStringLiteral("audio");
+}
+double DesktopController::selectedClipFadeIn() const {
+  if (!active_session_ || !active_session_->selected_clip()) return 0.0;
+  const auto* clip = active_session_->document().timeline().find_clip(*active_session_->selected_clip());
+  return clip ? secondsAsDouble(clip->fade_in()) : 0.0;
+}
+double DesktopController::selectedClipFadeOut() const {
+  if (!active_session_ || !active_session_->selected_clip()) return 0.0;
+  const auto* clip = active_session_->document().timeline().find_clip(*active_session_->selected_clip());
+  return clip ? secondsAsDouble(clip->fade_out()) : 0.0;
+}
+void DesktopController::setSelectedClipFades(double fade_in_seconds, double fade_out_seconds) {
+  if (!active_session_ || !active_session_->selected_clip() || !std::isfinite(fade_in_seconds) || !std::isfinite(fade_out_seconds)) return;
+  try {
+    active_session_->set_clip_fades(*active_session_->selected_clip(), seconds_to_time(fade_in_seconds), seconds_to_time(fade_out_seconds));
+    clearError();
+    publishTimeline();
+  } catch (const pulsar::desktop::FadeException& error) {
+    setError(error.code() == pulsar::desktop::FadeError::NoAudio ? QStringLiteral("Este clip no tiene audio para aplicar fundidos.")
+                                                                 : QStringLiteral("Ese fundido no es válido."));
+  } catch (const std::exception& error) {
+    logCause("edit failed", error);
+    setError(QStringLiteral("No se pudo aplicar el cambio."));
+  }
+}
+void DesktopController::duplicateSelected() {
+  if (!active_session_) return;
+  try {
+    active_session_->duplicate_selected();
+    clearError();
+    setStatus(QStringLiteral("Duplicado"));
+    clearProgram(has_video_media_ ? "loading" : "empty");
+    publishTimeline();
+  } catch (const pulsar::desktop::DuplicateException& error) {
+    setError(error.code() == pulsar::desktop::DuplicateError::NoSpace
+                 ? QStringLiteral("No hay lugar justo después para el duplicado. Movelo o dejá espacio y probá de nuevo.")
+                 : QStringLiteral("Seleccioná un clip o un título para duplicar."));
+  } catch (const std::exception& error) {
+    logCause("edit failed", error);
+    setError(QStringLiteral("No se pudo duplicar."));
+  }
+}
+// Frame step (Left/Right, ","/"."): one frame of the clip under the playhead, on that clip's own
+// frame grid (exact rational time, never an approximation such as 33 ms). In a gap it uses the
+// project's main frame rate.
+void DesktopController::stepFrame(int direction) {
+  if (!active_session_ || !has_video_media_ || direction == 0) return;
+  pause();
+  const auto position = active_session_->playback_position();
+  const auto total = active_session_->timeline_duration();
+  const auto* track = active_session_->document().timeline().find_track(active_session_->document().video_track_id());
+  if (track == nullptr) return;
+  const pulsar::domain::Clip* at = nullptr;
+  for (const auto& clip : track->clips()) {
+    const auto range = clip.timeline_range();
+    // Stepping back from the very end of a clip belongs to that clip.
+    if (range.contains(position) || (direction < 0 && range.end() == position)) { at = &clip; break; }
+  }
+  pulsar::domain::FrameRate rate{30, 1};
+  const auto frame_rate_of = [&](const pulsar::domain::Clip& clip) -> std::optional<pulsar::domain::FrameRate> {
+    const auto asset = active_session_->document().find_asset(clip.media_id());
+    if (!asset || !asset->has_video()) return std::nullopt;
+    return asset->metadata().nominal_frame_rate;
+  };
+  if (at != nullptr) {
+    if (const auto own = frame_rate_of(*at)) rate = *own;
+  } else {
+    for (const auto& clip : track->clips()) {
+      if (const auto own = frame_rate_of(clip)) { rate = *own; break; }
+    }
+  }
+  const auto frame_time = [&](std::int64_t index) {
+    return MediaTime{index, Rational{rate.rational().denominator(), rate.rational().numerator()}};
+  };
+  MediaTime target = position;
+  if (at != nullptr) {
+    const auto source = position - at->timeline_start() + at->source_range().start();
+    const auto index = pulsar::domain::frame_at(source, rate, pulsar::domain::RoundingMode::Floor).value();
+    const bool on_grid = frame_time(index) == source;
+    const auto next = direction > 0 ? index + 1 : (on_grid ? index - 1 : index);
+    target = frame_time(next) - at->source_range().start() + at->timeline_start();
+  } else {
+    target = direction > 0 ? position + frame_time(1) : position - frame_time(1);
+  }
+  if (target < MediaTime::zero()) target = MediaTime::zero();
+  if (target > total) target = total;
+  active_session_->seek(target);
+  clearProgram("loading");
+  updatePositionProperties();
+}
+
 void DesktopController::seekTimelineAt(double pixel, double width) { if (!active_session_) return; const auto target=timelineTimeAt(pixel,width); if (!target) return; active_session_->seek(*target); clearProgram(has_video_media_ ? "loading" : "empty"); updatePositionProperties(); }
 void DesktopController::moveTimelineClip(const QString& key,double press,double current,double width) { if (!active_session_) return; bool ok=false; auto value=key.toULongLong(&ok);if(!ok||!value)return;const auto press_time=timelineTimeAt(press,width);const auto current_time=timelineTimeAt(current,width);if(!press_time||!current_time)return;try{active_session_->move_clip(pulsar::domain::ClipId{value},*press_time,*current_time,snapToleranceAt(width).value_or(MediaTime::zero()));clearError();clearProgram(has_video_media_ ? "loading" : "empty");publishTimeline();}catch(...){setError("El movimiento no es válido.");publishTimeline();} }
 void DesktopController::trimTimelineClipStart(const QString& key,double pixel,double width) { if(!active_session_)return;bool ok=false;auto value=key.toULongLong(&ok);if(!ok||!value)return;const auto target=timelineTimeAt(pixel,width);if(!target)return;try{active_session_->trim_clip_start(pulsar::domain::ClipId{value},*target,snapToleranceAt(width).value_or(MediaTime::zero()));clearError();clearProgram(has_video_media_ ? "loading" : "empty");publishTimeline();}catch(...){setError("El recorte no es válido.");publishTimeline();} }
 void DesktopController::trimTimelineClipEnd(const QString& key,double pixel,double width) { if(!active_session_)return;bool ok=false;auto value=key.toULongLong(&ok);if(!ok||!value)return;const auto target=timelineTimeAt(pixel,width);if(!target)return;try{active_session_->trim_clip_end(pulsar::domain::ClipId{value},*target,snapToleranceAt(width).value_or(MediaTime::zero()));clearError();clearProgram(has_video_media_ ? "loading" : "empty");publishTimeline();}catch(...){setError("El recorte no es válido.");publishTimeline();} }
 void DesktopController::splitSelectedClip(){if(!active_session_)return;try{(void)active_session_->split_selected_at_playhead();clearError();clearProgram(has_video_media_ ? "loading" : "empty");publishTimeline();}catch(...){setError("El punto de corte debe estar dentro del clip.");}}
 void DesktopController::deleteSelectedClip(){if(!active_session_)return;if(active_session_->selected_title()){deleteSelectedTitle();return;}try{active_session_->delete_selected();clearError();clearProgram(has_video_media_ ? "loading" : "empty");publishTimeline();}catch(...){} }
+// Listen to a library sound before using it. One player, a new request replaces the old one;
+// it never touches the project or the timeline audio engine.
+void DesktopController::auditionSound(const QString& sound_id) {
+  const auto found = builtin_sounds_.find(sound_id.toStdString());
+  if (found == builtin_sounds_.end()) return;
+  const auto runtime = pulsar::desktop::builtin_sound_runtime_path(std::filesystem::path{"pulsar-sound:" + found->second.id});
+  std::error_code error;
+  if (!std::filesystem::is_regular_file(runtime, error)) {
+    setError(QStringLiteral("No se encontró el paquete de sonidos de PULSAR."));
+    return;
+  }
+  if (!audition_) audition_ = std::make_unique<QSoundEffect>();
+  audition_->stop();
+  audition_->setSource(QUrl::fromLocalFile(QString::fromStdString(runtime.string())));
+  audition_->setVolume(0.8f);
+  audition_->play();
+}
+
 void DesktopController::insertBuiltinSound(const QString& sound_id) {
   if (!active_session_) return;
   const auto found = builtin_sounds_.find(sound_id.toStdString());
@@ -1536,8 +1743,15 @@ QString DesktopController::suggestedPath(const QString& purpose) const {
                                                            : QStandardPaths::DocumentsLocation);
     if (directory.isEmpty() || !QDir{directory}.exists()) directory = QDir::homePath();
   }
-  QString stem = active_project_file_.empty() ? QStringLiteral("pulsar") : QString::fromStdString(active_project_file_.stem().string());
-  return QDir{directory}.filePath(stem + (is_export ? QStringLiteral(".mp4") : QStringLiteral(".pulsar")));
+  // "Mi video" until the project has a name; never suggest a name that would overwrite a file.
+  QString stem = active_project_file_.empty() ? (is_export ? QStringLiteral("Mi video") : QStringLiteral("Mi proyecto"))
+                                              : QString::fromStdString(active_project_file_.stem().string());
+  const QString extension = is_export ? QStringLiteral(".mp4") : QStringLiteral(".pulsar");
+  QString candidate = QDir{directory}.filePath(stem + extension);
+  for (int n = 2; n < 100 && QFileInfo::exists(candidate) && (is_export || active_project_file_.empty()); ++n) {
+    candidate = QDir{directory}.filePath(QStringLiteral("%1 (%2)%3").arg(stem).arg(n).arg(extension));
+  }
+  return candidate;
 }
 
 QString DesktopController::normalizeSavePath(const QString& text, const QString& extension) const {
@@ -1575,15 +1789,18 @@ DesktopController::DropResolution DesktopController::resolveAssetDrop(const QStr
   const auto tolerance = snapToleranceAt(width);
   if (!ok || value == 0 || !raw_time || !tolerance) { result.reason = QStringLiteral("Soltalo sobre una pista."); return result; }
   const auto& tracks = active_session_->track_views();
-  if (lane < 0 || lane >= static_cast<int>(tracks.size())) { result.reason = QStringLiteral("Soltalo sobre una pista."); return result; }
+  // One extra "lane" just below the last track: dropping music or a sound there makes a new audio track.
+  const bool below_tracks = lane == static_cast<int>(tracks.size());
+  if (lane < 0 || lane > static_cast<int>(tracks.size())) { result.reason = QStringLiteral("Soltalo sobre una pista."); return result; }
   const auto asset = active_session_->document().find_asset(pulsar::domain::MediaId{value});
   if (!asset) { result.reason = QStringLiteral("Medio no encontrado."); return result; }
   if (asset->availability() != pulsar::application::MediaAvailability::Available) { result.reason = QStringLiteral("El medio no está disponible."); return result; }
-  const auto& track = tracks[static_cast<std::size_t>(lane)];
-  const bool video_lane = track.kind == pulsar::domain::TrackKind::Video;
+  if (below_tracks && asset->has_video()) { result.reason = QStringLiteral("Los videos y fotos van en la pista de video."); return result; }
+  const pulsar::desktop::TimelineTrackView* track = below_tracks ? nullptr : &tracks[static_cast<std::size_t>(lane)];
+  const bool video_lane = track != nullptr && track->kind == pulsar::domain::TrackKind::Video;
   if (video_lane && !asset->has_video()) { result.reason = QStringLiteral("Los audios van en una pista de audio."); return result; }
   if (!video_lane && asset->has_video()) { result.reason = QStringLiteral("Para usar solo el audio: insertá el video y usá Separar audio."); return result; }
-  const auto duration = video_lane ? asset->playable_duration()
+  const auto duration = video_lane ? asset->default_clip_duration()
                                    : (asset->audio() && asset->audio()->duration ? *asset->audio()->duration : asset->playable_duration());
   if (duration <= MediaTime::zero()) { result.reason = QStringLiteral("El medio no tiene duración."); return result; }
   auto start = *raw_time < MediaTime::zero() ? MediaTime::zero() : *raw_time;
@@ -1602,14 +1819,17 @@ DesktopController::DropResolution DesktopController::resolveAssetDrop(const QStr
     }
   }
   const pulsar::domain::TimeRange destination{start, start + duration};
-  const auto* domain_track = active_session_->document().timeline().find_track(track.id);
-  if (domain_track == nullptr) { result.reason = QStringLiteral("Soltalo sobre una pista."); return result; }
-  for (const auto& clip : domain_track->clips()) {
-    if (destination.overlaps(clip.timeline_range())) { result.reason = QStringLiteral("No hay espacio ahí: se solaparía con otro clip."); return result; }
+  if (track != nullptr) {
+    const auto* domain_track = active_session_->document().timeline().find_track(track->id);
+    if (domain_track == nullptr) { result.reason = QStringLiteral("Soltalo sobre una pista."); return result; }
+    for (const auto& clip : domain_track->clips()) {
+      if (destination.overlaps(clip.timeline_range())) { result.reason = QStringLiteral("No hay espacio ahí: se solaparía con otro clip."); return result; }
+    }
+    result.track = track->id;
   }
   result.valid = true;
+  result.new_track = below_tracks;
   result.media = pulsar::domain::MediaId{value};
-  result.track = track.id;
   result.video = video_lane;
   result.start = start;
   result.duration = duration;
@@ -1636,6 +1856,7 @@ bool DesktopController::dropAsset(const QString& media_id, int lane, double pixe
   }
   try {
     if (drop.video) (void)active_session_->insert_video_asset(drop.media, drop.start);
+    else if (drop.new_track) (void)active_session_->insert_audio_asset_auto(drop.media, drop.start, true);
     else (void)active_session_->insert_audio_asset(drop.media, drop.track, drop.start);
   } catch (const std::exception& error) {
     logCause("drop failed", error);
@@ -1643,6 +1864,7 @@ bool DesktopController::dropAsset(const QString& media_id, int lane, double pixe
     return false;
   }
   clearError();
+  applyAssetSelection(media_id);       // the Inspector describes what was just placed
   clearProgram(has_video_media_ ? "loading" : "empty");
   publishTimeline();
   return true;
@@ -1664,6 +1886,8 @@ QVariantMap DesktopController::selectedTitle() const {
   map.insert("horizontal", static_cast<int>(title->horizontal()));
   map.insert("vertical", static_cast<int>(title->vertical()));
   map.insert("shadow", title->shadow());
+  map.insert("background", static_cast<int>(title->background()));
+  map.insert("opacity", title->opacity_percent());
   return map;
 }
 
@@ -1745,6 +1969,16 @@ void DesktopController::setSelectedTitleStyle(int size_percent, const QString& c
   const auto v = static_cast<pulsar::domain::TitleVAlign>(std::clamp(vertical, 0, 2));
   if (size == title->size_permille() && rgba == title->color_rgba() && h == title->horizontal() && v == title->vertical() && shadow == title->shadow()) return;
   commitTitle(title->with_style(size, rgba, h, v, shadow));
+}
+
+void DesktopController::setSelectedTitleLook(int background, int opacity_percent) {
+  if (!active_session_ || !active_session_->selected_title()) return;
+  const auto* title = active_session_->document().find_title(*active_session_->selected_title());
+  if (title == nullptr) return;
+  const auto box = static_cast<pulsar::domain::TitleBackground>(std::clamp(background, 0, 2));
+  const int opacity = std::clamp(opacity_percent, pulsar::domain::Title::minimum_opacity_percent, pulsar::domain::Title::maximum_opacity_percent);
+  if (box == title->background() && opacity == title->opacity_percent()) return;
+  commitTitle(title->with_look(box, opacity));
 }
 
 // Candidate edges for title snapping: zero, the playhead, every video/audio clip edge and the
@@ -1901,13 +2135,16 @@ std::optional<std::pair<int, int>> DesktopController::projectCanvasSize() const 
   if (!active_session_) return std::nullopt;
   const auto* track = active_session_->document().timeline().find_track(active_session_->document().video_track_id());
   if (track == nullptr) return std::nullopt;
+  std::vector<pulsar::application::MediaAsset> assets;
+  assets.reserve(track->clips().size());
   for (const auto& clip : track->clips()) {
-    const auto asset = active_session_->document().find_asset(clip.media_id());
-    if (asset && asset->has_video() && asset->metadata().width > 0 && asset->metadata().height > 0) {
-      return std::pair<int, int>{asset->metadata().width + (asset->metadata().width & 1), asset->metadata().height + (asset->metadata().height & 1)};
-    }
+    auto asset = active_session_->document().find_asset(clip.media_id());
+    if (asset && asset->has_video() && asset->metadata().width > 0 && asset->metadata().height > 0) assets.push_back(std::move(*asset));
   }
-  return std::nullopt;
+  const auto* master = pulsar::application::pick_master_asset(
+      assets, [](const pulsar::application::MediaAsset& asset) { return &asset; });
+  if (master == nullptr) return std::nullopt;
+  return pulsar::application::master_canvas_size(*master);
 }
 
 void DesktopController::composeTitlesOnPreview(pulsar::media::ffmpeg::FFmpegPreviewFrame& frame, MediaTime time) {

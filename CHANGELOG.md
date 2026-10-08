@@ -8,6 +8,14 @@ the version is defined once, in the root `CMakeLists.txt`.
 First public beta (Linux x86_64). History before this release is not itemised.
 
 ### Added
+- **Photos and colour cards as clips** (PNG, JPEG, WebP; *Placa de color* in the library): real stills on VIDEO 1, 5 s by default, trimmable to any length, never stretched (fit with bars), same picture in preview and export, EXIF orientation applied, transparency flattened over black. No temporary movie is made. A still-only project is built around at most 1920×1080.
+- **Audio fades**: linear fade-in / fade-out per clip (Inspector presets Sin, ¼, ½, 1, 2 s), drawn on the clip, identical in preview and export. Project format version 4 only when a fade or a title look exists.
+- **Titles**: background box (dark / light) and opacity; titles duplicate and keep their look.
+- **Duplicar** (*Ctrl+D*, toolbar, Inspector): a copy right after the original, one undo step, refused with a clear message when the room is taken.
+- **Frame step** (*←* / *→*, *,* / *.*, buttons beside Play): one frame on the clip's own rational frame grid.
+- **Library as a media bin**: kind icons, All / Video / Image / Audio filter, name search, clearer empty states. **Sounds**: Spanish names, ten categories, ▶ audition before inserting, 12 new original sounds (37 in total).
+- Thumbnails as a backdrop on clips too narrow for a tile; clip names keep their distinguishing end; fade ramps and photo/colour styling on the timeline.
+- Export dialog suggests "Mi video.mp4" (never a name that already exists) and the status bar says which file was written. *Acerca de PULSAR* box; one `BrandMark` component for the logo.
 - **Titles V0**: *Título* button or key *T* adds a static text at the playhead on a dedicated title track (text, size, colour, alignment, shadow in the Inspector; move/trim/delete; one undo step per edit; saved in the project, format v3 only when titles exist). Preview and export use the same rasteriser and compositor. Font: Inter Bold, SIL OFL 1.1 (`assets/fonts/`).
 - **Batch import**: multi-file import, folder import ("Importar una carpeta entera…" or a folder path), duplicates skipped, progress and cancel; audio in a batch goes to the library only.
 - **Drag and drop** from the library onto the timeline with a drop ghost, snapping and a reason when the drop is refused.
@@ -33,6 +41,10 @@ First public beta (Linux x86_64). History before this release is not itemised.
 - `--version`, application metadata, `.desktop` entry and icon, portable Linux bundle.
 
 ### Fixed
+- A `.pulsar` opened from the command line, "Open with" or dropped on the window was treated as a media file.
+- Editing shortcuts no longer fire behind a file dialog or the colour palette.
+- Music and sounds in the library can now be placed: *Insertar en el cabezal* (or double-click), or drop them under the last track; an audio track is created when none is free.
+- The Inspector described the last library item instead of the selected clip.
 - Export did not clamp the mixed audio at all while the preview hard-clipped; both now use the same soft stage.
 - A grouped edit larger than the history capacity could lose part of itself from the undo history; whole groups are now kept or dropped together.
 - Clips starting before a zoomed view no longer paint over the track headers; four or more tracks stay reachable (compact lanes, scroll indicator).

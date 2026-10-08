@@ -19,7 +19,9 @@ Item {
         anchors.verticalCenter: parent.verticalCenter
         spacing: 6
         TButton { glyph: "home"; enabled: controller.hasMedia; onClicked: controller.seekToStart() }
+        TButton { glyph: "step-back"; enabled: controller.hasMedia && !controller.playing; onClicked: controller.stepFrame(-1) }
         TButton { glyph: controller.playing ? "pause" : "play"; dominant: true; active: controller.playing; enabled: controller.hasMedia && !controller.busy; onClicked: controller.togglePlayback() }
+        TButton { glyph: "step-forward"; enabled: controller.hasMedia && !controller.playing; onClicked: controller.stepFrame(1) }
         TButton { glyph: "end"; enabled: controller.hasMedia; onClicked: controller.seekToEnd() }
     }
 }

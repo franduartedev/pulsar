@@ -123,6 +123,33 @@ int main(int argc, char** argv) {
   // Outside the title the export is the plain video (no stray overlay).
   REQUIRE(14, mean_abs_diff(exported, without_title, 0, 0, expected.width, min_y > 8 ? min_y - 4 : 1) < 14.0);
 
+  // ---- Look: a dark box and 70 % opacity must come out of the export exactly as in the preview ----
+  controller.setSelectedTitleLook(1, 70);
+  REQUIRE(40, controller.selectedTitle().value("background").toInt() == 1 && controller.selectedTitle().value("opacity").toInt() == 70);
+  const auto boxed_titles = std::vector<pulsar::domain::Title>{*controller.titleForTest()};
+  REQUIRE(41, boxed_titles[0].background() == pulsar::domain::TitleBackground::Dark && boxed_titles[0].opacity_percent() == 70);
+  auto boxed_expected = frame_at(video, t);
+  composition::TitleCompositor boxed_compositor{std::make_shared<QtTitleRasterizer>()};
+  REQUIRE(42, boxed_compositor.composite(composition::RgbaCanvas{boxed_expected.width, boxed_expected.height, boxed_expected.stride_bytes, boxed_expected.pixels.data()}, boxed_titles, t));
+  int bx0 = boxed_expected.width, by0 = boxed_expected.height, bx1 = 0, by1 = 0;
+  for (int y = 0; y < boxed_expected.height; ++y) for (int x = 0; x < boxed_expected.width; ++x) {
+    if (mean_abs_diff(boxed_expected, without_title, x, y, x + 1, y + 1) > 8) { bx0 = std::min(bx0, x); bx1 = std::max(bx1, x); by0 = std::min(by0, y); by1 = std::max(by1, y); }
+  }
+  REQUIRE(43, (bx1 - bx0) > (max_x - min_x) + 8 && (by1 - by0) > (max_y - min_y) + 4);   // the box is bigger than the bare text
+  // The box darkens the picture behind the text, but not completely (70 % opacity).
+  const double box_luma_change = mean_abs_diff(boxed_expected, without_title, bx0 + 1, by0 + 1, bx0 + 5, by0 + 5);
+  REQUIRE(44, box_luma_change > 10 && box_luma_change < 200);
+  const auto boxed_destination = root / "boxed.mp4";
+  controller.exportProjectWithPreset(QString::fromStdString(boxed_destination.string()), QStringLiteral("original"));
+  REQUIRE(45, wait_until([&] { return !controller.exportRunning(); }));
+  const auto boxed_exported = frame_at(boxed_destination, t);
+  const double boxed_inside = mean_abs_diff(boxed_exported, boxed_expected, bx0, by0, bx1 + 1, by1 + 1);
+  const double boxed_vs_untitled = mean_abs_diff(boxed_exported, without_title, bx0, by0, bx1 + 1, by1 + 1);
+  std::fprintf(stderr, "TITLES boxed export vs preview: %.2f, vs untitled: %.2f\n", boxed_inside, boxed_vs_untitled);
+  REQUIRE(46, boxed_inside < 14.0 && boxed_inside * 2.0 < boxed_vs_untitled);
+  controller.undoEdit();
+  REQUIRE(47, controller.selectedTitle().value("background").toInt() == 0 && controller.selectedTitle().value("opacity").toInt() == 100);
+
   // ---- Scaler: a 720p-box preset on this 320x180 project never enlarges ------------------------
   const auto destination720 = root / "small.mp4";
   controller.exportProjectWithPreset(QString::fromStdString(destination720.string()), QStringLiteral("1080p"));

@@ -155,6 +155,8 @@ struct ClipSpec {
   std::int64_t length;
   double gain_db{0.0};
   bool muted{false};
+  std::int64_t fade_in_frames{0};
+  std::int64_t fade_out_frames{0};
 };
 
 application::ProjectSnapshot snapshot(std::vector<application::MediaAsset> assets,
@@ -168,7 +170,7 @@ application::ProjectSnapshot snapshot(std::vector<application::MediaAsset> asset
     video_track.insert_clip(domain::Clip{
         domain::ClipId{spec.clip}, domain::MediaId{spec.media},
         domain::TimeRange{frames(spec.source_start), frames(spec.source_start + spec.length)},
-        frames(spec.timeline_start), spec.gain_db, spec.muted});
+        frames(spec.timeline_start), spec.gain_db, spec.muted, frames(spec.fade_in_frames), frames(spec.fade_out_frames)});
   }
   timeline.add_track(std::move(video_track));
   std::uint64_t track_id = 2;
@@ -178,7 +180,7 @@ application::ProjectSnapshot snapshot(std::vector<application::MediaAsset> asset
       track.insert_clip(domain::Clip{
           domain::ClipId{spec.clip}, domain::MediaId{spec.media},
           domain::TimeRange{frames(spec.source_start), frames(spec.source_start + spec.length)},
-          frames(spec.timeline_start), spec.gain_db, spec.muted});
+          frames(spec.timeline_start), spec.gain_db, spec.muted, frames(spec.fade_in_frames), frames(spec.fade_out_frames)});
     }
     timeline.add_track(std::move(track));
   }
@@ -241,6 +243,34 @@ void mix_alignment_gain_mute_and_clipping() {
   const auto clipped = clipping.render(frames(0), 1024);
   assert_near(left(clipped.block, 10), application::soft_output_stage(1.5F));   // bent, not chopped
   assert(left(clipped.block, 10) < 1.0F && left(clipped.block, 10) > application::kOutputKnee);
+}
+
+// Fades ramp on the output grid from the clip's own first frame, whatever the block boundaries.
+void fades_ramp_in_the_mixer_across_blocks() {
+  const auto render_blocks = [](const std::vector<std::size_t>& sizes) {
+    SourceBank bank{{{"sfx", SignalSpec{.constant = 0.50F}}}};
+    auto project = snapshot({audio_asset(2, "sfx")}, std::nullopt,
+                            {{{2, 2, 100, 0, 1024, 0.0, false, 256, 256}}});
+    application::AudioMixSession mixer{bank.factory()};
+    mixer.configure(std::move(project));
+    std::vector<float> out;
+    std::int64_t position = 0;
+    for (const auto size : sizes) {
+      const auto result = mixer.render(frames(position), size);
+      for (std::size_t frame = 0; frame < size; ++frame) out.push_back(left(result.block, frame));
+      position += static_cast<std::int64_t>(size);
+    }
+    return out;
+  };
+  const auto whole = render_blocks({1300});
+  assert(whole[99] == 0.0F && whole[100] == 0.0F);                // before the clip / its first (silent) frame
+  assert_near(whole[100 + 128], 0.25F, 2.0e-3F);                  // halfway up the 256-frame fade-in
+  assert_near(whole[100 + 256], 0.5F);                            // full level
+  assert_near(whole[100 + 700], 0.5F);
+  assert_near(whole[100 + 1024 - 128], 0.25F, 2.0e-3F);           // halfway down the fade-out
+  assert(whole[100 + 1023] > 0.0F && whole[100 + 1023] < 0.01F);  // nearly silent at the last frame
+  assert(whole[100 + 1024] == 0.0F);                              // nothing after the clip
+  assert(render_blocks({333, 333, 334, 300}) == whole);           // block boundaries do not matter
 }
 
 void mute_preserves_decode_and_clock_contract() {
@@ -535,6 +565,7 @@ void benchmark_mix_scaling() {
 int main() {
   contributor_resolution_is_complete_and_deterministic();
   mix_alignment_gain_mute_and_clipping();
+  fades_ramp_in_the_mixer_across_blocks();
   mute_preserves_decode_and_clock_contract();
   mute_transitions_reanchor_to_current_truth_without_replay();
   muted_embedded_and_parallel_audio_preserve_timing();

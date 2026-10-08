@@ -79,7 +79,7 @@ void Track::trim_clip_start(ClipId id, MediaTime timeline_start) {
   const TimeRange source_range{original.source_range().start() + offset,
                                original.source_range().end()};
   *iterator = Clip{original.id(), original.media_id(), source_range, timeline_start,
-                   original.audio_gain_db(), original.muted()};
+                   original.audio_gain_db(), original.muted(), original.fade_in(), original.fade_out()};
 }
 
 void Track::trim_clip_end(ClipId id, MediaTime timeline_end) {
@@ -99,7 +99,7 @@ void Track::trim_clip_end(ClipId id, MediaTime timeline_end) {
   const TimeRange source_range{original.source_range().start(),
                                original.source_range().start() + duration};
   *iterator = Clip{original.id(), original.media_id(), source_range, original.timeline_start(),
-                   original.audio_gain_db(), original.muted()};
+                   original.audio_gain_db(), original.muted(), original.fade_in(), original.fade_out()};
 }
 
 void Track::split_clip(ClipId id, MediaTime split_timeline_position, ClipId right_clip_id) {
@@ -123,10 +123,12 @@ void Track::split_clip(ClipId id, MediaTime split_timeline_position, ClipId righ
   const MediaTime source_split = original.source_range().start() + left_duration;
   const Clip left{original.id(), original.media_id(),
                   TimeRange{original.source_range().start(), source_split},
-                  original.timeline_start(), original.audio_gain_db(), original.muted()};
+                  original.timeline_start(), original.audio_gain_db(), original.muted(),
+                  original.fade_in(), MediaTime::zero()};      // the left half keeps the fade-in
   const Clip right{right_clip_id, original.media_id(),
                    TimeRange{source_split, original.source_range().end()},
-                   split_timeline_position, original.audio_gain_db(), original.muted()};
+                   split_timeline_position, original.audio_gain_db(), original.muted(),
+                   MediaTime::zero(), original.fade_out()};    // the right half keeps the fade-out
 
   Track replacement{id_, kind_};
   for (const auto& existing : clips_) {
@@ -148,7 +150,7 @@ void Track::set_clip_audio_gain(ClipId id, double gain_db) {
   }
   const Clip original = *iterator;
   *iterator = Clip{original.id(), original.media_id(), original.source_range(),
-                   original.timeline_start(), gain_db, original.muted()};
+                   original.timeline_start(), gain_db, original.muted(), original.fade_in(), original.fade_out()};
 }
 
 void Track::set_clip_muted(ClipId id, bool muted) {
@@ -159,7 +161,18 @@ void Track::set_clip_muted(ClipId id, bool muted) {
   }
   const Clip original = *iterator;
   *iterator = Clip{original.id(), original.media_id(), original.source_range(),
-                   original.timeline_start(), original.audio_gain_db(), muted};
+                   original.timeline_start(), original.audio_gain_db(), muted, original.fade_in(), original.fade_out()};
+}
+
+void Track::set_clip_fades(ClipId id, MediaTime fade_in, MediaTime fade_out) {
+  const auto iterator = std::find_if(
+      clips_.begin(), clips_.end(), [id](const Clip& clip) { return clip.id() == id; });
+  if (iterator == clips_.end()) {
+    throw std::invalid_argument{"clip id does not exist in track"};
+  }
+  const Clip original = *iterator;
+  *iterator = Clip{original.id(), original.media_id(), original.source_range(),
+                   original.timeline_start(), original.audio_gain_db(), original.muted(), fade_in, fade_out};
 }
 
 MediaTime Track::duration() const {

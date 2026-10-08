@@ -1,5 +1,7 @@
 #include "recovery_service.hpp"
 
+#include <pulsar/application/media/still_media.hpp>
+
 #include <pulsar/project_file/file_project_repository.hpp>
 
 #include <chrono>
@@ -161,7 +163,7 @@ pulsar::application::ProjectSnapshot absolutize_media_locators(pulsar::applicati
   const auto base = project_file.parent_path();
   for (auto& asset : snapshot.assets) {
     const auto& locator = asset.source_locator();
-    if (locator.is_absolute() || locator.string().rfind("pulsar-sound:", 0) == 0 || base.empty()) continue;
+    if (locator.is_absolute() || locator.string().rfind("pulsar-sound:", 0) == 0 || pulsar::application::is_color_card_locator(locator.generic_string()) || base.empty()) continue;
     const auto absolute = (base / locator).lexically_normal();
     if (asset.has_video()) {
       asset = MediaAsset{asset.id(), absolute, asset.video_stream_index(), asset.playable_duration(), asset.metadata(),

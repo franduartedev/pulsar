@@ -10,6 +10,7 @@ Rectangle {
     signal saveProjectAsRequested()
     signal importMediaRequested()
     signal exportRequested()
+    signal aboutRequested()
     color: Theme.bgRoot
 
     function projectName() {
@@ -25,15 +26,9 @@ Rectangle {
         anchors.leftMargin: Theme.spaceL
         anchors.verticalCenter: parent.verticalCenter
         spacing: 10
-        // Pulse mark: three bars, accent only on the tallest.
-        Item {
-            anchors.verticalCenter: parent.verticalCenter
-            width: 16; height: 18
-            Rectangle { x: 0; y: 6; width: 3; height: 8; radius: 1.5; color: Theme.textMuted }
-            Rectangle { x: 6.5; y: 0; width: 3; height: 18; radius: 1.5; color: Theme.accent }
-            Rectangle { x: 13; y: 4; width: 3; height: 11; radius: 1.5; color: Theme.textMuted }
-        }
-        Text { anchors.verticalCenter: parent.verticalCenter; text: "PULSAR"; color: Theme.textPrimary; font.pixelSize: Theme.fontSizeXL; font.bold: true; font.letterSpacing: 2.4 }
+        BrandMark { anchors.verticalCenter: parent.verticalCenter }
+        Text { anchors.verticalCenter: parent.verticalCenter; text: "PULSAR"; color: Theme.textPrimary; font.pixelSize: Theme.fontSizeXL; font.bold: true; font.letterSpacing: 2.4
+            MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: header.aboutRequested() } }
         Rectangle { anchors.verticalCenter: parent.verticalCenter; width: 1; height: 16; color: Theme.borderStrong }
         Text {
             anchors.verticalCenter: parent.verticalCenter
@@ -64,9 +59,9 @@ Rectangle {
         Item { width: Theme.spaceM; height: 1 }
         PButton { text: "Cancelar"; visible: controller.exportRunning; onClicked: controller.cancelExport() }
         PButton {
-            width: 108; height: 34
+            width: 136; height: 34
             primary: true
-            text: controller.exportRunning ? "Exportando…" : "Exportar"
+            text: controller.exportRunning ? "Exportando…" : "Exportar video"
             enabled: controller.hasVideoMedia && !controller.exportRunning
             onClicked: header.exportRequested()
         }

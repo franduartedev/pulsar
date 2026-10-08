@@ -1,5 +1,7 @@
 #include <pulsar/media/ffmpeg/ffmpeg_media_probe.hpp>
 
+#include <pulsar/application/media/still_media.hpp>
+
 #include "internal/ffmpeg_common.hpp"
 
 extern "C" {
@@ -76,6 +78,19 @@ application::MediaProbeResult FFmpegMediaProbe::probe(const std::filesystem::pat
     } else if (stream.codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
       result.audio_streams.push_back(audio_stream_info(stream));
     }
+  }
+
+  // A photograph is one picture with no real length: report it as a still that the editor can
+  // hold for as long as the clip needs (the demuxer says "N/A" or one frame at 25 fps).
+  if (result.container_name.has_value() &&
+      application::is_still_image_container(*result.container_name) &&
+      !result.video_streams.empty()) {
+    result.audio_streams.clear();
+    result.video_streams.resize(1);
+    auto& stream = result.video_streams.front();
+    stream.duration = application::still_playable_duration();
+    stream.nominal_frame_rate = application::still_frame_rate();
+    result.duration = stream.duration;
   }
 
   return result;

@@ -14,6 +14,7 @@ namespace pulsar::application { class ProjectDocument; }
 class MediaAssetListModel final : public QAbstractListModel {
   Q_OBJECT
 public:
+  Q_PROPERTY(int totalCount READ totalCount NOTIFY totalCountChanged)
   enum Role { MediaIdRole = Qt::UserRole + 1, NameRole, KindRole, DurationRole, InfoRole, AvailableRole };
 
   explicit MediaAssetListModel(QObject* parent = nullptr);
@@ -23,7 +24,14 @@ public:
 
   void refresh(const pulsar::application::ProjectDocument& document);
   [[nodiscard]] int count() const noexcept { return static_cast<int>(rows_.size()); }
+  [[nodiscard]] int totalCount() const noexcept { return static_cast<int>(all_.size()); }
   [[nodiscard]] bool contains(const QString& media_id) const;
+  // The bin view: kind "" (everything), "video", "image" (photos and colour cards) or "audio", plus a
+  // case-insensitive name search. Only changes what is listed, never the project.
+  Q_INVOKABLE void setFilter(const QString& kind, const QString& text);
+
+signals:
+  void totalCountChanged();
 
 private:
   struct Row {
@@ -34,5 +42,9 @@ private:
     QString info;      // "Video · 10.9 s"
     bool available{true};
   };
-  std::vector<Row> rows_;
+  void applyFilter();
+  std::vector<Row> all_;
+  std::vector<Row> rows_;   // what the filter lets through
+  QString filter_kind_;
+  QString filter_text_;
 };

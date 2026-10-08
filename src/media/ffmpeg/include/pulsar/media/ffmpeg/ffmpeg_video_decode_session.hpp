@@ -38,6 +38,8 @@ public:
   [[nodiscard]] int stream_index() const noexcept;
   [[nodiscard]] const std::string& codec_name() const noexcept;
   [[nodiscard]] std::optional<domain::MediaTime> stream_start_timestamp() const;
+  // A photograph or colour card: one picture that stands for every instant from its start.
+  [[nodiscard]] bool is_still() const noexcept;
 
 private:
   class Impl;

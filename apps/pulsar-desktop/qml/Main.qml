@@ -32,9 +32,11 @@ Window {
     property bool savingForAction: false
     property bool allowClose: false
 
+    property string pendingProjectPath: ""
     function perform(action) {
         if (action === "close") { allowClose = true; root.close() }
         else if (action === "open") openProjectDialog.open()
+        else if (action === "openfile") { var path = pendingProjectPath; pendingProjectPath = ""; controller.openProject(path) }
     }
     function guardedRun(action) {
         if (!controller.projectDirty) { perform(action); return }
@@ -70,28 +72,36 @@ Window {
     function askSavePath(purpose) {
         pathPurpose = purpose
         if (purpose === "export") {
-            pathPrompt.title = "Exportar vídeo"; pathPrompt.confirmText = "Exportar"; pathPrompt.extension = ".mp4"; pathPrompt.showPresets = true
+            pathPrompt.title = "Exportar video"; pathPrompt.confirmText = "Exportar"; pathPrompt.extension = ".mp4"; pathPrompt.showPresets = true
         } else {
             pathPrompt.title = "Guardar proyecto"; pathPrompt.confirmText = "Guardar"; pathPrompt.extension = ".pulsar"; pathPrompt.showPresets = false
         }
         pathPrompt.openWith(controller.suggestedPath(purpose))
     }
 
-    Shortcut { sequence: "Space"; onActivated: controller.togglePlayback() }
-    Shortcut { sequence: "Ctrl+I"; onActivated: fileDialog.open() }
-    Shortcut { sequence: "Ctrl+O"; onActivated: root.guardedRun("open") }
-    Shortcut { sequence: "Ctrl+S"; onActivated: controller.activeProjectPath.length > 0 ? controller.saveProject(controller.activeProjectPath) : root.askSavePath("project") }
-    Shortcut { sequence: "Ctrl+Shift+S"; onActivated: root.askSavePath("project") }
-    Shortcut { sequence: "Home"; onActivated: controller.seekToStart() }
-    Shortcut { sequence: "End"; onActivated: controller.seekToEnd() }
-    Shortcut { sequence: "S"; onActivated: controller.splitSelectedClip() }
-    Shortcut { sequence: "Delete"; onActivated: controller.deleteSelectedClip() }
-    Shortcut { sequence: "Ctrl+Z"; onActivated: controller.undoEdit() }
-    Shortcut { sequence: "Ctrl+Shift+Z"; onActivated: controller.redoEdit() }
-    Shortcut { sequence: "Shift+Z"; onActivated: controller.fitTimeline() }
-    // Single-key editing shortcuts never fire while typing in a field or inside a dialog.
+    // No editing shortcut fires behind a dialog (a file dialog swallows typing and the keys used
+    // to reach the timeline), and single-key ones never fire while typing in a field.
+    readonly property bool dialogOpen: pathPrompt.visible || unsavedDialog.visible || recoveryDialog.visible || aboutDialog.visible ||
+                                       fileDialog.visible || folderDialog.visible || openProjectDialog.visible || colorMenu.visible
     readonly property bool typing: !!root.activeFocusItem && typeof root.activeFocusItem.cursorPosition !== "undefined"
-    readonly property bool shortcutsBlocked: typing || pathPrompt.visible || unsavedDialog.visible || recoveryDialog.visible
+    readonly property bool shortcutsBlocked: typing || dialogOpen
+    Shortcut { sequence: "Space"; enabled: !root.shortcutsBlocked; onActivated: controller.togglePlayback() }
+    Shortcut { sequence: "Ctrl+I"; enabled: !root.dialogOpen; onActivated: fileDialog.open() }
+    Shortcut { sequence: "Ctrl+O"; enabled: !root.dialogOpen; onActivated: root.guardedRun("open") }
+    Shortcut { sequence: "Ctrl+S"; enabled: !root.dialogOpen; onActivated: controller.activeProjectPath.length > 0 ? controller.saveProject(controller.activeProjectPath) : root.askSavePath("project") }
+    Shortcut { sequence: "Ctrl+Shift+S"; enabled: !root.dialogOpen; onActivated: root.askSavePath("project") }
+    Shortcut { sequence: "Home"; enabled: !root.shortcutsBlocked; onActivated: controller.seekToStart() }
+    Shortcut { sequence: "End"; enabled: !root.shortcutsBlocked; onActivated: controller.seekToEnd() }
+    Shortcut { sequence: "S"; enabled: !root.shortcutsBlocked; onActivated: controller.splitSelectedClip() }
+    Shortcut { sequence: "Delete"; enabled: !root.shortcutsBlocked; onActivated: controller.deleteSelectedClip() }
+    Shortcut { sequence: "Ctrl+Z"; enabled: !root.dialogOpen; onActivated: controller.undoEdit() }
+    Shortcut { sequence: "Ctrl+Shift+Z"; enabled: !root.dialogOpen; onActivated: controller.redoEdit() }
+    Shortcut { sequence: "Shift+Z"; enabled: !root.shortcutsBlocked; onActivated: controller.fitTimeline() }
+    Shortcut { sequence: "Ctrl+D"; enabled: !root.dialogOpen; onActivated: controller.duplicateSelected() }
+    Shortcut { sequence: "Left"; enabled: !root.shortcutsBlocked; onActivated: controller.stepFrame(-1) }
+    Shortcut { sequence: "Right"; enabled: !root.shortcutsBlocked; onActivated: controller.stepFrame(1) }
+    Shortcut { sequence: ","; enabled: !root.shortcutsBlocked; onActivated: controller.stepFrame(-1) }
+    Shortcut { sequence: "."; enabled: !root.shortcutsBlocked; onActivated: controller.stepFrame(1) }
     Shortcut { sequence: "M"; enabled: !root.shortcutsBlocked; onActivated: controller.toggleSelectedClipMute() }
     Shortcut { sequence: "Shift+Delete"; enabled: !root.shortcutsBlocked; onActivated: controller.rippleDeleteSelectedClip() }
     Shortcut { sequence: "Q"; enabled: !root.shortcutsBlocked; onActivated: controller.trimSelectedStartToPlayhead() }
@@ -106,7 +116,7 @@ Window {
         title: "Importar medios"
         fileMode: FileDialog.OpenFiles
         nameFilters: [
-            "Medios (*.mp4 *.mov *.mkv *.avi *.webm *.wav *.mp3 *.m4a *.aac *.flac)",
+            "Medios (*.mp4 *.mov *.mkv *.avi *.webm *.wav *.mp3 *.m4a *.aac *.flac *.png *.jpg *.jpeg *.webp)",
             "Todos los archivos (*)"
         ]
         onAccepted: controller.openUrls(selectedFiles)
@@ -130,7 +140,14 @@ Window {
         anchors.fill: parent
         onDropped: function(drop) {
             if (drop.hasUrls && drop.urls.length > 0) {
-                controller.openUrls(drop.urls)
+                var first = drop.urls[0].toString()
+                if (drop.urls.length === 1 && first.toLowerCase().endsWith(".pulsar")) {
+                    // A project dropped on the window opens as a project (after the unsaved-changes guard).
+                    root.pendingProjectPath = decodeURIComponent(first.replace(/^file:\/\//, ""))
+                    root.guardedRun("openfile")
+                } else {
+                    controller.openUrls(drop.urls)
+                }
                 drop.acceptProposedAction()
             }
         }
@@ -147,6 +164,7 @@ Window {
         onSaveProjectAsRequested: root.askSavePath("project")
         onImportMediaRequested: fileDialog.open()
         onExportRequested: root.askSavePath("export")
+        onAboutRequested: aboutDialog.open()
     }
 
     MediaPanel {
@@ -160,6 +178,7 @@ Window {
         width: root.mediaWidth
         onImportRequested: fileDialog.open()
         onImportFolderRequested: folderDialog.open()
+        onCreateColorRequested: function(sx, sy) { var p = root.contentItem.mapFromItem(null, sx, sy); colorMenu.openAt(p.x, p.y) }
         onAssetDragStarted: function(mediaId, name, isVideo) { dragGhost.label = name; dragGhost.visible = true }
         onAssetDragMoved: function(mediaId, sx, sy) {
             var p = root.contentItem.mapFromItem(null, sx, sy)
@@ -238,9 +257,13 @@ Window {
         anchors.right: parent.right
         anchors.bottom: parent.bottom
         height: 26
+        onAboutRequested: aboutDialog.open()
     }
 
+    AboutDialog { id: aboutDialog }
+
     ClipContextMenu { id: clipMenu }
+    ColorCardMenu { id: colorMenu }
 
     UnsavedChangesDialog {
         id: unsavedDialog

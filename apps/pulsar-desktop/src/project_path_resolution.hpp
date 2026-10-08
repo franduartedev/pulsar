@@ -1,5 +1,7 @@
 #pragma once
 
+#include <pulsar/application/media/still_media.hpp>
+
 #include <filesystem>
 
 namespace pulsar::desktop {
@@ -12,6 +14,10 @@ namespace pulsar::desktop {
 [[nodiscard]] inline std::filesystem::path resolve_runtime_media_path(
     const std::filesystem::path& project_file, const std::filesystem::path& authored_locator) {
   if (authored_locator.is_absolute()) {
+    return authored_locator;
+  }
+  // A generated colour card has no file: the locator itself is what the decoder reads.
+  if (pulsar::application::is_color_card_locator(authored_locator.generic_string())) {
     return authored_locator;
   }
   const auto parent = project_file.parent_path();

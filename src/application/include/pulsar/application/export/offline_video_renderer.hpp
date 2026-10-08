@@ -142,6 +142,15 @@ private:
   std::unique_ptr<ActiveSource> active_source_;
   std::int64_t next_frame_index_{0};
   OfflineVideoRenderMetrics metrics_;
+  // The last scaled picture. A held frame (a photograph, a long pause) is scaled once, not once per
+  // output frame. Holding the source pointer keeps its identity from being reused.
+  struct ScaledCache {
+    std::shared_ptr<const OfflineVideoPixelBuffer> source;
+    std::int64_t width{0};
+    std::int64_t height{0};
+    OfflineVideoPixelBuffer scaled;
+  };
+  mutable std::optional<ScaledCache> scaled_cache_;
 };
 
 } // namespace pulsar::application::exporting

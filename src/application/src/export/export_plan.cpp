@@ -133,22 +133,18 @@ ExportPlan ExportPlan::build(const ProjectSnapshot& input, ExportProfile profile
                           "project has no designated video track"};
   }
 
-  const MediaAsset* master = nullptr;
-  for (const auto& clip : video_track->clips()) {
-    const auto& asset = find_asset(assets, clip.media_id());
-    if (asset.has_video()) {
-      master = &asset;
-      break;
-    }
-  }
+  const MediaAsset* master = pick_master_asset(
+      video_track->clips(),
+      [&](const domain::Clip& clip) -> const MediaAsset* { return &find_asset(assets, clip.media_id()); });
   if (master == nullptr) {
     throw ExportPlanError{ExportPlanErrorCode::NoVideoMaster,
                           "project has no video asset on its video track"};
   }
 
   const auto frame_rate = require_frame_rate(*master);
-  auto width = checked_even_dimension(master->metadata().width);
-  auto height = checked_even_dimension(master->metadata().height);
+  const auto canvas = master_canvas_size(*master);
+  auto width = checked_even_dimension(canvas.first);
+  auto height = checked_even_dimension(canvas.second);
   if (profile.max_output_width() > 0 && profile.max_output_height() > 0 &&
       (width > profile.max_output_width() || height > profile.max_output_height())) {
     const auto fit = composition::fit_geometry(static_cast<int>(width), static_cast<int>(height),

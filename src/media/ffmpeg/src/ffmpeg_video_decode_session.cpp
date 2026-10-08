@@ -6,6 +6,8 @@
 
 #include <pulsar/media/ffmpeg/media_decode_error.hpp>
 
+#include <pulsar/application/media/still_media.hpp>
+
 #include "internal/ffmpeg_common.hpp"
 
 extern "C" {
@@ -14,6 +16,7 @@ extern "C" {
 #include <libavcodec/codec_par.h>
 #include <libavformat/avformat.h>
 #include <libavutil/avutil.h>
+#include <libavutil/display.h>
 #include <libavutil/error.h>
 #include <libavutil/imgutils.h>
 #include <libavutil/pixdesc.h>
@@ -22,6 +25,7 @@ extern "C" {
 
 #include <chrono>
 #include <cerrno>
+#include <cmath>
 #include <cstdint>
 #include <filesystem>
 #include <limits>
@@ -282,6 +286,123 @@ using WideInt = __int128_t;
   return checked_to_int64(floor_divide(numerator, denominator));
 }
 
+// ---- Stills ---------------------------------------------------------------------------------
+// A photograph or colour card is decoded once into an opaque, upright RGBA picture that is held
+// for the whole clip. Transparent pixels are flattened over black (the project canvas is black),
+// and the EXIF orientation that phones write is applied so portrait photos are not sideways.
+constexpr std::int64_t max_still_pixels = 100'000'000;
+
+[[nodiscard]] FramePtr new_rgba_frame(int width, int height) {
+  FramePtr frame = allocate_frame();
+  frame->format = AV_PIX_FMT_RGBA;
+  frame->width = width;
+  frame->height = height;
+  if (av_frame_get_buffer(frame.get(), 32) < 0) {
+    throw MediaDecodeError{MediaDecodeErrorCode::DecodeFailed,
+                           "FFmpeg could not allocate a still picture buffer"};
+  }
+  return frame;
+}
+
+[[nodiscard]] int clockwise_quarter_turns(const AVFrame& source) {
+  const AVFrameSideData* side = av_frame_get_side_data(&source, AV_FRAME_DATA_DISPLAYMATRIX);
+  if (side == nullptr || side->size < 9 * sizeof(std::int32_t)) return 0;
+  const double counter_clockwise =
+      av_display_rotation_get(reinterpret_cast<const std::int32_t*>(side->data));
+  if (std::isnan(counter_clockwise)) return 0;
+  const long turns = std::lround(-counter_clockwise / 90.0);
+  return static_cast<int>(((turns % 4) + 4) % 4);
+}
+
+[[nodiscard]] FramePtr make_still_frame(const AVFrame& source) {
+  const int width = source.width;
+  const int height = source.height;
+  if (width <= 0 || height <= 0 || source.format < 0 ||
+      static_cast<std::int64_t>(width) * height > max_still_pixels) {
+    throw MediaDecodeError{MediaDecodeErrorCode::DecodeFailed,
+                           "the image is empty or too large to use as a still"};
+  }
+  // JPEG decodes to the deprecated "yuvj" formats; use the plain format plus a full-range flag.
+  auto format = static_cast<AVPixelFormat>(source.format);
+  bool full_range = source.color_range == AVCOL_RANGE_JPEG;
+  bool jpeg_range_yuv = false;
+  switch (format) {
+    case AV_PIX_FMT_YUVJ420P: format = AV_PIX_FMT_YUV420P; full_range = true; jpeg_range_yuv = true; break;
+    case AV_PIX_FMT_YUVJ422P: format = AV_PIX_FMT_YUV422P; full_range = true; jpeg_range_yuv = true; break;
+    case AV_PIX_FMT_YUVJ444P: format = AV_PIX_FMT_YUV444P; full_range = true; jpeg_range_yuv = true; break;
+    case AV_PIX_FMT_YUVJ440P: format = AV_PIX_FMT_YUV440P; full_range = true; jpeg_range_yuv = true; break;
+    default: break;
+  }
+  SwsContextPtr sws{sws_getContext(width, height, format, width, height, AV_PIX_FMT_RGBA,
+                                   SWS_BILINEAR, nullptr, nullptr, nullptr)};
+  if (sws == nullptr) {
+    throw MediaDecodeError{MediaDecodeErrorCode::DecodeFailed,
+                           "libswscale could not convert the still image"};
+  }
+  if (jpeg_range_yuv) {
+    const int* coefficients = sws_getCoefficients(SWS_CS_DEFAULT);
+    sws_setColorspaceDetails(sws.get(), coefficients, full_range ? 1 : 0, coefficients, 1, 0,
+                             1 << 16, 1 << 16);
+  }
+  FramePtr flat = new_rgba_frame(width, height);
+  if (sws_scale(sws.get(), source.data, source.linesize, 0, height, flat->data, flat->linesize) !=
+      height) {
+    throw MediaDecodeError{MediaDecodeErrorCode::DecodeFailed,
+                           "libswscale did not convert the complete still image"};
+  }
+  for (int y = 0; y < height; ++y) {
+    std::uint8_t* row = flat->data[0] + static_cast<std::ptrdiff_t>(y) * flat->linesize[0];
+    for (int x = 0; x < width; ++x) {
+      std::uint8_t* px = row + x * 4;
+      const unsigned alpha = px[3];
+      if (alpha != 255) {
+        px[0] = static_cast<std::uint8_t>((px[0] * alpha + 127) / 255);
+        px[1] = static_cast<std::uint8_t>((px[1] * alpha + 127) / 255);
+        px[2] = static_cast<std::uint8_t>((px[2] * alpha + 127) / 255);
+        px[3] = 255;
+      }
+    }
+  }
+  const int turns = clockwise_quarter_turns(source);
+  if (turns == 0) return flat;
+
+  const int out_width = (turns % 2 == 0) ? width : height;
+  const int out_height = (turns % 2 == 0) ? height : width;
+  FramePtr upright = new_rgba_frame(out_width, out_height);
+  for (int y = 0; y < height; ++y) {
+    const std::uint8_t* from = flat->data[0] + static_cast<std::ptrdiff_t>(y) * flat->linesize[0];
+    for (int x = 0; x < width; ++x) {
+      int dx = x;
+      int dy = y;
+      if (turns == 1) { dx = height - 1 - y; dy = x; }
+      else if (turns == 2) { dx = width - 1 - x; dy = height - 1 - y; }
+      else { dx = y; dy = width - 1 - x; }
+      std::copy_n(from + x * 4, 4,
+                  upright->data[0] + static_cast<std::ptrdiff_t>(dy) * upright->linesize[0] + dx * 4);
+    }
+  }
+  return upright;
+}
+
+[[nodiscard]] FramePtr make_color_card_frame(std::uint32_t rgb) {
+  const int width = application::still_canvas_max_width;
+  const int height = application::still_canvas_max_height;
+  FramePtr frame = new_rgba_frame(width, height);
+  const std::uint8_t pixel[4] = {static_cast<std::uint8_t>((rgb >> 16) & 0xFF),
+                                 static_cast<std::uint8_t>((rgb >> 8) & 0xFF),
+                                 static_cast<std::uint8_t>(rgb & 0xFF), 255};
+  for (int y = 0; y < height; ++y) {
+    std::uint8_t* row = frame->data[0] + static_cast<std::ptrdiff_t>(y) * frame->linesize[0];
+    for (int x = 0; x < width; ++x) std::copy_n(pixel, 4, row + x * 4);
+  }
+  return frame;
+}
+
+[[nodiscard]] internal::FormatContextPtr open_unless_generated(const std::filesystem::path& path) {
+  if (application::is_color_card_locator(path.generic_string())) return internal::FormatContextPtr{};
+  return internal::open_input_with_stream_info(internal::canonical_local_regular_file(path));
+}
+
 } // namespace
 
 class FFmpegVideoFrameLease::Impl {
@@ -437,9 +558,25 @@ FFmpegPreviewFrame FFmpegPreviewConverter::convert(const DecodedVisualVideoFrame
 class FFmpegVideoDecodeSession::Impl {
 public:
   Impl(const std::filesystem::path& path, int video_stream_index)
-      : context_{internal::open_input_with_stream_info(
-            internal::canonical_local_regular_file(path))},
-        stream_index_{video_stream_index} {
+      : context_{open_unless_generated(path)}, stream_index_{video_stream_index} {
+    if (context_ == nullptr) {
+      // Generated colour card: no file, no demuxer, no decoder.
+      const auto rgb = application::color_card_rgb(path.generic_string());
+      if (!rgb.has_value()) {
+        throw MediaDecodeError{MediaDecodeErrorCode::InvalidStreamIndex,
+                               "the colour card locator is malformed"};
+      }
+      codec_name_ = "pulsar-color";
+      stream_index_ = 0;
+      stream_time_base_ = domain::Rational{1, 1000};
+      stream_start_timestamp_ = domain::MediaTime{0, stream_time_base_};
+      still_ = true;
+      FramePtr card = make_color_card_frame(*rgb);
+      still_frame_ = DecodedVisualVideoFrame{
+          1, stream_index_, image_descriptor(*card), *stream_start_timestamp_,
+          FFmpegVideoFrameLease{std::make_shared<const FFmpegVideoFrameLease::Impl>(std::move(card))}};
+      return;
+    }
     if (stream_index_ < 0 ||
         static_cast<unsigned int>(stream_index_) >= context_->nb_streams) {
       throw MediaDecodeError{MediaDecodeErrorCode::InvalidStreamIndex,
@@ -468,9 +605,18 @@ public:
     codec_context_ = allocate_decoder_context(*decoder, *stream.codecpar);
     packet_ = allocate_packet();
     frame_ = allocate_frame();
+    still_ = context_->iformat != nullptr && context_->iformat->name != nullptr &&
+             application::is_still_image_container(context_->iformat->name);
   }
 
   [[nodiscard]] std::optional<DecodedVideoFrameInfo> decode_next() {
+    if (still_) {
+      auto frame = still_next();
+      if (!frame.has_value()) return std::nullopt;
+      return DecodedVideoFrameInfo{frame->stream_index, frame->image.coded_width,
+                                   frame->image.coded_height, frame->image.pixel_format_name,
+                                   frame->presentation_timestamp};
+    }
     if (pending_visual_frame_.has_value()) {
       auto pending = std::move(pending_visual_frame_);
       pending_visual_frame_.reset();
@@ -510,6 +656,11 @@ public:
   }
 
   [[nodiscard]] std::optional<DecodedVisualVideoFrame> decode_next_visual() {
+    if (still_) return still_next();
+    return decode_next_visual_raw();
+  }
+
+  [[nodiscard]] std::optional<DecodedVisualVideoFrame> decode_next_visual_raw() {
     if (pending_visual_frame_.has_value()) {
       auto pending = std::move(pending_visual_frame_);
       pending_visual_frame_.reset();
@@ -554,7 +705,10 @@ public:
     return stream_start_timestamp_;
   }
 
+  [[nodiscard]] bool is_still() const noexcept { return still_; }
+
   [[nodiscard]] VideoSeekResult seek_to_stream_timestamp(domain::MediaTime target) {
+    throw_if_still_metadata_seek();
     const std::int64_t seek_timestamp =
         floor_media_time_to_stream_timestamp(target, stream_time_base_);
 
@@ -593,6 +747,7 @@ public:
 
   [[nodiscard]] VideoPresentationSeekResult seek_to_presentation_timestamp(
       domain::MediaTime target) {
+    throw_if_still_metadata_seek();
     const std::int64_t seek_timestamp =
         floor_media_time_to_stream_timestamp(target, stream_time_base_);
 
@@ -646,6 +801,7 @@ public:
 
   [[nodiscard]] VideoPresentationVisualSeekResult seek_to_presentation_timestamp_visual(
       domain::MediaTime target) {
+    if (still_) return still_seek(target);
     const std::int64_t seek_timestamp =
         floor_media_time_to_stream_timestamp(target, stream_time_base_);
 
@@ -703,6 +859,55 @@ private:
     Draining,
     Finished,
   };
+
+  void throw_if_still_metadata_seek() const {
+    if (still_) {
+      throw MediaDecodeError{MediaDecodeErrorCode::SeekUnsupported,
+                             "still pictures only support presentation seeks"};
+    }
+  }
+
+  // Decodes the picture once; every later request is answered from the held frame.
+  void ensure_still_loaded() {
+    if (still_frame_.has_value()) return;
+    auto raw = decode_next_visual_raw();
+    if (!raw.has_value() || !raw->frame.valid()) {
+      throw MediaDecodeError{MediaDecodeErrorCode::DecodeFailed,
+                             "the image could not be decoded"};
+    }
+    FramePtr upright = make_still_frame(raw->frame.impl_->frame());
+    const auto origin = stream_start_timestamp_.value_or(domain::MediaTime{0, stream_time_base_});
+    still_frame_ = DecodedVisualVideoFrame{
+        1, stream_index_, image_descriptor(*upright), origin,
+        FFmpegVideoFrameLease{std::make_shared<const FFmpegVideoFrameLease::Impl>(std::move(upright))}};
+  }
+
+  // Sequential read: the picture once, then end of stream.
+  [[nodiscard]] std::optional<DecodedVisualVideoFrame> still_next() {
+    ensure_still_loaded();
+    if (still_delivered_) return std::nullopt;
+    still_delivered_ = true;
+    return fresh_still();
+  }
+
+  // Same picture, new identity: the consumer's visual mailbox hands each frame out once, so
+  // every delivery (a seek back into the held picture, for instance) must be a new "frame".
+  [[nodiscard]] DecodedVisualVideoFrame fresh_still() {
+    DecodedVisualVideoFrame frame = *still_frame_;
+    frame.physical_frame_id = next_visual_frame_id_++;
+    return frame;
+  }
+
+  // The picture is the frame at every instant from its start onwards.
+  [[nodiscard]] VideoPresentationVisualSeekResult still_seek(domain::MediaTime target) {
+    ensure_still_loaded();
+    if (target < *still_frame_->presentation_timestamp) {
+      still_delivered_ = false;
+      return VideoPresentationVisualSeekResult{target, std::nullopt, fresh_still(), 1};
+    }
+    still_delivered_ = true;
+    return VideoPresentationVisualSeekResult{target, fresh_still(), std::nullopt, 1};
+  }
 
   [[nodiscard]] std::optional<DecodedVideoFrameInfo> receive_pending_frame() {
     const int receive_result = avcodec_receive_frame(codec_context_.get(), frame_.get());
@@ -880,6 +1085,9 @@ private:
   // seeks, which flush codec state but do not restart the namespace.
   std::uint64_t next_visual_frame_id_{1};
   State state_{State::Reading};
+  bool still_{false};
+  bool still_delivered_{false};
+  std::optional<DecodedVisualVideoFrame> still_frame_;
   bool has_pending_packet_{false};
   bool pending_send_was_blocked_{false};
 };
@@ -898,6 +1106,8 @@ FFmpegVideoDecodeSession& FFmpegVideoDecodeSession::operator=(
 std::optional<DecodedVideoFrameInfo> FFmpegVideoDecodeSession::decode_next() {
   return impl_->decode_next();
 }
+
+bool FFmpegVideoDecodeSession::is_still() const noexcept { return impl_->is_still(); }
 
 std::optional<DecodedVisualVideoFrame> FFmpegVideoDecodeSession::decode_next_visual() {
   return impl_->decode_next_visual();

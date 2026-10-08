@@ -1626,6 +1626,105 @@ void titles_in_the_session_and_ripple() {
   assert(!session.can_ripple_delete());
 }
 
+void duplicate_and_fades_in_the_session() {
+  EditorSession session;
+  const auto media = session.processor().import_asset("v.mp4", SecondsProbe{20});
+  const auto a = session.processor().add_clip(media, TimeRange{secs(2), secs(6)}, MediaTime::zero());   // 4 s on 0..4
+  session.processor().set_clip_audio_gain(a, -3.0);
+  session.synchronize_document_state();
+  session.select_clip(a);
+
+  // ---- Fades: one undo step, exact values, refused where there is no sound -------------------
+  const auto half = MediaTime{500, Rational{1, 1000}};
+  const auto undo_before = session.processor().undo_size();
+  session.set_clip_fades(a, half, secs(1));
+  assert(session.processor().undo_size() == undo_before + 1);
+  assert(session.document().timeline().find_clip(a)->fade_in() == half && session.document().timeline().find_clip(a)->fade_out() == secs(1));
+  session.set_clip_fades(a, half, secs(1));                                           // unchanged: no history entry
+  assert(session.processor().undo_size() == undo_before + 1);
+  assert(session.undo() && session.document().timeline().find_clip(a)->fade_in() == MediaTime::zero());
+  assert(session.redo() && session.document().timeline().find_clip(a)->fade_out() == secs(1));
+  bool refused = false;
+  try { session.set_clip_fades(a, secs(61), MediaTime::zero()); } catch (const desktop::FadeException& e) { refused = e.code() == desktop::FadeError::TooLong; }
+  assert(refused);
+
+  // ---- They survive save/reopen (version 4 only when there are fades) ------------------------
+  const auto bytes = application::ProjectCodec::encode(session.document().snapshot());
+  assert(bytes.rfind("PULSAR_PROJECT 4\n", 0) == 0 && bytes.find("CLIP_FADE") != std::string::npos);
+  const auto restored = application::ProjectDocument::restore(application::ProjectCodec::decode(bytes));
+  assert(restored.timeline().find_clip(a)->fade_in() == half && restored.timeline().find_clip(a)->fade_out() == secs(1));
+  assert(restored.timeline().find_clip(a)->audio_gain_db() == -3.0);
+  assert(application::ProjectCodec::encode(restored.snapshot()) == bytes);
+
+  // ---- Split: the left half keeps the fade-in, the right half the fade-out --------------------
+  session.seek(secs(2));
+  const auto right = session.split_selected_at_playhead();
+  assert(session.document().timeline().find_clip(a)->fade_in() == half && session.document().timeline().find_clip(a)->fade_out() == MediaTime::zero());
+  assert(session.document().timeline().find_clip(right)->fade_in() == MediaTime::zero() && session.document().timeline().find_clip(right)->fade_out() == secs(1));
+  assert(session.undo());
+
+  // ---- Duplicate: right after the original, same settings, one undo step ---------------------
+  session.select_clip(a);
+  const auto before = layout_signature(session);
+  const auto undo_mark = session.processor().undo_size();
+  session.duplicate_selected();
+  const auto copy = *session.selected_clip();
+  assert(copy != a);
+  const auto* original_clip = session.document().timeline().find_clip(a);
+  const auto* copied_clip = session.document().timeline().find_clip(copy);
+  assert(copied_clip->timeline_start() == original_clip->timeline_range().end());
+  assert(copied_clip->source_range().start() == original_clip->source_range().start() && copied_clip->source_range().end() == original_clip->source_range().end());
+  assert(copied_clip->audio_gain_db() == -3.0 && copied_clip->fade_in() == half && copied_clip->fade_out() == secs(1) && !copied_clip->muted());
+  assert(session.processor().undo_size() > undo_mark);
+  assert(session.undo() && session.document().timeline().find_clip(copy) == nullptr && layout_signature(session) == before);   // ONE step
+  assert(session.redo() && session.document().timeline().find_clip(copy) != nullptr);
+
+  // No room: the original is followed by the copy; duplicating the first again must refuse.
+  session.select_clip(a);
+  bool no_room = false;
+  try { session.duplicate_selected(); } catch (const desktop::DuplicateException& e) { no_room = e.code() == desktop::DuplicateError::NoSpace; }
+  assert(no_room && session.document().timeline().find_clip(a) != nullptr);
+
+  // Nothing selected.
+  session.select_clip(std::nullopt);
+  bool nothing = false;
+  try { session.duplicate_selected(); } catch (const desktop::DuplicateException& e) { nothing = e.code() == desktop::DuplicateError::NothingSelected; }
+  assert(nothing);
+
+  // Titles duplicate too, and refuse when the next title is in the way.
+  session.seek(secs(1));
+  const auto title = session.add_title_at_playhead();
+  session.select_title(title);
+  session.duplicate_selected();
+  assert(session.titles().size() == 2 && session.titles()[1].start() == session.titles()[0].end() && session.titles()[1].text() == session.titles()[0].text());
+  session.select_title(session.titles()[0].id());
+  bool title_blocked = false;
+  try { session.duplicate_selected(); } catch (const desktop::DuplicateException& e) { title_blocked = e.code() == desktop::DuplicateError::NoSpace; }
+  assert(title_blocked && session.titles().size() == 2);
+
+  // A photo has no sound to fade.
+  EditorSession stills;
+  class StillProbe final : public MediaProbe {
+  public:
+    MediaProbeResult probe(const std::filesystem::path& path) const override {
+      MediaProbeResult result;
+      result.path = path;
+      result.container_name = "png_pipe";
+      result.video_streams.push_back(VideoStreamInfo{0, "png", 640, 360, Rational{1, 25}, secs(3600), domain::FrameRate{30, 1}});
+      return result;
+    }
+  };
+  const auto photo = stills.processor().import_asset("p.png", StillProbe{});
+  const auto photo_clip = stills.insert_video_asset(photo, MediaTime::zero());
+  assert(stills.document().timeline().find_clip(photo_clip)->duration() == secs(5));
+  bool no_audio = false;
+  try { stills.set_clip_fades(photo_clip, half, MediaTime::zero()); } catch (const desktop::FadeException& e) { no_audio = e.code() == desktop::FadeError::NoAudio; }
+  assert(no_audio);
+  stills.select_clip(photo_clip);
+  stills.duplicate_selected();                                                       // a photo duplicates like any clip
+  assert(stills.timeline_duration() == secs(10));
+}
+
 int main() {
   viewport_is_exactly_guarded();
   zoom_and_pan_preserve_editorial_time_mapping();
@@ -1678,5 +1777,6 @@ int main() {
   trim_to_playhead_q_and_w();
   select_adjacent_clip_follows_editorial_order();
   titles_in_the_session_and_ripple();
+  duplicate_and_fades_in_the_session();
   return 0;
 }

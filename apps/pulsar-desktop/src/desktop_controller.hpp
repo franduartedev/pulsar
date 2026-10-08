@@ -43,6 +43,7 @@
 #include <vector>
 
 class WaveformQuickItem;
+class QSoundEffect;
 
 class DesktopController final : public QObject {
   Q_OBJECT
@@ -90,6 +91,10 @@ class DesktopController final : public QObject {
   Q_PROPERTY(QString selectedClipKey READ selectedClipKey NOTIFY timelineChanged)
   Q_PROPERTY(double selectedClipGainDb READ selectedClipGainDb NOTIFY timelineChanged)
   Q_PROPERTY(bool selectedClipMuted READ selectedClipMuted NOTIFY timelineChanged)
+  Q_PROPERTY(double selectedClipFadeIn READ selectedClipFadeIn NOTIFY timelineChanged)    // seconds
+  Q_PROPERTY(double selectedClipFadeOut READ selectedClipFadeOut NOTIFY timelineChanged)  // seconds
+  Q_PROPERTY(bool canDuplicate READ canDuplicate NOTIFY timelineChanged)
+  Q_PROPERTY(QString selectedClipKind READ selectedClipKind NOTIFY timelineChanged)   // video | image | color | audio | ""
   Q_PROPERTY(bool selectedClipHasAudio READ selectedClipHasAudio NOTIFY timelineChanged)
   Q_PROPERTY(bool snapEnabled READ snapEnabled WRITE setSnapEnabled NOTIFY snapEnabledChanged)
   Q_PROPERTY(bool canSplit READ canSplit NOTIFY editActionStateChanged)
@@ -154,6 +159,10 @@ public:
   [[nodiscard]] QString selectedClipKey() const { return selected_clip_key_; }
   [[nodiscard]] double selectedClipGainDb() const;
   [[nodiscard]] bool selectedClipMuted() const;
+  [[nodiscard]] QString selectedClipKind() const;
+  [[nodiscard]] double selectedClipFadeIn() const;
+  [[nodiscard]] double selectedClipFadeOut() const;
+  [[nodiscard]] bool canDuplicate() const { return active_session_ && active_session_->can_duplicate_selected(); }
   [[nodiscard]] bool selectedClipHasAudio() const {
     return active_session_ && active_session_->selected_clip().has_value() &&
            active_session_->clip_has_audio(*active_session_->selected_clip());
@@ -186,6 +195,7 @@ public:
   Q_INVOKABLE void pause();
   Q_INVOKABLE void seekNormalized(double value);
   Q_INVOKABLE void seekToStart();
+  Q_INVOKABLE void stepFrame(int direction);   // -1 / +1: one frame of the clip under the playhead
   Q_INVOKABLE void seekToEnd();
   Q_INVOKABLE void closeMedia();
   Q_INVOKABLE void selectTimelineClip(const QString& clip_key);
@@ -211,6 +221,8 @@ public:
   Q_INVOKABLE void separateSelectedAudio();
   Q_INVOKABLE void setSelectedClipGainDb(double gain_db);
   Q_INVOKABLE void toggleSelectedClipMute();
+  Q_INVOKABLE void setSelectedClipFades(double fade_in_seconds, double fade_out_seconds);
+  Q_INVOKABLE void duplicateSelected();
   // ---- Drag & drop from the library. `lane` is the index of the timeline track under the
   // cursor, `pixel` the x inside the timeline area. The preview and the drop share one resolver,
   // so what the ghost shows is exactly what lands (snapping included).
@@ -230,6 +242,7 @@ public:
   Q_INVOKABLE void setSelectedTitleText(const QString& text);
   // colour "#RRGGBB"; h: 0 left 1 centre 2 right; v: 0 top 1 middle 2 bottom; size in 2..20 % of the height
   Q_INVOKABLE void setSelectedTitleStyle(int size_percent, const QString& color, int horizontal, int vertical, bool shadow);
+  Q_INVOKABLE void setSelectedTitleLook(int background, int opacity_percent);   // 0 none / 1 dark / 2 light box
   Q_INVOKABLE QVariantMap previewTitleMove(const QString& key, double press, double current, double width);
   Q_INVOKABLE void moveTitle(const QString& key, double press, double current, double width);
   Q_INVOKABLE QVariantMap previewTitleTrim(const QString& key, bool trim_start, double pixel, double width);
@@ -249,6 +262,7 @@ public:
   Q_INVOKABLE void undoEdit();
   Q_INVOKABLE void redoEdit();
   Q_INVOKABLE void insertBuiltinSound(const QString& sound_id);
+  Q_INVOKABLE void auditionSound(const QString& sound_id);   // plays a library sound (not part of the project)
   // Returns true only when the project was written; the dirty state is cleared only then.
   Q_INVOKABLE bool saveProject(const QString& path);
   // Returns false (and keeps the current project untouched) if the file cannot be opened.
@@ -258,6 +272,7 @@ public:
   Q_INVOKABLE void selectAsset(const QString& media_id);
   Q_INVOKABLE void insertAssetAtPlayhead(const QString& media_id);
   Q_INVOKABLE void appendAssetToVideoTrack(const QString& media_id);
+  Q_INVOKABLE void createColorCard(const QString& color);   // "#rrggbb": a 5 s colour clip
   // Save / export destination helpers (see PathPromptDialog).
   Q_INVOKABLE QString suggestedPath(const QString& purpose) const;
   Q_INVOKABLE QString normalizeSavePath(const QString& text, const QString& extension) const;
@@ -357,6 +372,7 @@ private:
   QVariantList sound_library_;
   struct BuiltinSound { std::string id; std::string name; std::string category; std::int64_t duration_frames; };
   std::unordered_map<std::string, BuiltinSound> builtin_sounds_;
+  std::unique_ptr<QSoundEffect> audition_;
   std::unordered_map<std::string, std::string> waveform_clip_identities_;
   std::unordered_map<WaveformQuickItem*, WaveformItemStamp> waveform_item_stamps_;
   std::filesystem::path waveform_cache_directory_;
@@ -397,7 +413,7 @@ private:
   [[nodiscard]] std::vector<pulsar::domain::MediaTime> titleSnapEdges(std::optional<pulsar::domain::TitleId> exclude) const;
   void commitTitle(pulsar::domain::Title title);
   struct DropResolution { bool valid{false}; QString reason; pulsar::domain::MediaId media{1}; pulsar::domain::TrackId track{1};
-                          bool video{false}; pulsar::domain::MediaTime start{pulsar::domain::MediaTime::zero()}; pulsar::domain::MediaTime duration{pulsar::domain::MediaTime::zero()}; };
+                          bool video{false}; bool new_track{false}; pulsar::domain::MediaTime start{pulsar::domain::MediaTime::zero()}; pulsar::domain::MediaTime duration{pulsar::domain::MediaTime::zero()}; };
   [[nodiscard]] DropResolution resolveAssetDrop(const QString& media_id, int lane, double pixel, double width) const;
   MediaAssetListModel asset_model_;
   QString selected_asset_id_;

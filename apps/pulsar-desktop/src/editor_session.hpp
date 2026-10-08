@@ -150,6 +150,38 @@ private:
   TitleError code_;
 };
 
+enum class DuplicateError {
+  NothingSelected,
+  NoSpace,  // the copy goes right after the original and something else is already there
+};
+
+class DuplicateException final : public std::invalid_argument {
+public:
+  DuplicateException(DuplicateError code, const char* message) : std::invalid_argument{message}, code_{code} {}
+  [[nodiscard]] DuplicateError code() const noexcept { return code_; }
+
+private:
+  DuplicateError code_;
+};
+
+enum class FadeError {
+  NoClip,
+  NoAudio,   // the clip has no sound to fade (a photo, a colour card, a silenced clip)
+  TooLong,
+};
+
+class FadeException final : public std::invalid_argument {
+public:
+  FadeException(FadeError code, const char* message) : std::invalid_argument{message}, code_{code} {}
+  [[nodiscard]] FadeError code() const noexcept { return code_; }
+
+private:
+  FadeError code_;
+};
+
+// Names shown on the timeline for the built-in sounds (the catalogue's interface-language names).
+void register_builtin_sound_display_name(std::string sound_id, std::string name);
+
 class EditorSession final {
 public:
   EditorSession();
@@ -208,6 +240,13 @@ public:
   void trim_clip_end(domain::ClipId clip, domain::MediaTime timeline_end);
   void set_clip_audio_gain(domain::ClipId clip, double gain_db);
   void set_clip_muted(domain::ClipId clip, bool muted);
+  // Linear audio fades of a clip with sound (zero = none). One undo step.
+  void set_clip_fades(domain::ClipId clip, domain::MediaTime fade_in, domain::MediaTime fade_out);
+  // "Duplicar": a copy of the selected clip (or title) right after the original, on the same
+  // track, with the same source range, gain, mute and fades. One undo step; the copy becomes the
+  // selection. Throws DuplicateException{NoSpace} (nothing changes) when the room is taken.
+  [[nodiscard]] bool can_duplicate_selected() const noexcept { return selected_clip_.has_value() || selected_title_.has_value(); }
+  void duplicate_selected();
   [[nodiscard]] bool can_split() const;
   [[nodiscard]] domain::ClipId split_selected_at_playhead();
   void delete_selected();
@@ -255,6 +294,12 @@ public:
   // Same contract as the video ingest: overlap throws NoSpace and changes nothing.
   [[nodiscard]] domain::ClipId insert_audio_asset(domain::MediaId media, domain::TrackId audio_track,
                                                   domain::MediaTime timeline_start);
+  // Library "Insertar" for audio: the first audio track with room at `timeline_start`, or a NEW audio
+  // track when every existing one is busy there (so music and sounds can always be placed). One undo
+  // step; same refusals as insert_audio_asset. `force_new_track` always makes a new track (drop below
+  // the last lane).
+  [[nodiscard]] domain::ClipId insert_audio_asset_auto(domain::MediaId media, domain::MediaTime timeline_start,
+                                                       bool force_new_track = false);
   // Appends right after the last clip of VIDEO 1 (zero when it is empty).
   [[nodiscard]] domain::ClipId append_video_asset(domain::MediaId media);
   // End of the last clip on VIDEO 1: the authority for "append", independent of

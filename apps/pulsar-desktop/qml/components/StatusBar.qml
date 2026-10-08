@@ -4,20 +4,25 @@ import "../theme/Theme.js" as Theme
 // One quiet line: shortcuts on the left, the single global status on the right.
 Item {
     id: bar
+    signal aboutRequested()
     readonly property bool hasError: controller.errorMessage.length > 0
     readonly property string statusText: {
         if (hasError) return controller.errorMessage
         if (controller.exportRunning) return "Exportando " + Math.round(controller.exportProgress * 100) + "%"
         if (controller.busy) return "Procesando…"
         if (controller.status.indexOf("Proyecto guardado") === 0) return controller.status
-        if (controller.exportStatus.length > 0) return controller.exportStatus
+        if (controller.exportStatus.length > 0) {
+            var path = controller.exportDestination
+            var name = path.length > 0 ? path.substring(path.lastIndexOf("/") + 1) : ""
+            return controller.exportStatus.indexOf("completada") >= 0 && name.length > 0 ? "Video exportado: " + name : controller.exportStatus
+        }
         return controller.playing ? "Reproduciendo" : "Listo"
     }
 
     Text {
         anchors.left: parent.left; anchors.leftMargin: Theme.spaceM
         anchors.verticalCenter: parent.verticalCenter
-        text: "Espacio  Reproducir   ·   S  Cortar   ·   Supr  Borrar   ·   Ctrl+Z  Deshacer   ·   Ctrl+S  Guardar"
+        text: "Espacio  Reproducir   ·   S  Cortar   ·   T  Título   ·   Ctrl+D  Duplicar   ·   Supr  Borrar   ·   Ctrl+Z  Deshacer   ·   Ctrl+S  Guardar"
         color: Theme.textMuted
         font.pixelSize: Theme.fontSizeXS
         elide: Text.ElideRight
@@ -30,6 +35,7 @@ Item {
         text: controller.appVersion
         color: Theme.textMuted
         font.pixelSize: Theme.fontSizeXS
+        MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: bar.aboutRequested() }
     }
     Row {
         id: statusRow

@@ -30,6 +30,8 @@ struct AudioContributor {
   int sample_rate;
   int channel_count;
   domain::Rational time_base;
+  domain::MediaTime fade_in{domain::MediaTime::zero()};
+  domain::MediaTime fade_out{domain::MediaTime::zero()};
 };
 
 struct UnavailableAudioContributor {

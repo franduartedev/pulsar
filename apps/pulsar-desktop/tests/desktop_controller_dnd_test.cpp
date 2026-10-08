@@ -100,6 +100,26 @@ int main(int argc, char** argv) {
   controller.redoEdit();
   REQUIRE(20, clips(controller) == clips_before + 1);
 
+  {
+    // Music with NO audio track yet (batch import keeps it in the library): a drop under the last lane
+    // and "Insertar" both make a track, as one undo step; footage cannot go there.
+    DesktopController fresh{provider, {}};
+    fresh.openPaths(QStringList{q(root / "a.mp4"), q(root / "music.wav")});
+    REQUIRE(30, wait_until([&] { return assets(fresh) == 2 && !fresh.busy() && fresh.importPending() == 0; }) && fresh.timelineTracks().size() == 1);
+    const auto fresh_music = asset_id(fresh, 1);
+    const auto fresh_video = asset_id(fresh, 0);
+    const int lane_below = static_cast<int>(fresh.timelineTracks().size());
+    REQUIRE(31, !fresh.previewAssetDrop(fresh_video, lane_below, 100.0, width).value("valid").toBool());
+    REQUIRE(32, fresh.previewAssetDrop(fresh_music, lane_below, 100.0, width).value("valid").toBool());
+    REQUIRE(33, fresh.dropAsset(fresh_music, lane_below, 100.0, width) && fresh.timelineTracks().size() == 2 && clips(fresh) == 2);
+    fresh.undoEdit();
+    REQUIRE(34, fresh.timelineTracks().size() == 1 && clips(fresh) == 1);               // track + clip: ONE undo step
+    fresh.insertAssetAtPlayhead(fresh_music);
+    REQUIRE(35, fresh.errorMessage().isEmpty() && fresh.timelineTracks().size() == 2 && clips(fresh) == 2);
+    fresh.insertAssetAtPlayhead(fresh_music);                                            // busy at the playhead: a third track
+    REQUIRE(36, fresh.errorMessage().isEmpty() && fresh.timelineTracks().size() == 3 && clips(fresh) == 3);
+  }
+
   fs::remove_all(root);
   return 0;
 }

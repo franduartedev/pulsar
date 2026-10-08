@@ -56,6 +56,7 @@ Item {
             Text { anchors.horizontalCenter: parent.horizontalCenter; text: "PULSAR"; color: Theme.textMuted; font.pixelSize: mat.height < 180 ? 18 : Theme.fontSizeXXL; font.bold: true; font.letterSpacing: 6 }
             Text { anchors.horizontalCenter: parent.horizontalCenter; text: controller.busy ? "Preparando medio…" : "Importá un medio para comenzar"; color: Theme.textSecondary; font.pixelSize: Theme.fontSizeM }
             PButton { anchors.horizontalCenter: parent.horizontalCenter; visible: !controller.busy; primary: true; text: "Importar medio"; onClicked: pane.importRequested() }
+            Text { anchors.horizontalCenter: parent.horizontalCenter; visible: !controller.busy && mat.height >= 220; text: "También podés arrastrar videos, fotos, música o una carpeta a esta ventana."; color: Theme.textMuted; font.pixelSize: Theme.fontSizeXS }
         }
         Text {
             anchors.centerIn: parent

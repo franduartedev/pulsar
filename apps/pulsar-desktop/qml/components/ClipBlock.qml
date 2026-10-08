@@ -20,11 +20,23 @@ Rectangle {
     property bool audioClip: false
     property bool hasAudio: false
     property string thumbSource: ""
+    // "video" | "image" | "color" | "audio"; fades are fractions of the clip width.
+    property string kind: "video"
+    property real fadeIn: 0
+    property real fadeOut: 0
+    readonly property bool isCard: kind === "color"
+    readonly property bool isStill: kind === "image" || kind === "color"
+    readonly property string cardColor: isCard && clipName.length >= 6 ? "#" + clipName.substring(clipName.length - 6) : ""
+    // The label without its file extension, elided in the middle so "clip_01" and "clip_14" stay apart.
+    readonly property string shownName: isCard ? "Color" : clipName.replace(/\.[A-Za-z0-9]{2,5}$/, "")
     // One picture per video clip, at the left, only when the clip is wide/tall enough to
     // keep the name and waveform readable. Decoration: absent thumbnail = plain clip.
     readonly property real thumbH: Math.max(0, height - 6)
     readonly property real thumbW: Math.round(thumbH * 16 / 9)
-    readonly property bool showThumb: !audioClip && !missing && thumbSource.length > 0 && thumbH >= 24 && width > thumbW + 110
+    // Wide clips: a picture tile at the left. Narrow ones: the same picture as a dimmed backdrop, so
+    // a long timeline still shows what each clip is. Colour cards are just their colour.
+    readonly property bool showThumb: !audioClip && !missing && !isCard && thumbSource.length > 0 && thumbH >= 24 && width > thumbW + 110
+    readonly property bool showBackdrop: !audioClip && !missing && !isCard && !showThumb && thumbSource.length > 0 && thumbH >= 24 && width >= 28
     readonly property real contentX: showThumb ? thumbW + 6 : 0
     property real canonicalStartX: 0
     property real canonicalWidth: 3
@@ -52,9 +64,10 @@ Rectangle {
     x: canonicalStartX + previewOffset
     width: Math.max(3, canonicalWidth + trimWidthDelta)
     color: missing ? Theme.clipMissing
-         : (selected ? (audioClip ? Theme.clipAudioSelected : Theme.clipVideoSelected)
-         : (body.containsMouse ? (audioClip ? Theme.clipAudioHover : Theme.clipVideoHover)
-         : (audioClip ? Theme.clipAudio : Theme.clipVideo)))
+         : isCard ? cardColor
+         : (selected ? (audioClip ? Theme.clipAudioSelected : (isStill ? Theme.clipImageSelected : Theme.clipVideoSelected))
+         : (body.containsMouse ? (audioClip ? Theme.clipAudioHover : (isStill ? Theme.clipImageHover : Theme.clipVideoHover))
+         : (audioClip ? Theme.clipAudio : (isStill ? Theme.clipImage : Theme.clipVideo))))
     // Selection is the only outline; rest and hover stay borderless.
     border.color: missing ? Theme.error : Theme.accent
     border.width: selected ? 2 : (missing ? 1 : 0)
@@ -69,6 +82,16 @@ Rectangle {
         anchors.right: parent.right; anchors.top: parent.top
         height: block.nameStripHeight
         color: "#33000000"
+    }
+    Image {
+        visible: block.showBackdrop
+        anchors.fill: parent
+        source: block.showBackdrop ? "image://pulsar-thumb/" + block.thumbSource : ""
+        asynchronous: true
+        cache: true
+        fillMode: Image.PreserveAspectCrop
+        sourceSize.width: 160; sourceSize.height: 90
+        opacity: 0.55
     }
     Image {
         visible: block.showThumb
@@ -87,11 +110,13 @@ Rectangle {
         anchors.top: parent.top
         height: block.nameStripHeight
         verticalAlignment: Text.AlignVCenter
-        text: block.clipName
-        color: Theme.textPrimary
+        text: block.shownName
+        // A colour card can be any colour: pick the label ink that reads on it.
+        color: block.isCard ? (Qt.color(block.cardColor).hslLightness > 0.6 ? "#101419" : "#ffffff") : Theme.textPrimary
         font.pixelSize: Theme.fontSizeXS
         font.bold: true
-        elide: Text.ElideRight
+        // Wide clips keep the start of the name; narrow ones keep its END, where file names differ (clip_07).
+        elide: block.width < 130 ? Text.ElideLeft : Text.ElideRight
     }
 
     // Waveform lane. Audio-only clips use the whole body; video clips keep the
@@ -116,6 +141,36 @@ Rectangle {
         visible: width >= 10 && height >= 8
         Component.onCompleted: controller.attachWaveformItem(block.clipKey, waveform)
         Component.onDestruction: controller.detachWaveformItem(waveform)
+    }
+
+    // Fades: translucent ramps over the clip's sound, drawn only when a fade exists.
+    Canvas {
+        id: fadeCanvas
+        visible: (block.fadeIn > 0 || block.fadeOut > 0) && block.width > 30
+        anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom
+        anchors.top: parent.top; anchors.topMargin: block.nameStripHeight
+        onVisibleChanged: requestPaint()
+        onWidthChanged: requestPaint()
+        onHeightChanged: requestPaint()
+        Connections { target: block; function onFadeInChanged() { fadeCanvas.requestPaint() } function onFadeOutChanged() { fadeCanvas.requestPaint() } }
+        onPaint: {
+            var ctx = getContext("2d")
+            ctx.reset()
+            ctx.fillStyle = "#66000000"
+            var w = width, h = height
+            if (block.fadeIn > 0) {
+                var fw = Math.min(w, block.fadeIn * block.width)
+                ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(fw, 0); ctx.lineTo(0, h); ctx.closePath(); ctx.fill()
+                ctx.strokeStyle = "#ccffffff"; ctx.lineWidth = 1
+                ctx.beginPath(); ctx.moveTo(0, h); ctx.lineTo(fw, 0); ctx.stroke()
+            }
+            if (block.fadeOut > 0) {
+                var ow = Math.min(w, block.fadeOut * block.width)
+                ctx.beginPath(); ctx.moveTo(w, 0); ctx.lineTo(w - ow, 0); ctx.lineTo(w, h); ctx.closePath(); ctx.fill()
+                ctx.strokeStyle = "#ccffffff"; ctx.lineWidth = 1
+                ctx.beginPath(); ctx.moveTo(w - ow, 0); ctx.lineTo(w, h); ctx.stroke()
+            }
+        }
     }
 
     // Only states that are not the default: mute, offline.

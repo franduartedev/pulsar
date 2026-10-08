@@ -50,7 +50,11 @@ std::optional<pulsar::application::composition::TitleRaster> QtTitleRasterizer::
   const QString text = QString::fromUtf8(title.text().data(), static_cast<qsizetype>(title.text().size()));
   const int side_margin = static_cast<int>(std::lround(canvas_width * 0.05));
   const int vertical_margin = static_cast<int>(std::lround(canvas_height * 0.06));
-  const double max_width = std::max(16, canvas_width - 2 * side_margin);
+  // A background box grows the title; keep the whole box inside the safe margins.
+  const bool boxed = title.background() != pulsar::domain::TitleBackground::None;
+  const int box_pad_x = boxed ? static_cast<int>(std::lround(font_px * 0.45)) : 0;
+  const int box_pad_y = boxed ? static_cast<int>(std::lround(font_px * 0.25)) : 0;
+  const double max_width = std::max(16, canvas_width - 2 * side_margin - 2 * box_pad_x);
   const int qt_alignment = title.horizontal() == TitleHAlign::Left ? Qt::AlignLeft
                           : title.horizontal() == TitleHAlign::Right ? Qt::AlignRight : Qt::AlignHCenter;
   const int flags = qt_alignment | Qt::TextWordWrap;
@@ -65,8 +69,8 @@ std::optional<pulsar::application::composition::TitleRaster> QtTitleRasterizer::
   const int pad = static_cast<int>(std::ceil(font_px * 0.12)) + shadow_offset + 2;
   const int text_w = std::min(static_cast<int>(std::ceil(bounds.width())) + 2, canvas_width);
   const int text_h = static_cast<int>(std::ceil(bounds.height())) + 2;
-  const int image_w = text_w + 2 * pad;
-  const int image_h = text_h + 2 * pad;
+  const int image_w = text_w + 2 * (pad + box_pad_x);
+  const int image_h = text_h + 2 * (pad + box_pad_y);
   if (image_w <= 0 || image_h <= 0 || static_cast<long long>(image_w) * image_h > 64LL * 1024 * 1024) return std::nullopt;
 
   QImage image{image_w, image_h, QImage::Format_RGBA8888_Premultiplied};
@@ -75,7 +79,16 @@ std::optional<pulsar::application::composition::TitleRaster> QtTitleRasterizer::
   painter.setRenderHint(QPainter::Antialiasing, true);
   painter.setRenderHint(QPainter::TextAntialiasing, true);
   painter.setFont(font);
-  const QRectF draw_rect{static_cast<double>(pad), static_cast<double>(pad), static_cast<double>(text_w), static_cast<double>(text_h)};
+  painter.setOpacity(title.opacity_percent() / 100.0);   // text, shadow and box fade together
+  if (boxed) {
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(title.background() == pulsar::domain::TitleBackground::Dark ? QColor{0, 0, 0, 165}
+                                                                                  : QColor{255, 255, 255, 215});
+    painter.drawRoundedRect(QRectF{static_cast<double>(pad), static_cast<double>(pad),
+                                   static_cast<double>(text_w + 2 * box_pad_x), static_cast<double>(text_h + 2 * box_pad_y)},
+                            font_px * 0.22, font_px * 0.22);
+  }
+  const QRectF draw_rect{static_cast<double>(pad + box_pad_x), static_cast<double>(pad + box_pad_y), static_cast<double>(text_w), static_cast<double>(text_h)};
   if (title.shadow()) {
     painter.setPen(QColor{0, 0, 0, 170});
     painter.drawText(draw_rect.translated(shadow_offset, shadow_offset), flags, text);
@@ -89,12 +102,14 @@ std::optional<pulsar::application::composition::TitleRaster> QtTitleRasterizer::
   pulsar::application::composition::TitleRaster raster;
   raster.width = image_w;
   raster.height = image_h;
+  const int full_w = text_w + 2 * box_pad_x;     // the visible block: text plus its box, if any
+  const int full_h = text_h + 2 * box_pad_y;
   const int box_x = title.horizontal() == TitleHAlign::Left ? side_margin
-                   : title.horizontal() == TitleHAlign::Right ? canvas_width - side_margin - text_w
-                                                              : (canvas_width - text_w) / 2;
+                   : title.horizontal() == TitleHAlign::Right ? canvas_width - side_margin - full_w
+                                                              : (canvas_width - full_w) / 2;
   const int box_y = title.vertical() == TitleVAlign::Top ? vertical_margin
-                   : title.vertical() == TitleVAlign::Middle ? (canvas_height - text_h) / 2
-                                                            : canvas_height - vertical_margin - text_h;
+                   : title.vertical() == TitleVAlign::Middle ? (canvas_height - full_h) / 2
+                                                            : canvas_height - vertical_margin - full_h;
   raster.x = box_x - pad;
   raster.y = box_y - pad;
   raster.premultiplied_rgba.resize(static_cast<std::size_t>(image_w) * image_h * 4);

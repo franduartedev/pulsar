@@ -32,6 +32,9 @@ public:
     AudioTrackRole,
     HasAudioRole,
     ThumbSourceRole,
+    KindRole,       // "video" | "image" | "color" | "audio"
+    FadeInRole,     // fraction of the clip width
+    FadeOutRole,
   };
 
   explicit TimelineClipListModel(QObject* parent = nullptr);
@@ -64,6 +67,9 @@ private:
     bool audio_track{false};
     bool has_audio{false};
     QString thumb_source;
+    QString kind;
+    double fade_in{0.0};
+    double fade_out{0.0};
   };
   std::vector<Row> rows_;
 };

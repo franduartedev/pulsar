@@ -135,7 +135,10 @@ int main(int argc, char** argv) {
   const int clips_with_audio = clips(controller);
   REQUIRE(23, clips_with_audio == 4);
   controller.appendAssetToVideoTrack(asset_id(controller, 3));
-  REQUIRE(24, clips(controller) == clips_with_audio && !controller.errorMessage().isEmpty());
+  // Audio is never placed on VIDEO 1: it goes to an audio track (one undo step), no error.
+  REQUIRE(24, clips(controller) == clips_with_audio + 1 && controller.errorMessage().isEmpty());
+  controller.undoEdit();
+  REQUIRE(24, clips(controller) == clips_with_audio);
 
   // Save, reopen: assets, clips and selection survive.
   const auto project = root / "multi.pulsar";

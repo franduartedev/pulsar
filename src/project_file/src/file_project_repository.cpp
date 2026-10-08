@@ -1,5 +1,6 @@
 #include <pulsar/project_file/file_project_repository.hpp>
 
+#include <pulsar/application/media/still_media.hpp>
 #include <pulsar/application/project/project_codec.hpp>
 #include <pulsar/project_file/runtime_resources.hpp>
 
@@ -61,10 +62,13 @@ void refresh_availability(application::ProjectRestoreState& state,
     const auto authored = asset.source_locator();
     const auto logical = authored.generic_string();
     const bool builtin_sound = logical.starts_with("pulsar-sound:");
+    const bool generated_card = application::is_color_card_locator(logical);
     const auto check_path = authored.is_relative() ? parent / authored : authored;
     std::error_code error;
     bool readable = false;
-    if (builtin_sound) {
+    if (generated_card) {
+      readable = application::color_card_rgb(logical).has_value();   // nothing on disk to check
+    } else if (builtin_sound) {
       const auto filename = logical.substr(std::string{"pulsar-sound:"}.size()) + ".wav";
       const auto root = assets_directory();
       const auto candidate = root / "sounds" / filename;

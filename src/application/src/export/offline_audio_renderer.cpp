@@ -68,6 +68,8 @@ struct OfflineAudioRenderer::ContributorState {
   bool eof{false};
   std::optional<domain::MediaTime> previous_end;
   ClipGain gain;
+  ClipFade fade;
+  std::int64_t first_clip_frame{0};   // output-grid index of the clip's first sample
   // Physical sample indices (stream-origin-relative) that lie inside the
   // half-open editorial source range: first = ceil(start), last = ceil(end) - 1.
   // Interpolation taps are clamped to [first_valid_index, last_valid_index].
@@ -117,9 +119,13 @@ OfflineAudioRenderer::ContributorState& OfflineAudioRenderer::state_for(
   const auto origin = source->stream_origin().value_or(domain::MediaTime::zero());
   auto state = std::make_unique<ContributorState>(ContributorState{
       contributor, std::move(source), origin, {}, false, std::nullopt,
-      ClipGain::from_decibels(contributor.gain_db, contributor.muted)});
+      ClipGain::from_decibels(contributor.gain_db, contributor.muted), ClipFade{}, 0, 0, -1});
   {
     const domain::FrameRate source_grid{state->source->sample_rate(), 1};
+    state->fade = ClipFade::from_times(contributor.fade_in, contributor.fade_out,
+                                       contributor.timeline_range.duration(), 48'000);
+    state->first_clip_frame = domain::frame_at(contributor.timeline_range.start(),
+                                               domain::FrameRate{48'000, 1}, domain::RoundingMode::Ceil).value();
     state->first_valid_index = domain::frame_at(contributor.source_range.start(), source_grid,
                                                 domain::RoundingMode::Ceil).value();
     state->last_valid_index = domain::frame_at(contributor.source_range.end(), source_grid,
@@ -255,7 +261,7 @@ float OfflineAudioRenderer::sample_at_channel(ContributorState& state,
 }
 
 std::array<float, 2> OfflineAudioRenderer::contributor_sample(
-    ContributorState& state, domain::MediaTime timeline_time) {
+    ContributorState& state, domain::MediaTime timeline_time, std::int64_t output_frame) {
   if (!state.contributor.timeline_range.contains(timeline_time)) return {0.0F, 0.0F};
   const auto source_time = contributor_source_position(state.contributor, timeline_time,
                                                        state.stream_origin) - state.stream_origin;
@@ -290,7 +296,8 @@ std::array<float, 2> OfflineAudioRenderer::contributor_sample(
       const auto second = sample_at_channel(state, second_tap_time, channel);
       result[static_cast<std::size_t>(channel)] = static_cast<float>(
           (static_cast<long double>(first) * (1.0L - fraction) +
-           static_cast<long double>(second) * fraction) * state.gain.linear);
+           static_cast<long double>(second) * fraction) * state.gain.linear *
+          (state.fade.active() ? state.fade.gain_at(output_frame - state.first_clip_frame) : 1.0F));
     }
   } catch (const OfflineAudioRenderError& error) {
     // Context is built only on the failure path; nothing is formatted per sample.
@@ -386,7 +393,7 @@ std::optional<OfflineAudioBlock> OfflineAudioRenderer::render_next_block() {
     long double left = 0.0L;
     long double right = 0.0L;
     for (auto* state : states) {
-      const auto value = contributor_sample(*state, timeline_time);
+      const auto value = contributor_sample(*state, timeline_time, first + static_cast<std::int64_t>(offset));
       left += value[0];
       right += value[1];
     }

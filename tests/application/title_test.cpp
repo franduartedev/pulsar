@@ -215,6 +215,48 @@ void compositor_blend_cache_and_failure() {
   assert(frame[0] == 7);
 }
 
+void title_look_rules_and_persistence() {
+  const Title plain{TitleId{1}, "Hola", TimeRange{secs(1), secs(4)}};
+  assert(plain.background() == domain::TitleBackground::None && plain.opacity_percent() == 100);
+  const auto boxed = plain.with_look(domain::TitleBackground::Dark, 60);
+  assert(boxed.background() == domain::TitleBackground::Dark && boxed.opacity_percent() == 60 && boxed.text() == "Hola");
+  assert(boxed.look_key() != plain.look_key());                                    // a new look is a new raster
+  assert(boxed.with_text("Chau").background() == domain::TitleBackground::Dark);   // other edits keep it
+  assert(throws_invalid([&] { (void)plain.with_look(domain::TitleBackground::Dark, 5); }));
+  assert(throws_invalid([&] { (void)plain.with_look(domain::TitleBackground::Dark, 101); }));
+
+  application::ProjectDocument document;
+  application::CommandProcessor processor{document};
+  const auto media = processor.import_asset("v.mp4", Probe{320, 180, 10});
+  (void)processor.add_clip(media, TimeRange{MediaTime::zero(), secs(10)}, MediaTime::zero());
+  (void)processor.add_title(Title{document.next_title_id(), "Uno", TimeRange{secs(1), secs(3)}});
+  processor.replace_title(document.titles()[0].with_look(domain::TitleBackground::Light, 80));
+  (void)processor.add_title(Title{document.next_title_id(), "Dos", TimeRange{secs(5), secs(7)}});
+  const auto bytes = application::ProjectCodec::encode(document.snapshot());
+  assert(bytes.rfind("PULSAR_PROJECT 4\n", 0) == 0 && bytes.find("TITLE_LOOK 1 2 80") != std::string::npos);
+  assert(bytes.find("TITLE_LOOK 2") == std::string::npos);                          // plain titles add nothing
+  const auto restored = application::ProjectDocument::restore(application::ProjectCodec::decode(bytes));
+  assert(restored.titles()[0].background() == domain::TitleBackground::Light && restored.titles()[0].opacity_percent() == 80);
+  assert(restored.titles()[1].background() == domain::TitleBackground::None);
+  assert(application::ProjectCodec::encode(restored.snapshot()) == bytes);
+  // Titles without a look keep the older, smaller version.
+  application::ProjectDocument simple;
+  application::CommandProcessor simple_processor{simple};
+  const auto simple_media = simple_processor.import_asset("v.mp4", Probe{320, 180, 10});
+  (void)simple_processor.add_clip(simple_media, TimeRange{MediaTime::zero(), secs(10)}, MediaTime::zero());
+  (void)simple_processor.add_title(Title{simple.next_title_id(), "Uno", TimeRange{secs(1), secs(3)}});
+  assert(application::ProjectCodec::encode(simple.snapshot()).rfind("PULSAR_PROJECT 3\n", 0) == 0);
+  // Malformed looks are refused.
+  for (const char* bad : {"TITLE_LOOK 9 1 80", "TITLE_LOOK 1 3 80", "TITLE_LOOK 1 1 5", "TITLE_LOOK 1 1"}) {
+    auto text = bytes;
+    const auto at = text.find("TITLE_LOOK 1 2 80");
+    text.replace(at, std::string{"TITLE_LOOK 1 2 80"}.size(), bad);
+    bool refused = false;
+    try { (void)application::ProjectCodec::decode(text); } catch (const application::ProjectCodecError&) { refused = true; }
+    assert(refused);
+  }
+}
+
 void export_preset_sizing() {
   using application::exporting::ExportPlan;
   using application::exporting::ExportProfile;
@@ -277,6 +319,7 @@ int main() {
   title_commands_undo_redo_and_overlap();
   title_project_file_round_trip();
   compositor_blend_cache_and_failure();
+  title_look_rules_and_persistence();
   export_preset_sizing();
   fit_geometry_cases();
   return 0;

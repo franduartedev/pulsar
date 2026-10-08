@@ -42,7 +42,7 @@ void resolve_track(const ProjectSnapshot& snapshot, const domain::Track& track,
         {track.id(), track.kind(), track_order, clip.id(), clip.media_id(),
          asset->source_locator(), audio.stream_index, clip.timeline_range(), clip.source_range(),
          std::nullopt, clip.audio_gain_db(), clip.muted(), audio.sample_rate,
-         audio.channel_count, audio.time_base});
+         audio.channel_count, audio.time_base, clip.fade_in(), clip.fade_out()});
   }
 }
 

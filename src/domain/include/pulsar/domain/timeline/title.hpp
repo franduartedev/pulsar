@@ -14,6 +14,8 @@ using TitleId = detail::StrongId<TitleIdTag>;
 
 enum class TitleHAlign : std::uint8_t { Left, Center, Right };
 enum class TitleVAlign : std::uint8_t { Top, Middle, Bottom };
+// A box behind the text (None = just text). Colours are fixed so the look stays consistent.
+enum class TitleBackground : std::uint8_t { None, Dark, Light };
 
 // A static text overlay on the video. Pure data: no fonts, pixels or UI types. The size is
 // stored in permille of the output frame HEIGHT, so the same title looks the same at 720p,
@@ -23,10 +25,13 @@ public:
   static constexpr int minimum_size_permille = 20;
   static constexpr int maximum_size_permille = 200;
   static constexpr std::size_t maximum_text_bytes = 400;
+  static constexpr int minimum_opacity_percent = 10;
+  static constexpr int maximum_opacity_percent = 100;
 
   Title(TitleId id, std::string text, TimeRange range, int size_permille = 70,
         std::uint32_t color_rgba = 0xFFFFFFFFu, TitleHAlign horizontal = TitleHAlign::Center,
-        TitleVAlign vertical = TitleVAlign::Bottom, bool shadow = true);
+        TitleVAlign vertical = TitleVAlign::Bottom, bool shadow = true,
+        TitleBackground background = TitleBackground::None, int opacity_percent = 100);
 
   [[nodiscard]] TitleId id() const noexcept { return id_; }
   [[nodiscard]] const std::string& text() const noexcept { return text_; }
@@ -38,12 +43,16 @@ public:
   [[nodiscard]] TitleHAlign horizontal() const noexcept { return horizontal_; }
   [[nodiscard]] TitleVAlign vertical() const noexcept { return vertical_; }
   [[nodiscard]] bool shadow() const noexcept { return shadow_; }
+  [[nodiscard]] TitleBackground background() const noexcept { return background_; }
+  // Overall opacity of text, shadow and box, in percent.
+  [[nodiscard]] int opacity_percent() const noexcept { return opacity_percent_; }
 
   // Value-style editing: every "with" returns a validated copy.
   [[nodiscard]] Title with_text(std::string text) const;
   [[nodiscard]] Title with_range(TimeRange range) const;
   [[nodiscard]] Title with_style(int size_permille, std::uint32_t color_rgba, TitleHAlign horizontal,
                                  TitleVAlign vertical, bool shadow) const;
+  [[nodiscard]] Title with_look(TitleBackground background, int opacity_percent) const;
 
   // The title is on screen in [start, end).
   [[nodiscard]] bool active_at(MediaTime time) const;
@@ -59,6 +68,8 @@ private:
   TitleHAlign horizontal_;
   TitleVAlign vertical_;
   bool shadow_;
+  TitleBackground background_;
+  int opacity_percent_;
 };
 
 } // namespace pulsar::domain

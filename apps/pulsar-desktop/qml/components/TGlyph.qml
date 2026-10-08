@@ -4,7 +4,7 @@ import "../theme/Theme.js" as Theme
 // Static vector glyph painted once on a Canvas (no icon assets to package).
 // Kinds: transport "home" | "play" | "pause" | "end";
 //        edit "split" | "trash" | "undo" | "redo" | "fit";
-//        media "video" | "audio";  audio state "speaker" | "speaker-off"; "magnet".
+//        media "video" | "audio" | "image";  audio state "speaker" | "speaker-off"; "magnet".
 Item {
     id: glyph
     property string kind: "play"
@@ -114,6 +114,23 @@ Item {
                 ctx.lineWidth = 1.4
                 ctx.fillRect(w * 0.17, h * 0.14, w * 0.14, h * 0.12)
                 ctx.fillRect(w * 0.69, h * 0.14, w * 0.14, h * 0.12)
+            } else if (glyph.kind === "duplicate") {
+                // Two overlapping sheets.
+                ctx.strokeRect(w * 0.14, h * 0.30, w * 0.50, h * 0.56)
+                ctx.strokeRect(w * 0.36, h * 0.14, w * 0.50, h * 0.56)
+            } else if (glyph.kind === "step-back") {
+                // One frame back: a bar and a single triangle (home is bar + triangle too, but with a taller bar).
+                tri(0.66, 0.30, 0.66, 0.70, 0.36, 0.50)
+                ctx.fillRect(w * 0.26, h * 0.30, w * 0.07, h * 0.40)
+            } else if (glyph.kind === "step-forward") {
+                tri(0.34, 0.30, 0.34, 0.70, 0.64, 0.50)
+                ctx.fillRect(w * 0.67, h * 0.30, w * 0.07, h * 0.40)
+            } else if (glyph.kind === "image") {
+                // Picture frame with a sun and two hills.
+                ctx.strokeRect(w * 0.12, h * 0.22, w * 0.76, h * 0.56)
+                ctx.beginPath(); ctx.arc(w * 0.34, h * 0.40, w * 0.07, 0, Math.PI * 2); ctx.fill()
+                tri(0.16, 0.74, 0.40, 0.50, 0.62, 0.74)
+                tri(0.46, 0.74, 0.64, 0.56, 0.84, 0.74)
             } else if (glyph.kind === "video") {
                 ctx.strokeRect(w * 0.12, h * 0.24, w * 0.76, h * 0.52)
                 tri(0.43, 0.38, 0.43, 0.62, 0.63, 0.50)

@@ -47,6 +47,7 @@ private:
   void split_clip(ClipId id, MediaTime split_timeline_position, ClipId right_clip_id);
   void set_clip_audio_gain(ClipId id, double gain_db);
   void set_clip_muted(ClipId id, bool muted);
+  void set_clip_fades(ClipId id, MediaTime fade_in, MediaTime fade_out);
 
   TrackId id_;
   TrackKind kind_;

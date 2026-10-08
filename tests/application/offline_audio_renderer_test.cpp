@@ -362,7 +362,34 @@ void unaligned_source_range_with_blocks_not_covering_start_still_fails_explicitl
 
 } // namespace
 
+// Linear fades at the clip edges, identical for any block size; a plain clip is untouched.
+void fades_ramp_linearly_and_are_block_size_invariant() {
+  application::ProjectDocument document;
+  application::CommandProcessor processor{document};
+  const auto media = processor.import_asset("logical-audio", Probe{});
+  const auto clip = processor.add_clip(media, domain::TimeRange{domain::MediaTime::zero(), domain::MediaTime{1, {1, 1}}},
+                                       domain::MediaTime::zero());
+  processor.set_clip_fades(clip, domain::MediaTime{250, {1, 1000}}, domain::MediaTime{500, {1, 1000}});
+  const auto snapshot = document.snapshot();
+  auto small = Factory{constant_source(48'000, 2, 0.5F, 48'000)};
+  auto large = Factory{constant_source(48'000, 2, 0.5F, 48'000)};
+  const auto pcm = render_all(snapshot, 333, small);
+  assert(pcm == render_all(snapshot, 4096, large));
+  const auto left = [&](std::size_t frame) { return pcm[frame * 2]; };
+  assert(left(0) == 0.0F);                                    // starts silent
+  assert(std::fabs(left(6'000) - 0.25F) < 1e-4F);             // halfway through a 12 000-frame fade-in
+  assert(left(12'000) == 0.5F && left(23'999) == 0.5F);       // full level in between
+  assert(std::fabs(left(36'000) - 0.25F) < 1e-3F);            // halfway through the 24 000-frame fade-out
+  assert(left(47'999) < 1e-4F && left(47'999) > 0.0F);        // fades toward silence at the very end
+  for (std::size_t frame = 1; frame < 12'000; ++frame) assert(left(frame) >= left(frame - 1));   // monotonic
+
+  auto plain = Factory{constant_source(48'000, 2, 0.5F, 48'000)};
+  const auto untouched = render_all(snapshot_with_clip(), 4096, plain);
+  assert(untouched[0] == 0.5F && untouched[untouched.size() - 2] == 0.5F);
+}
+
 int main() {
+  fades_ramp_linearly_and_are_block_size_invariant();
   output_is_stereo_and_stable_across_block_sizes();
   mono_is_rematrixed_and_mute_is_silence();
   resampling_is_rational_and_source_origin_is_normalized();

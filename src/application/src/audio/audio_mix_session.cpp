@@ -627,11 +627,20 @@ AudioMixRenderResult AudioMixSession::render(domain::MediaTime timeline_position
     auto& mixed = result.block.samples_mutable();
     const auto channels = static_cast<std::size_t>(format_.channel_count);
     if (!gain.muted) {
+      // Fades ramp on the output grid, counted from the clip's first output frame (the exporter
+      // counts the same way). The fast path is the plain gain multiply.
+      const auto fade = ClipFade::from_times(contributor.fade_in, contributor.fade_out,
+                                             contributor.timeline_range.duration(), format_.sample_rate);
+      const auto first_clip_frame = static_cast<std::int64_t>(
+          frames_ceil(source_timeline - contributor.timeline_range.start(), format_.sample_rate));
       for (std::size_t frame = 0; frame < available; ++frame) {
+        const float frame_gain = fade.active()
+                                     ? gain.linear * fade.gain_at(first_clip_frame + static_cast<std::int64_t>(frame))
+                                     : gain.linear;
         for (std::size_t channel = 0; channel < channels; ++channel) {
           const auto destination = (output_begin + frame) * channels + channel;
           const auto source_index = state->pcm_offset + frame * channels + channel;
-          mixed[destination] += state->pcm[source_index] * gain.linear;
+          mixed[destination] += state->pcm[source_index] * frame_gain;
         }
       }
       ++result.mixed_contributors;

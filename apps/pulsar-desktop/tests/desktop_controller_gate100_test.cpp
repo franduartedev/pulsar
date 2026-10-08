@@ -88,6 +88,15 @@ int main(int argc, char** argv) {
     fs::copy_file(originals[i % 3], copy);
     videos.push_back(copy);
   }
+  // A fifth of the clips are photos / colour cards: stills must cost no more than footage.
+  const fs::path still_sources[] = {fixtures / "still_wide.png", fixtures / "still_portrait.jpg", fixtures / "still_bars.webp"};
+  constexpr int still_assets = 6;
+  std::vector<fs::path> stills;
+  for (int i = 0; i < still_assets; ++i) {
+    const auto copy = root / ("s" + std::to_string(i) + still_sources[i % 3].extension().string());
+    fs::copy_file(still_sources[i % 3], copy);
+    stills.push_back(copy);
+  }
   write_wav(root / "music.wav", 60);
   const auto project = root / "big.pulsar";
   long rss_start = rss_kb();
@@ -98,8 +107,9 @@ int main(int argc, char** argv) {
     QStringList files;
     for (const auto& v : videos) files << q(v);
     files << q(root / "music.wav");   // the 100-ish clips are built below
+    for (const auto& s : stills) files << q(s);
     controller.openPaths(files);
-    REQUIRE(1, wait_until([&] { return controller.mediaAssets()->rowCount() == asset_target + 1 && !controller.busy(); }));
+    REQUIRE(1, wait_until([&] { return controller.mediaAssets()->rowCount() == asset_target + 1 + still_assets && !controller.busy(); }));
     REPORT("import 4 files (ms)", ms_since(t));
 
     // 100 video clips: appended one by one (each call republishes the whole read model).
@@ -107,7 +117,8 @@ int main(int argc, char** argv) {
     for (int i = 0; i < clip_target; ++i) {
       if (i == 0) continue;                       // the first video is already on the timeline
       const auto start = Clock::now();
-      controller.appendAssetToVideoTrack(asset_id(controller, i % asset_target));
+      controller.appendAssetToVideoTrack(i % 5 == 4 ? asset_id(controller, asset_target + 1 + (i / 5) % still_assets)
+                                                    : asset_id(controller, i % asset_target));
       per_call.push_back(ms_since(start));
     }
     REQUIRE(2, video_clips(controller) == clip_target);

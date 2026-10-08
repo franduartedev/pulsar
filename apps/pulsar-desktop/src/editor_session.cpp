@@ -1,6 +1,8 @@
 #include "editor_session.hpp"
 
 #include <algorithm>
+#include <cctype>
+#include <unordered_map>
 #include <chrono>
 #include <cmath>
 #include <iomanip>
@@ -16,11 +18,22 @@ namespace pulsar::desktop {
 namespace {
 // Human label for a clip's media: file name, or "Click Soft" for the built-in
 // "pulsar-sound:click_soft" catalogue locators.
+std::unordered_map<std::string, std::string>& sound_display_names() {
+  static std::unordered_map<std::string, std::string> names;
+  return names;
+}
+
 [[nodiscard]] std::string clip_display_name(const std::filesystem::path& locator) {
   const std::string text = locator.string();
   constexpr std::string_view prefix = "pulsar-sound:";
+  if (application::is_color_card_locator(text)) {
+    std::string hex = text.substr(application::color_card_locator_prefix.size());
+    for (auto& ch : hex) ch = static_cast<char>(std::toupper(static_cast<unsigned char>(ch)));
+    return "Color #" + hex;
+  }
   if (text.rfind(prefix, 0) != 0) return locator.filename().string();
   std::string name = text.substr(prefix.size());
+  if (const auto found = sound_display_names().find(name); found != sound_display_names().end()) return found->second;
   bool word_start = true;
   for (auto& ch : name) {
     if (ch == '_' || ch == '-') { ch = ' '; word_start = true; continue; }
@@ -96,6 +109,10 @@ double TimelineViewport::pixel_at_unclamped(domain::MediaTime time, double width
   return static_cast<double>((numerator / denominator) * width);
 }
 
+void register_builtin_sound_display_name(std::string sound_id, std::string name) {
+  sound_display_names()[std::move(sound_id)] = std::move(name);
+}
+
 EditorSession::EditorSession()
     : EditorSession{[](const std::filesystem::path&, int) {
         return std::unique_ptr<application::PlaybackMediaWorker>{};
@@ -162,6 +179,35 @@ domain::ClipId EditorSession::insert_audio_asset(domain::MediaId media, domain::
   return clip;
 }
 
+domain::ClipId EditorSession::insert_audio_asset_auto(domain::MediaId media, domain::MediaTime timeline_start,
+                                                      bool force_new_track) {
+  const auto asset = document_.find_asset(media);
+  if (!asset.has_value()) throw VideoIngestException{VideoIngestError::UnknownAsset, "unknown media asset"};
+  if (asset->has_video() || !asset->audio().has_value()) {
+    throw VideoIngestException{VideoIngestError::NotAudioAsset, "only audio-only media goes on an audio track"};
+  }
+  const auto duration = asset->audio()->duration.has_value() ? *asset->audio()->duration : asset->playable_duration();
+  if (duration <= domain::MediaTime::zero() || timeline_start < domain::MediaTime::zero()) {
+    throw VideoIngestException{VideoIngestError::InvalidDuration, "media has no usable duration or start is negative"};
+  }
+  const domain::TimeRange destination{timeline_start, timeline_start + duration};
+  std::optional<domain::TrackId> free_track;
+  if (!force_new_track) {
+    for (const auto& track : document_.timeline().tracks()) {
+      if (track.kind() != domain::TrackKind::Audio) continue;
+      const bool busy = std::any_of(track.clips().begin(), track.clips().end(),
+                                    [&](const auto& clip) { return destination.overlaps(clip.timeline_range()); });
+      if (!busy) { free_track = track.id(); break; }
+    }
+  }
+  std::optional<domain::ClipId> clip;
+  processor_.run_as_one_edit([&] {
+    const auto track = free_track.has_value() ? *free_track : processor_.add_track(domain::TrackKind::Audio);
+    clip = insert_audio_asset(media, track, timeline_start);
+  });
+  return *clip;
+}
+
 domain::ClipId EditorSession::insert_video_asset_at_playhead(domain::MediaId media) {
   return insert_video_asset(media, playback_position());
 }
@@ -183,7 +229,7 @@ domain::ClipId EditorSession::insert_video_asset(domain::MediaId media,
   if (asset->availability() != application::MediaAvailability::Available) {
     throw VideoIngestException{VideoIngestError::UnavailableAsset, "media asset is unavailable"};
   }
-  const auto duration = asset->playable_duration();
+  const auto duration = asset->default_clip_duration();
   if (duration <= domain::MediaTime::zero() || timeline_start < domain::MediaTime::zero()) {
     throw VideoIngestException{VideoIngestError::InvalidDuration,
                                "media has no usable duration or start is negative"};
@@ -519,6 +565,69 @@ domain::TitleId EditorSession::add_title_at_playhead() {
 void EditorSession::replace_title(domain::Title title) {
   if (document_.find_title(title.id()) == nullptr) throw TitleException{TitleError::Unknown, "unknown title"};
   processor_.replace_title(std::move(title));
+  synchronize_document_state();
+}
+
+void EditorSession::set_clip_fades(domain::ClipId clip, domain::MediaTime fade_in, domain::MediaTime fade_out) {
+  const auto* existing = document_.timeline().find_clip(clip);
+  if (existing == nullptr) throw FadeException{FadeError::NoClip, "unknown clip"};
+  if (!clip_has_audio(clip)) throw FadeException{FadeError::NoAudio, "the clip has no audio to fade"};
+  const domain::MediaTime maximum{domain::Clip::maximum_fade_seconds, domain::Rational{1, 1}};
+  if (fade_in < domain::MediaTime::zero() || fade_out < domain::MediaTime::zero() || fade_in > maximum || fade_out > maximum) {
+    throw FadeException{FadeError::TooLong, "fade out of range"};
+  }
+  processor_.set_clip_fades(clip, fade_in, fade_out);
+  synchronize_document_state();
+}
+
+void EditorSession::duplicate_selected() {
+  if (selected_title_.has_value()) {
+    const auto* title = document_.find_title(*selected_title_);
+    if (title == nullptr) throw DuplicateException{DuplicateError::NothingSelected, "no title selected"};
+    const auto length = title->end() - title->start();
+    const domain::TimeRange range{title->end(), title->end() + length};
+    for (const auto& other : document_.titles()) {
+      if (other.id() != title->id() && other.range().overlaps(range)) {
+        throw DuplicateException{DuplicateError::NoSpace, "no room after the title"};
+      }
+    }
+    const auto id = document_.next_title_id();
+    const auto copy = processor_.add_title(domain::Title{id, title->text(), range, title->size_permille(), title->color_rgba(),
+                                                         title->horizontal(), title->vertical(), title->shadow(),
+                                                         title->background(), title->opacity_percent()});
+    selected_title_ = copy;
+    selected_clip_.reset();
+    synchronize_document_state();
+    rebuild_read_model();
+    return;
+  }
+  if (!selected_clip_.has_value()) throw DuplicateException{DuplicateError::NothingSelected, "nothing selected"};
+  const auto* original = document_.timeline().find_clip(*selected_clip_);
+  if (original == nullptr) throw DuplicateException{DuplicateError::NothingSelected, "nothing selected"};
+  const domain::Clip source = *original;
+  const domain::Track* track = nullptr;
+  for (const auto& candidate : document_.timeline().tracks()) {
+    if (candidate.find_clip(source.id()) != nullptr) { track = &candidate; break; }
+  }
+  if (track == nullptr) throw DuplicateException{DuplicateError::NothingSelected, "nothing selected"};
+  const auto destination_track = track->id();
+  const auto start = source.timeline_range().end();
+  const domain::TimeRange destination{start, start + source.duration()};
+  for (const auto& other : track->clips()) {
+    if (destination.overlaps(other.timeline_range())) {
+      throw DuplicateException{DuplicateError::NoSpace, "no room after the clip"};
+    }
+  }
+  domain::ClipId copy = source.id();
+  processor_.run_as_one_edit([&] {
+    copy = processor_.add_clip(destination_track, source.media_id(), source.source_range(), start);
+    if (source.audio_gain_db() != 0.0) processor_.set_clip_audio_gain(copy, source.audio_gain_db());
+    if (source.muted()) processor_.set_clip_muted(copy, true);
+    if (source.fade_in() > domain::MediaTime::zero() || source.fade_out() > domain::MediaTime::zero()) {
+      processor_.set_clip_fades(copy, source.fade_in(), source.fade_out());
+    }
+  });
+  selected_clip_ = copy;
   synchronize_document_state();
 }
 

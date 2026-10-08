@@ -576,3 +576,20 @@ target_link_libraries(pulsar_title_tests PRIVATE pulsar::application pulsar::dom
 pulsar_apply_project_options(pulsar_title_tests)
 pulsar_apply_compiler_warnings(pulsar_title_tests)
 add_test(NAME pulsar.application.titles COMMAND pulsar_title_tests)
+
+add_executable(pulsar_still_tests
+  application/still_media_test.cpp
+)
+target_link_libraries(pulsar_still_tests PRIVATE pulsar::application pulsar::domain)
+pulsar_apply_project_options(pulsar_still_tests)
+pulsar_apply_compiler_warnings(pulsar_still_tests)
+add_test(NAME pulsar.application.still_media COMMAND pulsar_still_tests)
+
+add_executable(pulsar_ffmpeg_still_tests
+  media/ffmpeg_still_test.cpp
+)
+target_compile_definitions(pulsar_ffmpeg_still_tests PRIVATE PULSAR_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_link_libraries(pulsar_ffmpeg_still_tests PRIVATE pulsar::media_ffmpeg pulsar::application pulsar::domain)
+pulsar_apply_project_options(pulsar_ffmpeg_still_tests)
+pulsar_apply_compiler_warnings(pulsar_ffmpeg_still_tests)
+add_test(NAME pulsar.media.ffmpeg_still COMMAND pulsar_ffmpeg_still_tests)

@@ -1,5 +1,6 @@
 #include <pulsar/media/ffmpeg/ffmpeg_offline_video_source.hpp>
 
+#include <pulsar/application/media/still_media.hpp>
 #include <pulsar/media/ffmpeg/ffmpeg_offline_video_converter.hpp>
 #include <pulsar/media/ffmpeg/ffmpeg_video_decode_session.hpp>
 #include <pulsar/media/ffmpeg/media_decode_error.hpp>
@@ -33,6 +34,8 @@ public:
     if (frame.presentation_timestamp.has_value() && stream_origin_.has_value()) {
       frame.presentation_timestamp = *frame.presentation_timestamp - *stream_origin_;
     }
+    // A still stands for every instant of its clip: it never "ends" after one frame period.
+    if (session_.is_still()) frame.presentation_duration = application::still_playable_duration();
     return frame;
   }
 

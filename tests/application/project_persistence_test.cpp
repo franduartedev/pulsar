@@ -114,7 +114,7 @@ void golden_fixture_decodes() {
 void strict_decode_rejects_malformed_input() {
   const auto good = ProjectCodec::encode(ProjectDocument{}.snapshot());
   const std::vector<std::string> malformed{
-      "PULSAR_PROJECT 4\n", "PULSAR_PROJECT 1\nTIMELINE 1\nEND\n",
+      "PULSAR_PROJECT 5\n", "PULSAR_PROJECT 1\nTIMELINE 1\nEND\n",
       good.substr(0, good.size() - 4),
       good + "JUNK\n",
   };
@@ -356,7 +356,7 @@ void repository_normalizes_codec_failures() {
 
   // Malformed bytes through the real repository surface as repository errors.
   const auto malformed = root / "malformed.pulsar";
-  { std::ofstream output{malformed}; output << "PULSAR_PROJECT 4\n"; }
+  { std::ofstream output{malformed}; output << "PULSAR_PROJECT 5\n"; }
   bool load_rejected = false;
   try {
     (void)repository.load(malformed);

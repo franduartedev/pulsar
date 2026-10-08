@@ -38,6 +38,7 @@ Panel {
     // "H264 · 1280×720 · 24 fps" or "AAC · 44.1 kHz · estéreo"
     function mediaSummary(text) {
         var res = metaValue("Resolución")
+        if (metaValue("Codec").toLowerCase() === "pulsar-color") return "Placa de color · " + res.replace(/\s*×\s*/, "×")
         if (res.length > 0) {
             var bits = [metaValue("Codec").toUpperCase(), res.replace(/\s*×\s*/, "×"), fpsText(metaValue("FPS informativo"))]
             return bits.filter(function(b) { return b.length > 0 }).join(" · ")
@@ -144,7 +145,7 @@ Panel {
                         onActiveFocusChanged: if (!activeFocus) controller.setSelectedTitleText(text)
                         Keys.onPressed: function(event) {
                             if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter) && (event.modifiers & Qt.ControlModifier)) {
-                                controller.setSelectedTitleText(text); event.accepted = true
+                                controller.setSelectedTitleText(text); focus = false; event.accepted = true
                             } else if (event.key === Qt.Key_Escape) {
                                 text = titleSection.info.text; focus = false; event.accepted = true
                             }
@@ -207,6 +208,26 @@ Panel {
                         MouseArea { anchors.fill: parent; onClicked: titleSection.style(titleSection.info.size, titleSection.info.color, titleSection.info.horizontal, titleSection.info.vertical, !titleSection.info.shadow) }
                     }
                 }
+                Row {
+                    width: parent.width; spacing: 4
+                    Text { width: 52; anchors.verticalCenter: parent.verticalCenter; text: "Fondo"; color: Theme.textSecondary; font.pixelSize: Theme.fontSizeS }
+                    Repeater {
+                        model: ["Sin", "Oscuro", "Claro"]
+                        delegate: PButton {
+                            width: 56; height: Theme.controlHeightSmall; text: modelData
+                            primary: titleSection.info && titleSection.info.background === index
+                            onClicked: controller.setSelectedTitleLook(index, titleSection.info.opacity)
+                        }
+                    }
+                }
+                Row {
+                    width: parent.width; spacing: 6
+                    Text { width: 52; anchors.verticalCenter: parent.verticalCenter; text: "Opacidad"; color: Theme.textSecondary; font.pixelSize: Theme.fontSizeS }
+                    PButton { width: 28; height: Theme.controlHeightSmall; text: "−"; onClicked: controller.setSelectedTitleLook(titleSection.info.background, titleSection.info.opacity - 10) }
+                    Text { width: 46; horizontalAlignment: Text.AlignHCenter; anchors.verticalCenter: parent.verticalCenter; text: titleSection.info && titleSection.info.opacity !== undefined ? titleSection.info.opacity + " %" : ""; color: Theme.textPrimary; font.family: Theme.mono; font.pixelSize: Theme.fontSizeM }
+                    PButton { width: 28; height: Theme.controlHeightSmall; text: "+"; onClicked: controller.setSelectedTitleLook(titleSection.info.background, titleSection.info.opacity + 10) }
+                }
+                Text { width: parent.width; wrapMode: Text.WordWrap; text: "Mové o recortá el título en su pista. Ctrl+D lo duplica."; color: Theme.textMuted; font.pixelSize: Theme.fontSizeXS }
             }
 
             // ---- CLIP (editable context) -------------------------------
@@ -217,6 +238,18 @@ Panel {
                 SectionLabel { text: "CLIP" }
                 Text { width: parent.width; text: inspector.selName; color: Theme.textPrimary; font.pixelSize: Theme.fontSizeM; elide: Text.ElideMiddle }
                 Text { width: parent.width; text: inspector.selRange; color: Theme.textSecondary; font.family: Theme.mono; font.pixelSize: Theme.fontSizeXS; elide: Text.ElideRight }
+                Text {
+                    visible: controller.selectedClipKind === "image" || controller.selectedClipKind === "color"
+                    width: parent.width; wrapMode: Text.WordWrap
+                    text: controller.selectedClipKind === "color" ? "Placa de color. Arrastrá un borde para cambiar su duración." : "Imagen fija. Arrastrá un borde para cambiar su duración."
+                    color: Theme.textMuted; font.pixelSize: Theme.fontSizeXS
+                }
+                PButton {
+                    width: parent.width; height: Theme.controlHeightSmall
+                    text: "Duplicar   Ctrl+D"
+                    enabled: controller.canDuplicate
+                    onClicked: controller.duplicateSelected()
+                }
             }
 
             // ---- AUDIO (editable) --------------------------------------
@@ -249,6 +282,7 @@ Panel {
                             text: Number(controller.selectedClipGainDb).toFixed(1)
                             selectByMouse: true
                             onEditingFinished: controller.setSelectedClipGainDb(Number(text))
+                            onAccepted: focus = false      // Enter hands the keyboard back to the editor
                         }
                         Text { anchors.right: parent.right; anchors.rightMargin: 6; anchors.verticalCenter: parent.verticalCenter; text: "dB"; color: Theme.textMuted; font.pixelSize: Theme.fontSizeXS }
                     }
@@ -277,15 +311,41 @@ Panel {
                     }
                     MouseArea { id: muteMouse; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: { muteButton.forceActiveFocus(); controller.toggleSelectedClipMute() } }
                 }
-                Text { visible: !controller.selectedClipHasAudio; width: parent.width; wrapMode: Text.WordWrap; text: "Este clip no tiene audio."; color: Theme.textMuted; font.pixelSize: Theme.fontSizeS }
-                Text { visible: controller.selectedClipHasAudio; width: parent.width; text: "−60 a +12 dB"; color: Theme.textMuted; font.pixelSize: Theme.fontSizeXS }
+                // Fades: linear ramps at the start / end of the clip's sound (music, intros, effects).
+                Column {
+                    visible: controller.selectedClipHasAudio
+                    width: parent.width
+                    spacing: 6
+                    Repeater {
+                        model: [{label: "Entrada", fadeIn: true}, {label: "Salida", fadeIn: false}]
+                        delegate: Row {
+                            id: fadeRow
+                            readonly property bool isIn: modelData.fadeIn
+                            readonly property real current: isIn ? controller.selectedClipFadeIn : controller.selectedClipFadeOut
+                            width: parent.width
+                            spacing: 4
+                            Text { width: 52; anchors.verticalCenter: parent.verticalCenter; text: modelData.label; color: Theme.textSecondary; font.pixelSize: Theme.fontSizeS }
+                            Repeater {
+                                model: [{label: "Sin", seconds: 0}, {label: "¼ s", seconds: 0.25}, {label: "½ s", seconds: 0.5}, {label: "1 s", seconds: 1}, {label: "2 s", seconds: 2}]
+                                delegate: PButton {
+                                    width: 36; height: Theme.controlHeightSmall; text: modelData.label
+                                    primary: Math.abs(fadeRow.current - modelData.seconds) < 0.0005
+                                    onClicked: fadeRow.isIn ? controller.setSelectedClipFades(modelData.seconds, controller.selectedClipFadeOut)
+                                                            : controller.setSelectedClipFades(controller.selectedClipFadeIn, modelData.seconds)
+                                }
+                            }
+                        }
+                    }
+                    Text { width: parent.width; wrapMode: Text.WordWrap; text: "Fundido lineal al empezar o terminar el clip."; color: Theme.textMuted; font.pixelSize: Theme.fontSizeXS }
+                }
+                Text { visible: !controller.selectedClipHasAudio; width: parent.width; wrapMode: Text.WordWrap; text: controller.selectedClipKind === "image" || controller.selectedClipKind === "color" ? "Las imágenes y placas no tienen audio." : "Este clip no tiene audio."; color: Theme.textMuted; font.pixelSize: Theme.fontSizeS }
             }
 
             // ---- MEDIA INFO (informative) ------------------------------
             Column {
                 // The controller only describes the active source; hide it when
                 // the selected clip belongs to a different media.
-                visible: inspector.summary.length > 0
+                visible: inspector.summary.length > 0 && controller.selectedTitleKey.length === 0
                 width: parent.width
                 spacing: 6
                 SectionLabel { text: "MEDIO" }
