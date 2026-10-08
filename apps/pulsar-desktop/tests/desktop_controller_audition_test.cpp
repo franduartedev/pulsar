@@ -1,3 +1,5 @@
+#include <QElapsedTimer>
+#include <QCoreApplication>
 // Library sound audition: the WAV reader/converter, every shipped sound is playable data, and the
 // controller's ▶ semantics (replace / same-again-stops / never edits the project).
 #include "../src/audition_audio.hpp"
@@ -113,6 +115,18 @@ int main(int argc, char** argv) {
     controller.stopAudition();
     REQUIRE(25, controller.auditioningSound().isEmpty());
     REQUIRE(26, controller.projectDirty() == dirty_before && controller.canUndo() == undo_before && controller.timelineClips()->rowCount() == 0);
+  }
+  {
+    // A sound that plays to its end must clear the active state by itself, promptly (not on a late safety net).
+    const auto library = controller.soundLibrary();
+    const QString id = library.at(0).toMap().value("id").toString();
+    controller.auditionSound(id);
+    if (controller.auditioningSound() == id) {
+      QElapsedTimer waited; waited.start();
+      while (!controller.auditioningSound().isEmpty() && waited.elapsed() < 6000) { QCoreApplication::processEvents(QEventLoop::AllEvents, 20); }
+      std::fprintf(stderr, "AUDITION natural end after %lld ms\n", static_cast<long long>(waited.elapsed()));
+      REQUIRE(27, controller.auditioningSound().isEmpty());
+    }
   }
   std::fprintf(stderr, "AUDITION ok\n");
   return 0;

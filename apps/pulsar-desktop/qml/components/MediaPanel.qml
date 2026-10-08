@@ -272,9 +272,9 @@ Panel {
                 anchors.left: parent.left; anchors.leftMargin: 8; anchors.verticalCenter: parent.verticalCenter
                 width: 32; height: 32; radius: 16
                 readonly property bool playing: controller.auditioningSound === modelData.id
-                color: playing || playMouse.containsMouse ? Theme.accentDim : Theme.bgElevated
-                border.width: playing || playMouse.containsMouse ? 1 : 0; border.color: Theme.accent
-                TGlyph { anchors.centerIn: parent; width: 16; height: 16; kind: soundIcon.playing ? "pause" : "play"; ink: soundIcon.playing || playMouse.containsMouse ? Theme.accentHover : Theme.waveformAudio }
+                color: playing ? Theme.accentDim : (playMouse.containsMouse ? Theme.bgHover : Theme.bgElevated)
+                border.width: playing ? 1 : 0; border.color: Theme.accent
+                TGlyph { anchors.centerIn: parent; width: 16; height: 16; kind: soundIcon.playing ? "pause" : "play"; ink: soundIcon.playing ? Theme.accentHover : Theme.waveformAudio }
                 MouseArea { id: playMouse; anchors.fill: parent; hoverEnabled: true; onClicked: controller.auditionSound(modelData.id) }
             }
             Column {

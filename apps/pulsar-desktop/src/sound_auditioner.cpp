@@ -91,7 +91,9 @@ QString SoundAuditioner::play(const std::filesystem::path& wav_path) {
   sink_ = std::make_unique<QAudioSink>(device, format);
   sink_->setVolume(0.9F);
   connect(sink_.get(), &QAudioSink::stateChanged, this, [this](QAudio::State state) {
-    if (state == QAudio::IdleState) stop();                       // the buffer ran dry: the sound is over
+    // The buffer ran dry: the sound is over. Tear down after the backend callback has returned
+    // instead of destroying the sink from inside its own signal.
+    if (state == QAudio::IdleState) QTimer::singleShot(0, this, [this] { stop(); });
     else if (state == QAudio::StoppedState && sink_ && sink_->error() != QAudio::NoError) {
       qCWarning(auditionLog) << "audio sink failed, error" << static_cast<int>(sink_->error());
       stop();
@@ -103,12 +105,13 @@ QString SoundAuditioner::play(const std::filesystem::path& wav_path) {
     teardown();
     return QStringLiteral("La salida de audio no pudo reproducir el sonido.");
   }
-  // Safety net for backends that never report Idle: stop shortly after the sound should be over.
+  // Safety net for backends that never report Idle: the sound (lead and tail included) is over
+  // at `duration_ms`, so clear shortly after that rather than leave a stale active state.
   guard_ = std::make_unique<QTimer>();
   guard_->setSingleShot(true);
   connect(guard_.get(), &QTimer::timeout, this, [this] { stop(); });
   const qint64 duration_ms = static_cast<qint64>(samples.size() / static_cast<std::size_t>(channels)) * 1000 / rate;
-  guard_->start(static_cast<int>(duration_ms + 800));
+  guard_->start(static_cast<int>(duration_ms + 150));
   return {};
 }
 
