@@ -1,9 +1,9 @@
 #include "desktop_controller.hpp"
+#include "sound_auditioner.hpp"
 #include "timeline_zoom.hpp"
 #include <pulsar/media/ffmpeg/ffmpeg_offline_frame_scaler.hpp>
 #include "builtin_sound_catalog.hpp"
 #include <QColor>
-#include <QSoundEffect>
 #include <cctype>
 #include <QFileInfo>
 #include <QDir>
@@ -321,6 +321,7 @@ void DesktopController::loadSoundLibrary() {
   emit soundLibraryChanged();
 }
 DesktopController::~DesktopController() {
+  auditioner_.reset();   // its own audio stream: stop it before anything else goes away
   autosave_timer_.stop();
   recovery_.shutdown();
   thumb_refresh_timer_.stop();
@@ -1415,9 +1416,11 @@ void DesktopController::trimTimelineClipStart(const QString& key,double pixel,do
 void DesktopController::trimTimelineClipEnd(const QString& key,double pixel,double width) { if(!active_session_)return;bool ok=false;auto value=key.toULongLong(&ok);if(!ok||!value)return;const auto target=timelineTimeAt(pixel,width);if(!target)return;try{active_session_->trim_clip_end(pulsar::domain::ClipId{value},*target,snapToleranceAt(width).value_or(MediaTime::zero()));clearError();clearProgram(has_video_media_ ? "loading" : "empty");publishTimeline();}catch(...){setError("El recorte no es válido.");publishTimeline();} }
 void DesktopController::splitSelectedClip(){if(!active_session_)return;try{(void)active_session_->split_selected_at_playhead();clearError();clearProgram(has_video_media_ ? "loading" : "empty");publishTimeline();}catch(...){setError("El punto de corte debe estar dentro del clip.");}}
 void DesktopController::deleteSelectedClip(){if(!active_session_)return;if(active_session_->selected_title()){deleteSelectedTitle();return;}try{active_session_->delete_selected();clearError();clearProgram(has_video_media_ ? "loading" : "empty");publishTimeline();}catch(...){} }
-// Listen to a library sound before using it. One player, a new request replaces the old one;
-// it never touches the project or the timeline audio engine.
+// Listen to a library sound before using it. One player on its own audio stream: a new request
+// replaces the running sound, the same sound again stops it, and it never touches the project,
+// the timeline or the playback engine.
 void DesktopController::auditionSound(const QString& sound_id) {
+  if (auditioner_ && auditioning_sound_ == sound_id && auditioner_->playing()) { stopAudition(); return; }
   const auto found = builtin_sounds_.find(sound_id.toStdString());
   if (found == builtin_sounds_.end()) return;
   const auto runtime = pulsar::desktop::builtin_sound_runtime_path(std::filesystem::path{"pulsar-sound:" + found->second.id});
@@ -1426,11 +1429,26 @@ void DesktopController::auditionSound(const QString& sound_id) {
     setError(QStringLiteral("No se encontró el paquete de sonidos de PULSAR."));
     return;
   }
-  if (!audition_) audition_ = std::make_unique<QSoundEffect>();
-  audition_->stop();
-  audition_->setSource(QUrl::fromLocalFile(QString::fromStdString(runtime.string())));
-  audition_->setVolume(0.8f);
-  audition_->play();
+  if (!auditioner_) {
+    auditioner_ = std::make_unique<pulsar::desktop::SoundAuditioner>();
+    connect(auditioner_.get(), &pulsar::desktop::SoundAuditioner::finished, this, [this] {
+      if (!auditioning_sound_.isEmpty()) { auditioning_sound_.clear(); emit auditionChanged(); }
+    });
+  }
+  const QString problem = auditioner_->play(runtime);
+  if (!problem.isEmpty()) {
+    auditioning_sound_.clear();
+    emit auditionChanged();
+    setError(QStringLiteral("No se pudo reproducir el sonido: ") + problem);
+    return;
+  }
+  auditioning_sound_ = sound_id;
+  emit auditionChanged();
+}
+
+void DesktopController::stopAudition() {
+  if (auditioner_) auditioner_->stop();
+  if (!auditioning_sound_.isEmpty()) { auditioning_sound_.clear(); emit auditionChanged(); }
 }
 
 void DesktopController::insertBuiltinSound(const QString& sound_id) {
@@ -1779,6 +1797,29 @@ QString DesktopController::validateSavePath(const QString& path) const {
 }
 
 bool DesktopController::pathExists(const QString& path) const { return QFileInfo::exists(path); }
+bool DesktopController::isDirectory(const QString& path) const { return QFileInfo{path}.isDir(); }
+QVariantList DesktopController::importPlaces() const {
+  struct Place { const char* name; QStandardPaths::StandardLocation location; };
+  static const Place places[] = {{"Inicio", QStandardPaths::HomeLocation}, {"Escritorio", QStandardPaths::DesktopLocation},
+                                 {"Videos", QStandardPaths::MoviesLocation}, {"Imágenes", QStandardPaths::PicturesLocation},
+                                 {"Música", QStandardPaths::MusicLocation}, {"Descargas", QStandardPaths::DownloadLocation},
+                                 {"Documentos", QStandardPaths::DocumentsLocation}};
+  QVariantList result;
+  QStringList seen;
+  for (const auto& place : places) {
+    const QString path = QStandardPaths::writableLocation(place.location);
+    if (path.isEmpty() || !QFileInfo{path}.isDir() || seen.contains(path)) continue;
+    seen << path;
+    result.append(QVariantMap{{QStringLiteral("name"), QString::fromUtf8(place.name)}, {QStringLiteral("path"), path}});
+  }
+  return result;
+}
+QString DesktopController::importStartFolder() const {
+  const QString videos = QStandardPaths::writableLocation(QStandardPaths::MoviesLocation);
+  if (!videos.isEmpty() && QFileInfo{videos}.isDir()) return videos;
+  const QString home = QStandardPaths::writableLocation(QStandardPaths::HomeLocation);
+  return home.isEmpty() ? QStringLiteral("/") : home;
+}
 
 // ---- Drag & drop from the library ---------------------------------------------------------
 DesktopController::DropResolution DesktopController::resolveAssetDrop(const QString& media_id, int lane, double pixel, double width) const {

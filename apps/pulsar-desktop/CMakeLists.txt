@@ -8,6 +8,9 @@ qt_add_executable(pulsar_desktop
   src/desktop_controller.cpp
   src/desktop_controller.hpp
   src/builtin_sound_catalog.hpp
+  src/sound_auditioner.cpp
+  src/sound_auditioner.hpp
+  src/audition_audio.hpp
   src/timeline_clip_list_model.cpp
   src/timeline_clip_list_model.hpp
   src/media_asset_list_model.cpp
@@ -62,6 +65,7 @@ qt_add_resources(pulsar_desktop pulsar_desktop_qml
     qml/components/BrandMark.qml
     qml/components/AboutDialog.qml
     qml/components/PathPromptDialog.qml
+    qml/components/ImportDialog.qml
     qml/components/PSlider.qml
     qml/components/FieldRow.qml
     qml/components/Segmented.qml
@@ -147,6 +151,9 @@ add_executable(pulsar_desktop_export_tests
   src/recovery_service.cpp
   src/recovery_service.hpp
   src/builtin_sound_catalog.hpp
+  src/sound_auditioner.cpp
+  src/sound_auditioner.hpp
+  src/audition_audio.hpp
 )
 set_target_properties(pulsar_desktop_export_tests PROPERTIES AUTOMOC ON)
 target_include_directories(pulsar_desktop_export_tests PRIVATE src)
@@ -199,6 +206,9 @@ add_executable(pulsar_desktop_ingest_tests
   src/recovery_service.cpp
   src/recovery_service.hpp
   src/builtin_sound_catalog.hpp
+  src/sound_auditioner.cpp
+  src/sound_auditioner.hpp
+  src/audition_audio.hpp
 )
 set_target_properties(pulsar_desktop_ingest_tests PROPERTIES AUTOMOC ON)
 target_include_directories(pulsar_desktop_ingest_tests PRIVATE src)
@@ -229,7 +239,7 @@ set_tests_properties(pulsar.desktop.ingest_integration
   PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;PULSAR_RECOVERY_DIR=${CMAKE_CURRENT_BINARY_DIR}/recovery-ingest")
 
 # Release-safety desktop tests (same sources as the other controller tests).
-foreach(pair "safety|pulsar.desktop.safety" "shutdown|pulsar.desktop.shutdown" "batch|pulsar.desktop.batch" "title_parity|pulsar.desktop.title_parity" "recovery|pulsar.desktop.recovery" "dnd|pulsar.desktop.dnd" "gate100|pulsar.desktop.gate100" "stills|pulsar.desktop.stills" "polish|pulsar.desktop.polish")
+foreach(pair "safety|pulsar.desktop.safety" "shutdown|pulsar.desktop.shutdown" "batch|pulsar.desktop.batch" "title_parity|pulsar.desktop.title_parity" "recovery|pulsar.desktop.recovery" "dnd|pulsar.desktop.dnd" "gate100|pulsar.desktop.gate100" "stills|pulsar.desktop.stills" "polish|pulsar.desktop.polish" "audition|pulsar.desktop.audition")
   string(REPLACE "|" ";" parts "${pair}")
   list(GET parts 0 short)
   list(GET parts 1 test_name)
@@ -257,6 +267,9 @@ foreach(pair "safety|pulsar.desktop.safety" "shutdown|pulsar.desktop.shutdown" "
     src/recovery_service.cpp
     src/recovery_service.hpp
     src/builtin_sound_catalog.hpp
+    src/sound_auditioner.cpp
+    src/sound_auditioner.hpp
+    src/audition_audio.hpp
   )
   set_target_properties(${target} PROPERTIES AUTOMOC ON)
   target_include_directories(${target} PRIVATE src)
@@ -270,6 +283,8 @@ foreach(pair "safety|pulsar.desktop.safety" "shutdown|pulsar.desktop.shutdown" "
   add_test(NAME ${test_name} COMMAND ${target})
   set_tests_properties(${test_name} PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;PULSAR_RECOVERY_DIR=${CMAKE_CURRENT_BINARY_DIR}/recovery-${short}" TIMEOUT 300)
 endforeach()
+# The audition test needs the sound pack of the source tree (installed builds find it next to the binary).
+set_property(TEST pulsar.desktop.audition APPEND PROPERTY ENVIRONMENT "PULSAR_ASSETS_DIR=${CMAKE_SOURCE_DIR}/assets")
 endif()
 
 # ---- Installation (portable bundle / AppImage / distro packaging) ----------

@@ -43,11 +43,12 @@
 #include <vector>
 
 class WaveformQuickItem;
-class QSoundEffect;
+namespace pulsar::desktop { class SoundAuditioner; }
 
 class DesktopController final : public QObject {
   Q_OBJECT
   Q_PROPERTY(QString appVersion READ appVersion CONSTANT)
+  Q_PROPERTY(QString auditioningSound READ auditioningSound NOTIFY auditionChanged)   // id of the library sound being auditioned, or ""
   Q_PROPERTY(bool soundPackAvailable READ soundPackAvailable CONSTANT)
   Q_PROPERTY(QString status READ status NOTIFY statusChanged)
   Q_PROPERTY(QString technicalStatus READ technicalStatus NOTIFY technicalStatusChanged)
@@ -144,6 +145,7 @@ public:
   [[nodiscard]] QString recoveryDescription() const { return recovery_description_; }
   [[nodiscard]] QAbstractItemModel* timelineClips() { return &timeline_model_; }
   [[nodiscard]] QAbstractItemModel* timelineTitles() { return &title_model_; }
+  [[nodiscard]] QString auditioningSound() const { return auditioning_sound_; }
   [[nodiscard]] QString selectedTitleKey() const;
   [[nodiscard]] QVariantMap selectedTitle() const;
   [[nodiscard]] bool selectedTitleOnScreen() const;
@@ -266,7 +268,8 @@ public:
   Q_INVOKABLE void undoEdit();
   Q_INVOKABLE void redoEdit();
   Q_INVOKABLE void insertBuiltinSound(const QString& sound_id);
-  Q_INVOKABLE void auditionSound(const QString& sound_id);   // plays a library sound (not part of the project)
+  Q_INVOKABLE void auditionSound(const QString& sound_id);   // plays a library sound on its own stream (not part of the project); the same sound again stops it
+  Q_INVOKABLE void stopAudition();
   // Returns true only when the project was written; the dirty state is cleared only then.
   Q_INVOKABLE bool saveProject(const QString& path);
   // Returns false (and keeps the current project untouched) if the file cannot be opened.
@@ -282,13 +285,16 @@ public:
   Q_INVOKABLE QString normalizeSavePath(const QString& text, const QString& extension) const;
   Q_INVOKABLE QString validateSavePath(const QString& path) const;   // "" when usable
   Q_INVOKABLE bool pathExists(const QString& path) const;
+  Q_INVOKABLE bool isDirectory(const QString& path) const;
+  Q_INVOKABLE QVariantList importPlaces() const;        // [{name, path}] the import dialog offers (Inicio, Escritorio, Videos, ...) that exist
+  Q_INVOKABLE QString importStartFolder() const;        // Videos if it exists, else the home folder
   Q_INVOKABLE void exportProject(const QString& path);
   Q_INVOKABLE void cancelExport();
   Q_INVOKABLE void attachWaveformItem(const QString& clip_key, QObject* item);
   Q_INVOKABLE void detachWaveformItem(QObject* item);
 signals:
   void statusChanged(); void technicalStatusChanged(); void mediaChanged(); void errorChanged();
-  void previewChanged(); void positionChanged(); void selectedTitleOnScreenChanged(); void playbackChanged(); void busyChanged();
+  void previewChanged(); void auditionChanged(); void positionChanged(); void selectedTitleOnScreenChanged(); void playbackChanged(); void busyChanged();
   void exportRunningChanged(); void exportProgressChanged(); void exportStatusChanged();
   void exportDestinationChanged();
   void projectDirtyChanged(); void activeProjectPathChanged();
@@ -376,7 +382,8 @@ private:
   QVariantList sound_library_;
   struct BuiltinSound { std::string id; std::string name; std::string category; std::int64_t duration_frames; };
   std::unordered_map<std::string, BuiltinSound> builtin_sounds_;
-  std::unique_ptr<QSoundEffect> audition_;
+  std::unique_ptr<pulsar::desktop::SoundAuditioner> auditioner_;
+  QString auditioning_sound_;
   std::unordered_map<std::string, std::string> waveform_clip_identities_;
   std::unordered_map<WaveformQuickItem*, WaveformItemStamp> waveform_item_stamps_;
   std::filesystem::path waveform_cache_directory_;

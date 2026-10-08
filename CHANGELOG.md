@@ -7,6 +7,10 @@ the version is defined once, in the root `CMakeLists.txt`.
 
 First public beta (Linux x86_64). History before this release is not itemised.
 
+### Fixed (release-candidate human gate)
+- **Sound audition (▶ in Sonidos)** was silent on a real desktop. It now plays on its own audio stream (a dedicated `QAudioSink`, negotiated like the timeline's engine, with a short lead-in so a device waking from idle does not swallow a click) instead of `QSoundEffect`. The same ▶ again stops it (the button shows pause while it plays), another sound replaces it, and it never touches the project or the playback engine. If the machine has no usable output the status bar now says so.
+- **Import dialog**: *Importar medio*, *Ctrl+I* and *Carpeta…* open a PULSAR-styled browser (places, path field, folder listing, multi-select with checkboxes, *Seleccionar todo*, *Mostrar todos los archivos*, *Importar N archivos* / *Importar esta carpeta*, Cancelar/Esc) instead of the toolkit's light dialog, which could not select several files on Qt 6.4. Validation, folder expansion, duplicate skipping, batch progress and drag and drop are unchanged. *Abrir proyecto* still uses the system dialog.
+
 ### Added
 - **Licence: GPL-3.0-or-later** (`LICENSE`, `THIRD_PARTY_NOTICES.md`). The packages now bundle **our own FFmpeg 6.1.1**
   (`--enable-gpl --enable-version3`, no `--enable-nonfree`) with static **x264** and **dav1d**, instead of Ubuntu's FFmpeg

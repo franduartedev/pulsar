@@ -82,11 +82,11 @@ Window {
     // No editing shortcut fires behind a dialog (a file dialog swallows typing and the keys used
     // to reach the timeline), and single-key ones never fire while typing in a field.
     readonly property bool dialogOpen: pathPrompt.visible || unsavedDialog.visible || recoveryDialog.visible || aboutDialog.visible ||
-                                       fileDialog.visible || folderDialog.visible || openProjectDialog.visible || colorMenu.visible
+                                       importDialog.visible || openProjectDialog.visible || colorMenu.visible
     readonly property bool typing: !!root.activeFocusItem && typeof root.activeFocusItem.cursorPosition !== "undefined"
     readonly property bool shortcutsBlocked: typing || dialogOpen
     Shortcut { sequence: "Space"; enabled: !root.shortcutsBlocked; onActivated: controller.togglePlayback() }
-    Shortcut { sequence: "Ctrl+I"; enabled: !root.dialogOpen; onActivated: fileDialog.open() }
+    Shortcut { sequence: "Ctrl+I"; enabled: !root.dialogOpen; onActivated: importDialog.openFiles() }
     Shortcut { sequence: "Ctrl+O"; enabled: !root.dialogOpen; onActivated: root.guardedRun("open") }
     Shortcut { sequence: "Ctrl+S"; enabled: !root.dialogOpen; onActivated: controller.activeProjectPath.length > 0 ? controller.saveProject(controller.activeProjectPath) : root.askSavePath("project") }
     Shortcut { sequence: "Ctrl+Shift+S"; enabled: !root.dialogOpen; onActivated: root.askSavePath("project") }
@@ -111,22 +111,7 @@ Window {
     Shortcut { sequence: "T"; enabled: !root.shortcutsBlocked; onActivated: controller.addTitle() }
     Shortcut { sequence: "N"; enabled: !root.shortcutsBlocked; onActivated: controller.snapEnabled = !controller.snapEnabled }
 
-    FileDialog {
-        id: fileDialog
-        title: "Importar medios"
-        fileMode: FileDialog.OpenFiles
-        nameFilters: [
-            "Medios (*.mp4 *.mov *.mkv *.avi *.webm *.wav *.mp3 *.m4a *.aac *.flac *.png *.jpg *.jpeg *.webp)",
-            "Todos los archivos (*)"
-        ]
-        onAccepted: controller.openUrls(selectedFiles)
-    }
-
-    FolderDialog {
-        id: folderDialog
-        title: "Importar una carpeta"
-        onAccepted: controller.openUrls([selectedFolder])
-    }
+    ImportDialog { id: importDialog }
 
     FileDialog {
         id: openProjectDialog
@@ -162,7 +147,7 @@ Window {
         onOpenProjectRequested: root.guardedRun("open")
         onSaveProjectRequested: controller.activeProjectPath.length > 0 ? controller.saveProject(controller.activeProjectPath) : root.askSavePath("project")
         onSaveProjectAsRequested: root.askSavePath("project")
-        onImportMediaRequested: fileDialog.open()
+        onImportMediaRequested: importDialog.openFiles()
         onExportRequested: root.askSavePath("export")
         onAboutRequested: aboutDialog.open()
     }
@@ -176,8 +161,8 @@ Window {
         anchors.topMargin: root.gap
         anchors.bottomMargin: root.gap
         width: root.mediaWidth
-        onImportRequested: fileDialog.open()
-        onImportFolderRequested: folderDialog.open()
+        onImportRequested: importDialog.openFiles()
+        onImportFolderRequested: importDialog.openFolder()
         onCreateColorRequested: function(sx, sy) { var p = root.contentItem.mapFromItem(null, sx, sy); colorMenu.openAt(p.x, p.y) }
         onAssetDragStarted: function(mediaId, name, isVideo) { dragGhost.label = name; dragGhost.visible = true }
         onAssetDragMoved: function(mediaId, sx, sy) {
@@ -230,7 +215,7 @@ Window {
             ViewerPane {
                 width: parent.width
                 height: Math.max(150, parent.height - scrubber.height - transportBar.height)
-                onImportRequested: fileDialog.open()
+                onImportRequested: importDialog.openFiles()
             }
             // Program seek line, attached to the monitor it controls.
             SourceScrubber { id: scrubber; width: parent.width; height: 20 }
