@@ -1,6 +1,7 @@
 #include <pulsar/application/commands/command_processor.hpp>
 #include <pulsar/application/media/media_probe.hpp>
 #include <pulsar/application/timeline/timeline_clip_resolver.hpp>
+#include <pulsar/application/composition/visual_composition_resolver.hpp>
 
 #include <cassert>
 #include <filesystem>
@@ -83,6 +84,61 @@ void boundaries_and_gaps() {
   const auto ended = std::get<TimelineEnded>(application::resolve_clip_at(
       snapshot, snapshot.video_track_id, time(25)));
   assert(ended.duration == time(25));
+}
+
+void visual_composition_order_gaps_and_boundaries() {
+  Fixture fixture;
+  const auto first = fixture.processor.add_clip(fixture.media, TimeRange{time(0), time(2)}, time(0));
+  auto snapshot = fixture.document.snapshot();
+  auto single = application::resolve_visual_composition(snapshot, time(0));
+  assert(single.layers.size() == 1);
+  assert(std::get<ResolvedClip>(single.layers[0].source).clip_id == first);
+
+  domain::Track upper{domain::TrackId{9}, domain::TrackKind::Video};
+  upper.insert_clip(domain::Clip{domain::ClipId{20}, fixture.media,
+      TimeRange{time(10), time(11)}, time(1001, Rational{1, 30000})});
+  snapshot.timeline.add_track(std::move(upper));
+  snapshot.timeline.add_track(domain::Track{domain::TrackId{3}, domain::TrackKind::Video});
+  snapshot.visual_track_ids = {domain::TrackId{3}, snapshot.video_track_id, domain::TrackId{9}};
+  const auto original = snapshot.assets.front();
+  snapshot.assets.front() = application::MediaAsset{
+      original.id(), original.source_locator(), original.video_stream_index(),
+      original.playable_duration(), original.metadata(), application::MediaAvailability::Available,
+      std::nullopt, application::AudioAssetMetadata{1, 48000, 2, Rational{1, 48000}, time(100)}};
+  auto before = application::resolve_visual_composition(snapshot, time(1000, Rational{1, 30000}));
+  assert(std::holds_alternative<TimelineGap>(before.layers[0].source));
+  assert(std::holds_alternative<TimelineGap>(before.layers[2].source));
+  const auto boundary = time(1001, Rational{1, 30000});
+  for (int repeat = 0; repeat < 3; ++repeat) {
+    const auto active = application::resolve_visual_composition(snapshot, boundary);
+    assert(active.timeline_position == boundary);
+    for (std::size_t i = 0; i < active.layers.size(); ++i)
+      assert(active.layers[i].track_id == snapshot.visual_track_ids[i]);
+    assert(std::get<ResolvedClip>(active.layers[1].source).source_time == boundary);
+    assert(std::get<ResolvedClip>(active.layers[1].source).audio.has_value());
+    const auto& top = std::get<ResolvedClip>(active.layers[2].source);
+    assert(top.source_time == time(10));
+    assert(top.timeline_position == boundary);
+    assert(!top.audio.has_value());
+  }
+  const auto end = application::resolve_visual_composition(snapshot, boundary + time(1));
+  assert(std::holds_alternative<TimelineGap>(end.layers[2].source));
+  assert(std::holds_alternative<ResolvedClip>(end.layers[1].source));
+  const auto ended = application::resolve_visual_composition(snapshot, time(2));
+  for (const auto& layer : ended.layers) assert(std::holds_alternative<TimelineEnded>(layer.source));
+  snapshot.assets.clear();
+  const auto missing = application::resolve_visual_composition(snapshot, boundary);
+  assert(std::holds_alternative<application::MissingClipMedia>(missing.layers[1].source));
+  assert(std::holds_alternative<application::MissingClipMedia>(missing.layers[2].source));
+  bool rejected = false;
+  try { (void)application::resolve_visual_composition(snapshot, time(-1)); }
+  catch (const std::invalid_argument&) { rejected = true; }
+  assert(rejected);
+  snapshot.visual_track_ids.pop_back();
+  rejected = false;
+  try { (void)application::resolve_visual_composition(snapshot, time(0)); }
+  catch (const std::invalid_argument&) { rejected = true; }
+  assert(rejected);
 }
 
 void empty_end_and_invalid_inputs() {
@@ -209,6 +265,7 @@ void ordering_same_asset_and_snapshot_purity() {
 } // namespace
 
 int main() {
+  visual_composition_order_gaps_and_boundaries();
   boundaries_and_gaps();
   empty_end_and_invalid_inputs();
   exact_mapping_and_boundaries_are_preserved();
