@@ -8,6 +8,11 @@ the version is defined once, in the root `CMakeLists.txt`.
 First public beta (Linux x86_64). History before this release is not itemised.
 
 ### Added
+- **Licence: GPL-3.0-or-later** (`LICENSE`, `THIRD_PARTY_NOTICES.md`). The packages now bundle **our own FFmpeg 6.1.1**
+  (`--enable-gpl --enable-version3`, no `--enable-nonfree`) with static **x264** and **dav1d**, instead of Ubuntu's FFmpeg
+  with its ~25 extra codec libraries; the bundle is smaller and no longer contains libzvbi (GPL-2.0-only), x265 or Xvid.
+  Corresponding source archives are built with each release. Product behaviour is unchanged; JPEG XL (never an
+  import format) is the only thing the old build could decode that the new one cannot.
 - **Official identity**: the *Pulse Arc* mark (header, About box, application icon and AppImage/desktop icon) replaces the placeholder bars. The artwork comes from the supplied brand sheet; `docs/release/brand.md` records its provenance.
 - **Free title placement**: drag the selected title in the Viewer (centre guides snap at the middle of the frame); one undo step per drag; saved in the project (`TITLE_POS`, format version 5 only when a title is placed); preview and export share the rasteriser, so the title lands on the same pixels. The alignment presets (a 3×3 pad in the Inspector) return a title to the grid and *Restablecer* clears a free position.
 - **Inspector redesigned**: a context chip (TÍTULO / VIDEO / FOTO / PLACA / AUDIO), grouped sections (Texto · Posición · Estilo; Clip · Audio · Medio), segmented controls for background and fades, steppers for size and opacity, "Nada seleccionado" empty state.

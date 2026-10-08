@@ -81,3 +81,9 @@ and the ADRs in [`docs/adr`](docs/adr/README.md).
 
 Run the tests before sending changes and keep modules' dependency direction. The
 engineering rules are in [`docs/development/engineering.md`](docs/development/engineering.md).
+
+## License
+
+PULSAR is free software, released under the **GNU General Public License v3.0 or later** (`GPL-3.0-or-later`); see
+[`LICENSE`](LICENSE). It bundles FFmpeg (built with `--enable-gpl --enable-version3`), x264 and Qt: the components,
+their licences and where to get the corresponding source are in [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).

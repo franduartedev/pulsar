@@ -2,6 +2,8 @@
 # Builds the PULSAR Linux release candidates from a clean checkout:
 #   dist/PULSAR-<version>-linux-x86_64.tar.gz   portable bundle (recommended)
 #   dist/PULSAR-<version>-x86_64.AppImage       AppImage (needs FUSE 2, or --appimage-extract-and-run)
+#   dist/PULSAR-<version>-source.tar.gz                   PULSAR source (git archive of HEAD)
+#   dist/PULSAR-<version>-third-party-source.tar.gz       FFmpeg + x264 + dav1d sources and the build recipe
 #   dist/SHA256SUMS
 # Requirements: cmake, ninja, g++, Qt 6 + FFmpeg development packages (see README.md),
 # dpkg (Debian/Ubuntu), curl, tar. Run from anywhere. Nothing here publishes anything.
@@ -41,7 +43,14 @@ ln -sf "$TOOLS/linuxdeploy-plugin-qt-x86_64.AppImage" "$TOOLS/linuxdeploy-plugin
 export APPIMAGE_EXTRACT_AND_RUN=1   # the tools themselves run without FUSE
 export PATH="$TOOLS:$PATH"
 
+# --- FFmpeg: our own GPL-3 build (see build-ffmpeg.sh), never the distribution's -----------------
+FFPREFIX="$BUILD/ffmpeg-prefix"
+"$ROOT/packaging/linux/build-ffmpeg.sh" "$FFPREFIX"
+export PKG_CONFIG_PATH="$FFPREFIX/lib/pkgconfig" LD_LIBRARY_PATH="$FFPREFIX/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+THIRD="${PULSAR_THIRD_PARTY_DIR:-$BUILD/third-party}"
+
 # --- build + install --------------------------------------------------------------------------
+rm -rf "$BUILD/CMakeCache.txt" "$BUILD/CMakeFiles"   # always re-resolve FFmpeg to our prefix
 cmake -S "$ROOT" -B "$BUILD" -G Ninja -DCMAKE_BUILD_TYPE=Release -DPULSAR_BUILD_TESTS=OFF \
       -DPULSAR_BUILD_DESKTOP=ON -DPULSAR_BUILD_QT_AUDIO=ON -DCMAKE_INSTALL_PREFIX=/usr \
       "-DCMAKE_CXX_FLAGS=-ffile-prefix-map=$ROOT=. -fdebug-prefix-map=$ROOT=."
@@ -91,7 +100,7 @@ find "$APPDIR/usr/lib" -xtype l -delete
 # --- licenses of everything that ships --------------------------------------------------------
 LIC="$APPDIR/usr/share/doc/pulsar-third-party"; mkdir -p "$LIC"
 : > "$LIC/PACKAGES.txt"
-{ find "$APPDIR/usr/lib" "$APPDIR/usr/plugins" "$APPDIR/usr/qml" -type f -name '*.so*' -printf '%f\n' | sort -u; } | while read -r so; do
+{ find "$APPDIR/usr/lib" "$APPDIR/usr/plugins" "$APPDIR/usr/qml" -type f -name '*.so*' -printf '%f\n' | sort -u; } | grep -vE '^lib(avcodec|avformat|avutil|swscale|swresample)\.so' | while read -r so; do
   for dir in /usr/lib/x86_64-linux-gnu /lib/x86_64-linux-gnu /usr/lib/x86_64-linux-gnu/qt6/plugins/* /usr/lib/x86_64-linux-gnu/qt6/qml/*; do
     if pkg="$(dpkg -S "$dir/$so" 2>/dev/null | head -1 | cut -d: -f1)"; [ -n "$pkg" ]; then echo "$pkg"; break; fi
   done
@@ -102,6 +111,16 @@ while read -r pkg; do
   [ -f "/usr/share/doc/$pkg/copyright" ] && cp "/usr/share/doc/$pkg/copyright" "$LIC/$pkg.copyright" || true
 done < "$STAGE/pkgs.txt"
 
+# Our own FFmpeg/x264 build is not a distribution package: record it and ship its licence texts.
+cp "$FFPREFIX/BUILDINFO.txt" "$LIC/FFMPEG-BUILDINFO.txt"
+FFSRC="$(mktemp -d)"; tar -C "$FFSRC" -xf "$THIRD/ffmpeg_6.1.1.orig.tar.xz" --wildcards 'ffmpeg-6.1.1/COPYING.*' 'ffmpeg-6.1.1/LICENSE.md'
+cp "$FFSRC"/ffmpeg-6.1.1/COPYING.GPLv3 "$FFSRC"/ffmpeg-6.1.1/COPYING.GPLv2 "$FFSRC"/ffmpeg-6.1.1/LICENSE.md "$LIC/" ; mv "$LIC/LICENSE.md" "$LIC/FFMPEG-LICENSE.md"
+tar -C "$FFSRC" -xzf "$THIRD/x264_0.164.3108+git31e19f9.orig.tar.gz" --wildcards '*/COPYING' --strip-components=1 && mv "$FFSRC/COPYING" "$LIC/X264-COPYING"; rm -rf "$FFSRC"
+# Licence of PULSAR itself, the notices, and the licence texts our dependencies refer to.
+DOC="$APPDIR/usr/share/doc/pulsar"; mkdir -p "$DOC/licenses"
+cp "$ROOT/LICENSE" "$ROOT/THIRD_PARTY_NOTICES.md" "$DOC/"
+for text in GPL-2 GPL-3 LGPL-2 LGPL-2.1 LGPL-3 Apache-2.0 MPL-2.0 BSD CC0-1.0 Artistic; do cp "/usr/share/common-licenses/$text" "$DOC/licenses/$text"; done
+cp "$ROOT/assets/fonts/"*OFL* "$DOC/licenses/" 2>/dev/null || true
 
 # --- portable tar.gz ----------------------------------------------------------------------------
 BUNDLE="$STAGE/$NAME"
@@ -109,6 +128,7 @@ rm -rf "$BUNDLE"; mkdir -p "$BUNDLE"
 cp -a "$APPDIR/usr" "$BUNDLE/usr"
 cp "$ROOT/packaging/linux/pulsar-launcher.sh" "$BUNDLE/pulsar"; chmod +x "$BUNDLE/pulsar"
 cp "$ROOT/docs/release/0.1.0-beta.md" "$BUNDLE/README-BETA.md"
+cp "$ROOT/LICENSE" "$ROOT/THIRD_PARTY_NOTICES.md" "$BUNDLE/"
 cp "$ROOT/CHANGELOG.md" "$BUNDLE/CHANGELOG.md"
 cp -a "$ROOT/packaging/linux/pulsar.desktop" "$ROOT/packaging/linux/pulsar.svg" "$BUNDLE/"
 EPOCH="$(git -C "$ROOT" log -1 --format=%ct 2>/dev/null || date +%s)"
@@ -119,4 +139,15 @@ tar --sort=name --owner=0 --group=0 --numeric-owner --mtime="@$EPOCH" -C "$STAGE
 APPIMAGE="$(ls -t "$DIST"/*.AppImage | head -1)"
 [ "$(basename "$APPIMAGE")" = "$NAME-x86_64.AppImage" ] || mv "$APPIMAGE" "$DIST/$NAME-x86_64.AppImage"
 
-( cd "$DIST" && sha256sum "$NAME-linux-x86_64.tar.gz" "$NAME-x86_64.AppImage" > SHA256SUMS && cat SHA256SUMS && ls -l "$NAME"* )
+# --- corresponding source -----------------------------------------------------------------------
+# PULSAR: exactly the committed tree this binary was built from (refuses a dirty tree).
+[ -z "$(git -C "$ROOT" status --porcelain --untracked-files=no)" ] || die "uncommitted changes: commit before building the release source archive"
+git -C "$ROOT" archive --format=tar --prefix="$NAME-source/" HEAD | gzip -n > "$DIST/$NAME-source.tar.gz"
+# Third party: the exact FFmpeg / x264 / dav1d sources and the recipe that built the shipped binaries.
+TP="$STAGE/$NAME-third-party-source"; rm -rf "$TP"; mkdir -p "$TP"
+cp "$THIRD/ffmpeg_6.1.1.orig.tar.xz" "$THIRD/x264_0.164.3108+git31e19f9.orig.tar.gz" "$THIRD/dav1d_1.4.1.orig.tar.xz" "$TP/"
+cp "$ROOT/packaging/linux/build-ffmpeg.sh" "$FFPREFIX/BUILDINFO.txt" "$ROOT/THIRD_PARTY_NOTICES.md" "$ROOT/LICENSE" "$TP/"
+( cd "$TP" && sha256sum *.tar.* > SHA256SUMS )
+tar --sort=name --owner=0 --group=0 --numeric-owner --mtime="@$EPOCH" -C "$STAGE" -czf "$DIST/$NAME-third-party-source.tar.gz" "$NAME-third-party-source"
+
+( cd "$DIST" && sha256sum "$NAME-linux-x86_64.tar.gz" "$NAME-x86_64.AppImage" "$NAME-source.tar.gz" "$NAME-third-party-source.tar.gz" > SHA256SUMS && cat SHA256SUMS && ls -l "$NAME"* )
