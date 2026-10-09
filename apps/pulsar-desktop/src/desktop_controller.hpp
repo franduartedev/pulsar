@@ -356,6 +356,8 @@ private:
   void presentTimeline(const pulsar::application::TimelinePresentation&);
   void clearProgram(QString state);
   void displayLease(const pulsar::application::TimelinePresentSample&);
+  void displayComposition(const pulsar::application::TimelineCompositionPresentation&);
+  std::unique_ptr<pulsar::application::CompositionPreview> makeCompositionPreview(const std::filesystem::path&);
   void setBusy(bool); void setStatus(QString); void setTechnicalStatus(QString); void setPreviewLate(bool);
   void setExportStatus(QString);
   void setError(QString); void clearError();
@@ -367,6 +369,8 @@ private:
   QTimer waveform_timer_;
   QTimer error_timer_;  // editorial/UI errors fade after a few seconds
   std::shared_ptr<pulsar::media::ffmpeg::FFmpegPlaybackVisualMailbox> visual_mailbox_;
+  std::weak_ptr<const pulsar::application::composition::RgbaSurface> displayed_composite_;
+  pulsar::application::exporting::OfflineVideoRenderMetrics composition_render_metrics_;
   pulsar::application::WaveformCacheManager waveform_cache_manager_{1};
   WaveformSourceCreator waveform_source_creator_;
   std::unordered_map<std::string, std::shared_ptr<pulsar::application::WaveformCacheRequest>> waveform_requests_;

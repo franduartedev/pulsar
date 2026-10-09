@@ -120,23 +120,25 @@ EditorSession::EditorSession()
 
 EditorSession::EditorSession(application::PlaybackWorkerFactory worker_factory,
                              application::AudioPlaybackSourceFactory audio_source_factory,
-                             std::unique_ptr<application::AudioOutput> audio_output)
+                             std::unique_ptr<application::AudioOutput> audio_output,
+                             std::unique_ptr<application::CompositionPreview> composition_preview)
     : processor_{document_},
       audio_output_{std::move(audio_output)},
       coordinator_{clock_, std::move(worker_factory), std::move(audio_source_factory),
-                   audio_output_.get()} {
+                   audio_output_.get(), std::move(composition_preview)} {
   synchronize_document_state();
 }
 
 EditorSession::EditorSession(application::ProjectRestoreState restore_state,
                              application::PlaybackWorkerFactory worker_factory,
                              application::AudioPlaybackSourceFactory audio_source_factory,
-                             std::unique_ptr<application::AudioOutput> audio_output)
+                             std::unique_ptr<application::AudioOutput> audio_output,
+                             std::unique_ptr<application::CompositionPreview> composition_preview)
     : document_{application::ProjectDocument::restore(std::move(restore_state))},
       processor_{document_},
       audio_output_{std::move(audio_output)},
       coordinator_{clock_, std::move(worker_factory), std::move(audio_source_factory),
-                   audio_output_.get()} {
+                   audio_output_.get(), std::move(composition_preview)} {
   synchronize_document_state();
 }
 

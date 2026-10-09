@@ -125,6 +125,9 @@ public:
   OfflineVideoRenderer& operator=(const OfflineVideoRenderer&) = delete;
 
   [[nodiscard]] OfflineVideoFrame render_frame(domain::FrameNumber frame_index);
+  // Shared visual engine entry point for asynchronous preview. Exact editorial
+  // time, including backward seeks; does not alter the sequential export index.
+  [[nodiscard]] OfflineVideoFrame render_at(domain::MediaTime timeline_time);
   [[nodiscard]] const OfflineVideoRenderMetrics& metrics() const noexcept { return metrics_; }
 
 private:
@@ -137,6 +140,8 @@ private:
   void open_source(domain::TrackId track_id, const ResolvedClip& clip, domain::MediaTime source_time);
   void update_live_frame_metric() noexcept;
   void check_cancelled() const;
+  [[nodiscard]] OfflineVideoFrame render_time(domain::FrameNumber frame_index,
+                                             domain::MediaTime timeline_time);
 
   const ExportPlan& plan_;
   OfflineVideoSourceFactory& source_factory_;

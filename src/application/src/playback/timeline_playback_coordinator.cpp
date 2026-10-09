@@ -22,12 +22,14 @@ namespace {
 TimelinePlaybackCoordinator::TimelinePlaybackCoordinator(const MonotonicClock& clock,
                                                          PlaybackWorkerFactory worker_factory,
                                                          AudioPlaybackSourceFactory audio_source_factory,
-                                                         AudioOutput* audio_output)
+                                                         AudioOutput* audio_output,
+                                                         std::unique_ptr<CompositionPreview> composition_preview)
     : clock_{clock},
       worker_factory_{std::move(worker_factory)},
       transport_{clock},
       audio_session_{std::make_unique<AudioMixPlaybackSession>(audio_output,
-                                                                std::move(audio_source_factory))} {}
+                                                                std::move(audio_source_factory))},
+      composition_preview_{std::move(composition_preview)} {}
 
 void TimelinePlaybackCoordinator::set_advance_permission(TimelineAdvancePermission permission) {
   advance_permission_ = permission;
@@ -56,6 +58,12 @@ void TimelinePlaybackCoordinator::set_snapshot(ProjectSnapshot snapshot) {
   reanchor_transport(position);
   reset_source();
   snapshot_ = std::move(snapshot);
+  current_composite_.reset();
+  composition_error_.reset();
+  if (composition_preview_) {
+    if (uses_composition()) composition_preview_->configure(*snapshot_);
+    else composition_preview_->invalidate();
+  }
   audio_session_->configure(*snapshot_);
   segment_kind_ = SegmentKind::None;
   current_presentation_.reset();
@@ -64,12 +72,15 @@ void TimelinePlaybackCoordinator::set_snapshot(ProjectSnapshot snapshot) {
   active_missing_.reset();
   segment_end_.reset();
   semantic_condition_ = PlaybackSemanticCondition::Inactive;
-  const auto outcome = resolve_clip_at(*snapshot_, snapshot_->video_track_id, position);
-  reconcile(outcome, position, true);
+  if (!uses_composition()) {
+    const auto outcome = resolve_clip_at(*snapshot_, snapshot_->video_track_id, position);
+    reconcile(outcome, position, true);
+  }
   synchronize_transport();
 }
 
 void TimelinePlaybackCoordinator::play() {
+  if (uses_composition() && composition_error_) return;
   intent_ = PlaybackIntent::Playing;
   if (editorial_transition_pending_ && editorial_video_fresh_) {
     // A paused caller has already received the fresh frame on a previous
@@ -80,7 +91,7 @@ void TimelinePlaybackCoordinator::play() {
   const auto* video_track = snapshot_.has_value()
                                 ? snapshot_->timeline.find_track(snapshot_->video_track_id)
                                 : nullptr;
-  const bool has_video_track = video_track != nullptr && !video_track->clips().empty();
+  const bool has_video_track = uses_composition() || (video_track != nullptr && !video_track->clips().empty());
   if (audio_session_ != nullptr && (!editorial_transition_pending_ || !has_video_track)) {
     audio_session_->play();
   }
@@ -127,9 +138,13 @@ void TimelinePlaybackCoordinator::seek(domain::MediaTime timeline_position_value
   // queued device PCM before publishing the new video segment or resuming the
   // transport, so no old audio can observe the new editorial position.
   audio_session_->seek(timeline_position_value);
+  current_composite_.reset();
+  composition_error_.reset();
+  if (composition_preview_) composition_preview_->invalidate();
   clock_source_ = intent_ == PlaybackIntent::Playing ? PlaybackClockSource::Software
                                                        : PlaybackClockSource::Paused;
-  reconcile(outcome, timeline_position_value, true);
+  if (uses_composition()) set_advance_permission(TimelineAdvancePermission::Hold);
+  else reconcile(outcome, timeline_position_value, true);
   synchronize_transport();
 }
 
@@ -137,6 +152,7 @@ TimelinePresentation TimelinePlaybackCoordinator::update() {
   if (!snapshot_.has_value()) {
     return TimelineEndedPresentation{domain::MediaTime::zero(), domain::MediaTime::zero()};
   }
+  if (uses_composition()) return update_composition();
 
   const auto present_at = [this](domain::MediaTime position) {
     const auto outcome = resolve_clip_at(*snapshot_, snapshot_->video_track_id, position);
@@ -191,6 +207,48 @@ TimelinePresentation TimelinePlaybackCoordinator::update() {
     return present_at(after_audio);
   }
   return first;
+}
+
+TimelinePresentation TimelinePlaybackCoordinator::update_composition() {
+  if (composition_error_) return TimelineCompositionPending{timeline_position(), composition_error_};
+  if (!composition_preview_) {
+    return TimelineCompositionPending{timeline_position(), "composition preview is not configured"};
+  }
+  if (editorial_transition_pending_ && editorial_video_handoff_complete_) {
+    editorial_transition_pending_ = false;
+    if (intent_ == PlaybackIntent::Playing) audio_session_->play();
+  }
+  if (!editorial_transition_pending_) synchronize_audio_clock();
+  const auto position = timeline_position();
+  const auto duration = snapshot_->timeline.duration();
+  if (position >= duration) {
+    enter_ended(TimelineEnded{position, duration}, false);
+    return make_ended(TimelineEnded{position, duration});
+  }
+  composition_preview_->request(position);
+  if (auto result = composition_preview_->take()) {
+    if (result->error) {
+      composition_error_ = result->error;
+      audio_session_->pause();
+      clock_source_ = PlaybackClockSource::Paused;
+      set_advance_permission(TimelineAdvancePermission::Hold);
+      synchronize_transport();
+      semantic_condition_ = PlaybackSemanticCondition::Error;
+      current_composite_.reset();
+      return TimelineCompositionPending{position, result->error};
+    }
+    current_composite_ = TimelineCompositionPresentation{std::move(*result)};
+    editorial_video_fresh_ = true;
+    editorial_video_handoff_complete_ = true;
+    set_advance_permission(TimelineAdvancePermission::Advance);
+    segment_kind_ = SegmentKind::Clip;
+    semantic_condition_ = PlaybackSemanticCondition::Present;
+    synchronize_transport();
+    if (clock_source_ == PlaybackClockSource::AudioDevice) transport_.pause();
+  }
+  if (current_composite_) return *current_composite_;
+  semantic_condition_ = PlaybackSemanticCondition::Starved;
+  return TimelineCompositionPending{position, std::nullopt};
 }
 
 domain::MediaTime TimelinePlaybackCoordinator::timeline_position() const {
@@ -312,6 +370,10 @@ void TimelinePlaybackCoordinator::enter_ended(const TimelineEnded& ended, bool f
     return;
   }
   reset_source();
+  if (uses_composition() && composition_preview_) {
+    composition_preview_->invalidate();
+    current_composite_.reset();
+  }
   active_clip_.reset();
   active_missing_.reset();
   source_creation_error_.reset();
@@ -433,8 +495,10 @@ void TimelinePlaybackCoordinator::synchronize_audio_clock() {
       audio_session_->state() == AudioPlaybackState::Recovering) {
     audio_session_->play();
   }
-  if (audio_session_->state() == AudioPlaybackState::Running &&
-      audio_session_->has_device_clock()) {
+  // The device may have started after the last mix condition was recorded
+  // (Ready). Its clock is authoritative immediately, including that first tick.
+  if ((audio_session_->state() == AudioPlaybackState::Running ||
+       audio_session_->state() == AudioPlaybackState::Ready) && audio_session_->has_device_clock()) {
     apply_audio_condition(AudioPlaybackCondition::Present);
     if (const auto position = audio_session_->clock_position(); position.has_value()) {
       const auto editorial_position = timeline_position();

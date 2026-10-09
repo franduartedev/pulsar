@@ -6,6 +6,10 @@
 
 #include <pulsar/media/ffmpeg/ffmpeg_preview_converter.hpp>
 #include <pulsar/media/ffmpeg/ffmpeg_video_decode_session.hpp>
+#include <pulsar/media/ffmpeg/ffmpeg_media_probe.hpp>
+#include <pulsar/media/ffmpeg/ffmpeg_offline_video_source.hpp>
+#include <pulsar/media/ffmpeg/ffmpeg_offline_frame_scaler.hpp>
+#include <pulsar/project_file/file_project_repository.hpp>
 
 #include <QEventLoop>
 #include <QGuiApplication>
@@ -13,6 +17,7 @@
 
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <filesystem>
 #include <functional>
 #include <vector>
@@ -193,6 +198,45 @@ int main(int argc, char** argv) {
   REQUIRE(15, wait_until([&] { return !controller.exportRunning(); }));
   const auto same_size = frame_at(destination720, t);
   REQUIRE(16, same_size.width == 320 && same_size.height == 180);
+
+  // A persisted multi-layer document previews through the same renderer, then titles.
+  const auto multi_path = root / "multi.pulsar";
+  REQUIRE(70, controller.saveProject(QString::fromStdString(multi_path.string())));
+  pulsar::project_file::FileProjectRepository repository;
+  auto document = pulsar::application::ProjectDocument::restore(repository.load(multi_path));
+  pulsar::application::CommandProcessor processor{document};
+  const auto upper_media = processor.import_asset(fs::path{PULSAR_SOURCE_DIR} / "tests/fixtures/e6_video_b.mp4",
+      pulsar::media::ffmpeg::FFmpegMediaProbe{});
+  auto multi = document.snapshot();
+  const auto track_id = document.next_track_id();
+  multi.timeline.add_track(pulsar::domain::Track{track_id, pulsar::domain::TrackKind::Video});
+  multi.timeline.insert_clip(track_id, pulsar::domain::Clip{document.next_clip_id(), upper_media,
+      {MediaTime::zero(), MediaTime{2, {1, 1}}}, MediaTime::zero()});
+  multi.visual_track_ids.push_back(track_id);
+  ++multi.allocator_state.next_track_id;
+  ++multi.allocator_state.next_clip_id;
+  (void)repository.save(multi_path, multi);
+  REQUIRE(71, controller.openProject(QString::fromStdString(multi_path.string())));
+  const auto multi_plan = pulsar::application::exporting::ExportPlan::build(multi);
+  pulsar::media::ffmpeg::FFmpegOfflineVideoSourceFactory sources;
+  pulsar::media::ffmpeg::FFmpegOfflineFrameScaler scaler;
+  composition::TitleCompositor multi_titles{std::make_shared<QtTitleRasterizer>()};
+  pulsar::application::exporting::OfflineVideoRenderer renderer{multi_plan, sources, {&scaler, &multi_titles}};
+  for (const auto position : {1, 2, 0, 1}) {
+    controller.seekNormalized(0.75);
+    controller.seekNormalized(0.0);
+    controller.seekNormalized(position / 4.0);
+    const auto expected_multi = renderer.render_at(MediaTime{position, {1, 1}});
+    REQUIRE(72, wait_until([&] {
+      const auto actual = provider.requestImage(QStringLiteral("current"), nullptr, {});
+      if (actual.width() != expected_multi.width || actual.height() != expected_multi.height) return false;
+      for (int y = 0; y < actual.height(); ++y) {
+        if (std::memcmp(actual.constScanLine(y), expected_multi.pixels.data() +
+            std::size_t(y) * expected_multi.stride_bytes, std::size_t(expected_multi.width) * 4) != 0) return false;
+      }
+      return true;
+    }));
+  }
   fs::remove_all(root);
   return 0;
 }

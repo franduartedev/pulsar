@@ -1631,11 +1631,11 @@ bool DesktopController::openProjectImpl(const QString& path, std::optional<pulsa
         pulsar::media::qt_audio::QtAudioOutput::Options{{48000 * 2}, {}});
     auto candidate = std::make_unique<pulsar::desktop::EditorSession>(
         std::move(restore_state), makeWorkerFactory(candidate_mailbox, project_path),
-        makeAudioSourceFactory(project_path), std::move(candidate_output));
+        makeAudioSourceFactory(project_path), std::move(candidate_output), makeCompositionPreview(project_path));
 #else
     auto candidate = std::make_unique<pulsar::desktop::EditorSession>(
         std::move(restore_state), makeWorkerFactory(candidate_mailbox, project_path),
-        makeAudioSourceFactory(project_path));
+        makeAudioSourceFactory(project_path), std::unique_ptr<pulsar::application::AudioOutput>{}, makeCompositionPreview(project_path));
 #endif
     resetImportQueue();
     active_session_ = std::move(candidate);
@@ -2432,11 +2432,11 @@ std::unique_ptr<pulsar::desktop::EditorSession> DesktopController::makeEditorSes
       pulsar::media::qt_audio::QtAudioOutput::Options{{48000 * 2}, {}});
   return std::make_unique<pulsar::desktop::EditorSession>(
       makeWorkerFactory(visual_mailbox_, std::filesystem::path{}),
-      makeAudioSourceFactory(std::filesystem::path{}), std::move(output));
+      makeAudioSourceFactory(std::filesystem::path{}), std::move(output), makeCompositionPreview({}));
 #else
   return std::make_unique<pulsar::desktop::EditorSession>(
       makeWorkerFactory(visual_mailbox_, std::filesystem::path{}),
-      makeAudioSourceFactory(std::filesystem::path{}));
+      makeAudioSourceFactory(std::filesystem::path{}), std::unique_ptr<pulsar::application::AudioOutput>{}, makeCompositionPreview({}));
 #endif
 }
 
@@ -2457,6 +2457,13 @@ pulsar::application::PlaybackWorkerFactory DesktopController::makeWorkerFactory(
     ++worker_construction_count_;
     return worker;
   };
+}
+
+std::unique_ptr<pulsar::application::CompositionPreview> DesktopController::makeCompositionPreview(
+    const std::filesystem::path& project_file) {
+  return std::make_unique<pulsar::application::AsyncCompositionPreview>(
+      std::make_unique<ResolvingExportVideoSourceFactory>(project_file),
+      std::make_unique<pulsar::media::ffmpeg::FFmpegOfflineFrameScaler>());
 }
 
 pulsar::application::AudioPlaybackSourceFactory DesktopController::makeAudioSourceFactory(
@@ -2511,7 +2518,7 @@ void DesktopController::workerLoop() {
   }
 }
 
-void DesktopController::presentTimeline(const pulsar::application::TimelinePresentation& presentation){std::visit([this](const auto& value){using T=std::decay_t<decltype(value)>;if constexpr(std::is_same_v<T,pulsar::application::TimelinePresentSample>){displayLease(value);}else if constexpr(std::is_same_v<T,pulsar::application::TimelineHoldPresentation>){pulsar::application::TimelinePresentSample present{value.clip_id,value.media_id,value.timeline_position,value.sample};displayLease(present);}else if constexpr(std::is_same_v<T,pulsar::application::TimelineGapPresentation>||std::is_same_v<T,pulsar::application::TimelineSourceGapPresentation>){if(!showTitleOverGap())clearProgram(has_video_media_ ? "gap" : "empty");}else if constexpr(std::is_same_v<T,pulsar::application::TimelineMissingMediaPresentation>){clearProgram(has_video_media_ ? "missing" : "empty");}else if constexpr(std::is_same_v<T,pulsar::application::TimelineStarvedPresentation>){
+void DesktopController::presentTimeline(const pulsar::application::TimelinePresentation& presentation){std::visit([this](const auto& value){using T=std::decay_t<decltype(value)>;if constexpr(std::is_same_v<T,pulsar::application::TimelineCompositionPresentation>){displayComposition(value);}else if constexpr(std::is_same_v<T,pulsar::application::TimelineCompositionPending>){if(value.error){setError(QString::fromStdString(*value.error));clearProgram("error");}else clearProgram("loading");}else if constexpr(std::is_same_v<T,pulsar::application::TimelinePresentSample>){displayLease(value);}else if constexpr(std::is_same_v<T,pulsar::application::TimelineHoldPresentation>){pulsar::application::TimelinePresentSample present{value.clip_id,value.media_id,value.timeline_position,value.sample};displayLease(present);}else if constexpr(std::is_same_v<T,pulsar::application::TimelineGapPresentation>||std::is_same_v<T,pulsar::application::TimelineSourceGapPresentation>){if(!showTitleOverGap())clearProgram(has_video_media_ ? "gap" : "empty");}else if constexpr(std::is_same_v<T,pulsar::application::TimelineMissingMediaPresentation>){clearProgram(has_video_media_ ? "missing" : "empty");}else if constexpr(std::is_same_v<T,pulsar::application::TimelineStarvedPresentation>){
   const auto epoch = visual_mailbox_->active_epoch();
   const auto generation = active_session_->document().document_generation();
   const bool same = displayed_identity_.has_value() && displayed_identity_->session_epoch == editor_session_epoch_ &&
@@ -2524,7 +2531,23 @@ void DesktopController::presentTimeline(const pulsar::application::TimelinePrese
   if (!same && viewer_state_ != "frame") clearProgram("loading");
 }else if constexpr(std::is_same_v<T,pulsar::application::TimelineSourceEndedEarlyPresentation>||std::is_same_v<T,pulsar::application::TimelineSourceErrorPresentation>){clearProgram("error");}else if constexpr(std::is_same_v<T,pulsar::application::TimelineEndedPresentation>){clearProgram("ended");}},presentation);}
 void DesktopController::displayLease(const pulsar::application::TimelinePresentSample& present){const auto source_epoch=visual_mailbox_->active_epoch();const auto generation=active_session_->document().document_generation();VisualIdentity identity{editor_session_epoch_,generation,present.clip_id,present.media_id,source_epoch,present.sample.ordinal};if(displayed_identity_&&displayed_identity_.value().session_epoch==identity.session_epoch&&displayed_identity_->document_generation==identity.document_generation&&displayed_identity_->clip_id==identity.clip_id&&displayed_identity_->media_id==identity.media_id&&displayed_identity_->source_epoch==identity.source_epoch&&displayed_identity_->ordinal==identity.ordinal&&viewer_state_=="frame")return;auto lease=visual_mailbox_->take(source_epoch,present.sample.ordinal);if(!lease){++visual_misses_;clearProgram("loading");return;}try{FFmpegPreviewConverter converter;auto preview=converter.convert(*lease);composeTitlesOnPreview(preview,present.timeline_position);image_provider_.setImage(imageFromPreview(preview));last_conversion_time_=preview.conversion_time;conversion_durations_.push(preview.conversion_time);++conversion_count_;displayed_identity_=identity;viewer_state_="frame";++displayed_frames_;++preview_revision_;preview_source_=QString("image://pulsar-preview/current?rev=%1").arg(preview_revision_);emit previewChanged();}catch(const std::exception& error){setError(QString::fromUtf8(error.what()));clearProgram("error");}}
-void DesktopController::clearProgram(QString state){title_gap_key_.clear();const bool changed=viewer_state_!=state||!preview_source_.isEmpty();image_provider_.clear();preview_source_.clear();displayed_identity_.reset();viewer_state_=std::move(state);if(changed)emit previewChanged();}
+void DesktopController::displayComposition(const pulsar::application::TimelineCompositionPresentation& presentation) {
+  const auto& result = presentation.composite;
+  if (!result.surface || displayed_composite_.lock() == result.surface) return;
+  auto canvas = *result.surface;
+  title_compositor_.composite({canvas.width, canvas.height, canvas.stride_bytes, canvas.pixels.data()},
+      active_session_->document().titles(), result.timeline_time);
+  image_provider_.setImage(QImage(canvas.pixels.data(), canvas.width, canvas.height,
+      canvas.stride_bytes, QImage::Format_RGBA8888).copy());
+  displayed_composite_ = result.surface;
+  composition_render_metrics_ = result.render_metrics;
+  viewer_state_ = "frame";
+  ++displayed_frames_;
+  ++preview_revision_;
+  preview_source_ = QString("image://pulsar-preview/current?rev=%1").arg(preview_revision_);
+  emit previewChanged();
+}
+void DesktopController::clearProgram(QString state){displayed_composite_.reset();title_gap_key_.clear();const bool changed=viewer_state_!=state||!preview_source_.isEmpty();image_provider_.clear();preview_source_.clear();displayed_identity_.reset();viewer_state_=std::move(state);if(changed)emit previewChanged();}
 void DesktopController::updateTick(){if(!active_session_||!has_media_){return;}try{const auto presentation=active_session_->update_playback();presentTimeline(presentation);const bool now_playing=active_session_->playback_intent()==pulsar::application::PlaybackIntent::Playing;if(now_playing!=playing_){playing_=now_playing;emit playbackChanged();}updatePositionProperties();updateDiagnostics();}catch(const std::exception& error){active_session_->pause();playing_=false;emit playbackChanged();clearProgram("error");setError(QString::fromUtf8(error.what()));setStatus("Error");}}
 void DesktopController::updatePositionProperties(){if(!active_session_)return;const auto position=active_session_->playback_position();const auto duration=active_session_->timeline_duration();position_text_=formatTime(position);duration_text_=formatTime(duration);progress_=duration>MediaTime::zero()?std::clamp(secondsAsDouble(position)/secondsAsDouble(duration),0.0,1.0):0.0;timeline_playhead_progress_=timeline_view_start_&&timeline_view_duration_&&position>=*timeline_view_start_&&position<=*timeline_view_start_+*timeline_view_duration_?timelinePixelAt(position,1.0):-1.0;emit positionChanged();emit selectedTitleOnScreenChanged();emit timelinePlayheadChanged();emit editActionStateChanged();}
 void DesktopController::publishProjectDirty() {
@@ -2580,6 +2603,15 @@ QString DesktopController::performanceSnapshot() const {
   const auto mailbox = visual_mailbox_ != nullptr ? visual_mailbox_->stats()
                                                   : pulsar::media::ffmpeg::FFmpegPlaybackVisualMailbox::Stats{};
   QStringList lines;
+  const auto composition_stats = active_session_ ? active_session_->composition_metrics()
+      : pulsar::application::CompositionPreviewMetrics{};
+  lines << QStringLiteral("composition.completed=%1 coalesced=%2 stale=%3 replaced=%4")
+      .arg(composition_stats.completed).arg(composition_stats.requests_coalesced)
+      .arg(composition_stats.stale_discarded).arg(composition_stats.results_replaced);
+  lines << QStringLiteral("composition.layers=%1 decoders=%2 source_frames=%3 scale_ns=%4 composite_ns=%5")
+      .arg(composition_render_metrics_.peak_active_layers).arg(composition_render_metrics_.peak_active_decoders)
+      .arg(composition_render_metrics_.peak_live_source_frames).arg(composition_render_metrics_.scale_nanoseconds)
+      .arg(composition_render_metrics_.composite_nanoseconds);
   lines << QStringLiteral("desktop.sync_performed_count=%1").arg(sync_performed);
   lines << QStringLiteral("desktop.sync_skipped_count=%1").arg(sync_skipped);
   lines << QStringLiteral("desktop.sync_p50_us=%1").arg(to_microseconds(sync_p50));

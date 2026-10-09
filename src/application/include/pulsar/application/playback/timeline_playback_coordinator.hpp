@@ -2,6 +2,7 @@
 
 #include <pulsar/application/playback/audio_mix_playback_session.hpp>
 #include <pulsar/application/playback/playback_session.hpp>
+#include <pulsar/application/playback/composition_preview.hpp>
 #include <pulsar/application/timeline/timeline_clip_resolver.hpp>
 
 #include <filesystem>
@@ -68,11 +69,19 @@ struct TimelineEndedPresentation {
   domain::MediaTime duration;
 };
 
+struct TimelineCompositionPresentation {
+  CompositionPreviewResult composite;
+};
+struct TimelineCompositionPending {
+  domain::MediaTime timeline_position;
+  std::optional<std::string> error;
+};
+
 using TimelinePresentation = std::variant<
     TimelinePresentSample, TimelineHoldPresentation, TimelineSourceGapPresentation,
     TimelineGapPresentation, TimelineMissingMediaPresentation, TimelineStarvedPresentation,
     TimelineSourceEndedEarlyPresentation, TimelineSourceErrorPresentation,
-    TimelineEndedPresentation>;
+    TimelineEndedPresentation, TimelineCompositionPresentation, TimelineCompositionPending>;
 
 using PlaybackWorkerFactory = std::function<std::unique_ptr<PlaybackMediaWorker>(
     const std::filesystem::path& source_locator, int video_stream_index)>;
@@ -100,7 +109,8 @@ class TimelinePlaybackCoordinator {
 public:
   TimelinePlaybackCoordinator(const MonotonicClock& clock, PlaybackWorkerFactory worker_factory,
                               AudioPlaybackSourceFactory audio_source_factory = {},
-                              AudioOutput* audio_output = nullptr);
+                               AudioOutput* audio_output = nullptr,
+                               std::unique_ptr<CompositionPreview> composition_preview = {});
   ~TimelinePlaybackCoordinator() = default;
 
   TimelinePlaybackCoordinator(const TimelinePlaybackCoordinator&) = delete;
@@ -120,6 +130,9 @@ public:
   }
   [[nodiscard]] const AudioMixPlaybackMetrics& audio_metrics() const noexcept {
     return audio_session_->metrics();
+  }
+  [[nodiscard]] CompositionPreviewMetrics composition_metrics() const {
+    return composition_preview_ ? composition_preview_->metrics() : CompositionPreviewMetrics{};
   }
 
 private:
@@ -159,6 +172,10 @@ private:
   void reset_source();
   void synchronize_audio_clock();
   void apply_audio_condition(AudioPlaybackCondition condition);
+  [[nodiscard]] TimelinePresentation update_composition();
+  [[nodiscard]] bool uses_composition() const noexcept {
+    return snapshot_ && snapshot_->visual_track_ids.size() > 1;
+  }
 
   const MonotonicClock& clock_;
   PlaybackWorkerFactory worker_factory_;
@@ -166,6 +183,9 @@ private:
   std::optional<ProjectSnapshot> snapshot_;
   std::unique_ptr<PlaybackSession> source_session_;
   std::unique_ptr<AudioMixPlaybackSession> audio_session_;
+  std::unique_ptr<CompositionPreview> composition_preview_;
+  std::optional<TimelineCompositionPresentation> current_composite_;
+  std::optional<std::string> composition_error_;
   std::optional<ResolvedClip> active_clip_;
   std::optional<MissingClipMedia> active_missing_;
   std::optional<domain::MediaTime> segment_end_;

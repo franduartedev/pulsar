@@ -31,6 +31,7 @@ add_library(pulsar_application
   src/playback/timeline_playback_coordinator.cpp
   src/playback/presentation_scheduler.cpp
   src/playback/frame_coverage.cpp
+  src/playback/composition_preview.cpp
   src/playback/video_source.cpp
 )
 

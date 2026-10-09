@@ -187,14 +187,16 @@ public:
   EditorSession();
   explicit EditorSession(application::PlaybackWorkerFactory worker_factory,
                          application::AudioPlaybackSourceFactory audio_source_factory = {},
-                         std::unique_ptr<application::AudioOutput> audio_output = {});
+                         std::unique_ptr<application::AudioOutput> audio_output = {},
+                         std::unique_ptr<application::CompositionPreview> composition_preview = {});
   // Builds a completely fresh session from loaded restore state: new document,
   // new processor/history, new coordinator, no selection. Throws without
   // mutating any existing session; callers replace atomically on success.
   explicit EditorSession(application::ProjectRestoreState restore_state,
                          application::PlaybackWorkerFactory worker_factory,
                          application::AudioPlaybackSourceFactory audio_source_factory = {},
-                         std::unique_ptr<application::AudioOutput> audio_output = {});
+                         std::unique_ptr<application::AudioOutput> audio_output = {},
+                         std::unique_ptr<application::CompositionPreview> composition_preview = {});
   ~EditorSession() = default;
   EditorSession(const EditorSession&) = delete;
   EditorSession& operator=(const EditorSession&) = delete;
@@ -216,6 +218,9 @@ public:
   [[nodiscard]] application::PlaybackIntent playback_intent() const noexcept;
   [[nodiscard]] const application::AudioMixPlaybackMetrics& audio_metrics() const noexcept {
     return coordinator_.audio_metrics();
+  }
+  [[nodiscard]] application::CompositionPreviewMetrics composition_metrics() const {
+    return coordinator_.composition_metrics();
   }
   void seek(domain::MediaTime position);
   [[nodiscard]] domain::MediaTime playback_position() const;

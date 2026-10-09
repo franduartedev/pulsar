@@ -291,6 +291,62 @@ ProjectSnapshot snapshot_with_clip(Fixture& fixture, MediaId media, TimeRange so
   return fixture.document.snapshot();
 }
 
+class ControlledComposition final : public application::CompositionPreview {
+public:
+  std::optional<application::CompositionPreviewResult> ready;
+  MediaTime requested{MediaTime::zero()};
+  int invalidations{0};
+  void configure(ProjectSnapshot) override { invalidate(); }
+  void invalidate() override { ++invalidations; ready.reset(); }
+  void request(MediaTime position) override { requested = position; }
+  std::optional<application::CompositionPreviewResult> take() override {
+    auto result = std::move(ready);
+    ready.reset();
+    return result;
+  }
+  application::CompositionPreviewMetrics metrics() const override { return {}; }
+};
+
+void composition_handoff_seek_and_audio_authority() {
+  Fixture fixture;
+  auto snapshot = snapshot_with_clip(fixture, fixture.media_one, {time(0), time(10)}, time(0));
+  snapshot.timeline.add_track(domain::Track{domain::TrackId{9}, domain::TrackKind::Video});
+  snapshot.visual_track_ids.push_back(domain::TrackId{9});
+  FakeClock clock;
+  SyncOutput output;
+  auto preview = std::make_unique<ControlledComposition>();
+  auto* control = preview.get();
+  TimelinePlaybackCoordinator coordinator{clock, fixture.factory(),
+      [](const std::filesystem::path&, int) { return std::make_unique<SyncAudioSource>(); },
+      &output, std::move(preview)};
+  coordinator.set_snapshot(snapshot);
+  coordinator.play();
+  clock.advance(time(5));
+  assert(std::holds_alternative<application::TimelineCompositionPending>(coordinator.update()));
+  assert(coordinator.timeline_position() == time(0) && !output.running());
+  assert(fixture.factory_calls == 0); // no duplicate primary decoder outside the shared engine
+  control->ready = application::CompositionPreviewResult{time(0),
+      std::make_shared<const application::composition::RgbaSurface>(application::composition::black_surface(2, 2)), {}, {}};
+  assert(std::holds_alternative<application::TimelineCompositionPresentation>(coordinator.update()));
+  assert(!output.running()); // composite is handed off before audio can run
+  (void)coordinator.update();
+  assert(output.running());
+  output.advance(4410);
+  clock.advance(time(5));
+  const auto held = coordinator.update();
+  assert(std::holds_alternative<application::TimelineCompositionPresentation>(held));
+  assert(coordinator.clock_source() == application::PlaybackClockSource::AudioDevice);
+  assert(coordinator.timeline_position() < time(1));
+  assert(std::get<application::TimelineCompositionPresentation>(held).composite.timeline_time == time(0));
+  coordinator.seek(time(2));
+  assert(std::holds_alternative<application::TimelineCompositionPending>(coordinator.update()));
+  assert(control->requested == time(2) && !output.running());
+  const auto invalidations = control->invalidations;
+  coordinator.set_snapshot(snapshot);
+  assert(control->invalidations == invalidations + 1);
+  assert(std::holds_alternative<application::TimelineCompositionPending>(coordinator.update()));
+}
+
 void one_clock_play_pause_resume_and_origin_mapping() {
   Fixture fixture;
   const auto snapshot = snapshot_with_clip(fixture, fixture.media_one, TimeRange{time(0), time(10)}, time(0));
@@ -1124,6 +1180,7 @@ void audio_clock_crosses_boundary_before_video_mapping() {
 } // namespace
 
 int main() {
+  composition_handoff_seek_and_audio_authority();
   one_clock_play_pause_resume_and_origin_mapping();
   gaps_and_missing_continue_clock();
   contiguous_same_and_different_media_switches();

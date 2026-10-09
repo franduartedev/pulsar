@@ -245,6 +245,22 @@ OfflineVideoFrame OfflineVideoRenderer::render_frame(domain::FrameNumber frame_i
   }
 
   const auto timeline_time = output_frame_time(frame_index, plan_.frame_rate());
+  auto output = render_time(frame_index, timeline_time);
+  ++next_frame_index_;
+  return output;
+}
+
+OfflineVideoFrame OfflineVideoRenderer::render_at(domain::MediaTime timeline_time) {
+  if (timeline_time < domain::MediaTime::zero() || timeline_time >= plan_.editorial_duration()) {
+    throw OfflineVideoRenderError{OfflineVideoRenderErrorCode::InternalInvariant,
+                                  "preview time is outside the editorial range"};
+  }
+  return render_time(domain::FrameNumber{output_frame_index_at(timeline_time, plan_.frame_rate(),
+      domain::RoundingMode::Floor)}, timeline_time);
+}
+
+OfflineVideoFrame OfflineVideoRenderer::render_time(domain::FrameNumber frame_index,
+                                                    domain::MediaTime timeline_time) {
   check_cancelled();
   const auto composition = resolve_visual_composition(plan_.snapshot(), timeline_time);
   std::ostringstream diagnostic;
@@ -285,7 +301,6 @@ OfflineVideoFrame OfflineVideoRenderer::render_frame(domain::FrameNumber frame_i
       options_.titles->composite(composition::RgbaCanvas{output.width, output.height, output.stride_bytes, output.pixels.data()},
                                  plan_.snapshot().titles, timeline_time);
     }
-    ++next_frame_index_;
     ++metrics_.output_frames;
     return output;
   } catch (OfflineVideoRenderError& error) {
