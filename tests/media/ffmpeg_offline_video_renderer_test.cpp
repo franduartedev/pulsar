@@ -117,6 +117,41 @@ void normalizes_non_zero_stream_origin() {
   std::filesystem::remove(path);
 }
 
+void preserves_declared_gaps_from_real_media() {
+  using namespace pulsar;
+  const auto path = std::filesystem::temp_directory_path() /
+      ("pulsar-declared-gap-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".mkv");
+  const auto command = shell_quote(PULSAR_TEST_FFMPEG_CLI) +
+      " -y -hide_banner -loglevel error -f lavfi -i testsrc2=size=64x36:rate=25:duration=1"
+      " -vf setpts=2*PTS -fps_mode passthrough -c:v ffv1 -an " + shell_quote(path);
+  if (std::system(command.c_str()) != 0) throw std::runtime_error{"could not create declared-gap fixture"};
+  try {
+    application::ProjectDocument document;
+    application::CommandProcessor processor{document};
+    const auto id = processor.import_asset(path, OriginProbe{domain::MediaTime{2, {1, 1}}});
+    (void)processor.add_clip(id, {{0, {1, 1}}, {1, {1, 1}}}, domain::MediaTime::zero());
+    const auto plan = application::exporting::ExportPlan::build(document.snapshot());
+    media::ffmpeg::FFmpegOfflineVideoSourceFactory factory;
+    auto source = factory.open(path, 0);
+    const auto seek = source->seek_to_presentation_timestamp(domain::MediaTime::zero());
+    assert(seek.candidate && seek.lookahead);
+    assert((seek.candidate->presentation_duration == domain::MediaTime{1, {1, 25}}));
+    assert((seek.lookahead->presentation_timestamp == domain::MediaTime{2, {1, 25}}));
+    application::exporting::OfflineVideoRenderer renderer{plan, factory};
+    (void)renderer.render_frame(domain::FrameNumber{0});
+    const auto gap = renderer.render_frame(domain::FrameNumber{1});
+    for (std::size_t i = 0; i < gap.pixels.size(); i += 4) {
+      assert(gap.pixels[i] == 0 && gap.pixels[i + 1] == 0 && gap.pixels[i + 2] == 0 && gap.pixels[i + 3] == 255);
+    }
+    const auto next = renderer.render_frame(domain::FrameNumber{2});
+    assert(next.pixels != gap.pixels);
+  } catch (...) {
+    std::filesystem::remove(path);
+    throw;
+  }
+  std::filesystem::remove(path);
+}
+
 void multilayer_real_decode_matches_single_track() {
   using namespace pulsar;
   application::ProjectDocument document;
@@ -242,6 +277,7 @@ void renders_h264_24fps_non_frame_aligned_source_range() {
 } // namespace
 
 int main() {
+  preserves_declared_gaps_from_real_media();
   multilayer_real_decode_matches_single_track();
   renders_real_fixture_sequentially();
   normalizes_non_zero_stream_origin();

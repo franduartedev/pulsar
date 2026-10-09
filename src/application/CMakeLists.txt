@@ -30,6 +30,7 @@ add_library(pulsar_application
   src/playback/audio_mix_playback_session.cpp
   src/playback/timeline_playback_coordinator.cpp
   src/playback/presentation_scheduler.cpp
+  src/playback/frame_coverage.cpp
   src/playback/video_source.cpp
 )
 

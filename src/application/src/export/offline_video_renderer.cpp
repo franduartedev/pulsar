@@ -1,5 +1,6 @@
 #include <pulsar/application/export/offline_video_renderer.hpp>
 #include <pulsar/application/composition/visual_composition_resolver.hpp>
+#include <pulsar/application/playback/frame_coverage.hpp>
 
 #include <algorithm>
 #include <chrono>
@@ -115,7 +116,7 @@ void OfflineVideoRenderer::open_source(domain::TrackId track_id, const ResolvedC
   update_live_frame_metric();
 }
 
-const OfflineVideoSourceFrame& OfflineVideoRenderer::select_source_frame(
+const OfflineVideoSourceFrame* OfflineVideoRenderer::select_source_frame(
     domain::TrackId track_id, const ResolvedClip& clip, domain::MediaTime source_time) {
   const auto found = active_sources_.find(track_id.value());
   const auto* active_source = found == active_sources_.end() ? nullptr : found->second.get();
@@ -145,8 +146,10 @@ const OfflineVideoSourceFrame& OfflineVideoRenderer::select_source_frame(
   if (active.candidate.has_value()) check_timestamp(*active.candidate);
   if (active.lookahead.has_value()) check_timestamp(*active.lookahead);
 
-  while (active.lookahead.has_value() &&
-         *active.lookahead->presentation_timestamp <= source_time) {
+  while (active.lookahead && (!active.candidate || frame_coverage(source_time,
+      *active.candidate->presentation_timestamp, active.candidate->presentation_duration,
+      active.lookahead->presentation_timestamp, false).kind == FrameCoverageKind::Advance)) {
+    if (!active.candidate && source_time < *active.lookahead->presentation_timestamp) return nullptr;
     check_cancelled();
     active.candidate = std::move(active.lookahead);
     active.lookahead.reset();
@@ -166,47 +169,20 @@ const OfflineVideoSourceFrame& OfflineVideoRenderer::select_source_frame(
     if (active.lookahead.has_value()) check_timestamp(*active.lookahead);
   }
 
-  if (!active.candidate.has_value() && active.lookahead.has_value()) {
-    // The target is before the first physical frame. The first frame is the
-    // only deterministic representation available for that interval.
-    active.candidate = std::move(active.lookahead);
-    active.lookahead.reset();
-  }
   if (!active.candidate.has_value()) {
     throw OfflineVideoRenderError{OfflineVideoRenderErrorCode::SourceEndedEarly,
                                   "offline video source ended before the requested time"};
   }
-  if (*active.candidate->presentation_timestamp > source_time) {
+  const auto coverage = frame_coverage(source_time, *active.candidate->presentation_timestamp,
+      active.candidate->presentation_duration,
+      active.lookahead ? active.lookahead->presentation_timestamp : std::nullopt, !active.lookahead);
+  if (coverage.kind == FrameCoverageKind::Gap) return nullptr;
+  if (coverage.kind != FrameCoverageKind::Covered) {
     throw OfflineVideoRenderError{OfflineVideoRenderErrorCode::SourceEndedEarly,
-                                  "offline video source has no frame at the requested time"};
-  }
-  if (!active.lookahead.has_value() &&
-      *active.candidate->presentation_timestamp < source_time) {
-    if (!active.candidate->presentation_duration.has_value() ||
-        *active.candidate->presentation_timestamp +
-                *active.candidate->presentation_duration <=
-            source_time) {
-      // A demuxer is allowed to end immediately after the final physical
-      // frame without exposing a duration for that frame.  The project
-      // already validated the half-open source range against the media
-      // duration, so the final decoded frame covers the remainder of this
-      // clip range.  Do not require a synthetic PTS at every output-grid
-      // instant.  An explicit duration still wins when the source provides
-      // one, because it can prove an actual gap before the clip boundary.
-      const auto nominal_output_duration = domain::MediaTime{
-          1, domain::Rational{plan_.frame_rate().rational().denominator(),
-                              plan_.frame_rate().rational().numerator()}};
-      if (active.candidate->presentation_duration.has_value() ||
-          source_time >= clip.source_range.end() ||
-          *active.candidate->presentation_timestamp + nominal_output_duration <= source_time) {
-        throw OfflineVideoRenderError{
-            OfflineVideoRenderErrorCode::SourceEndedEarly,
-            "offline video source ended before the requested interval"};
-      }
-    }
+                                  "offline video source ended before the requested interval"};
   }
   update_live_frame_metric();
-  return *active.candidate;
+  return &*active.candidate;
 }
 
 void OfflineVideoRenderer::compose_frame(composition::RgbaSurface& canvas, ActiveSource& active,
@@ -291,8 +267,8 @@ OfflineVideoFrame OfflineVideoRenderer::render_frame(domain::FrameNumber frame_i
       if (const auto* clip = std::get_if<ResolvedClip>(&layer.source)) {
         diagnostic << " clip_id=" << clip->clip_id.value() << " media_id=" << clip->media_id.value()
                    << " source_time=" << static_cast<double>(clip->source_time);
-        const auto& frame = select_source_frame(layer.track_id, *clip, clip->source_time);
-        compose_frame(canvas, *active_sources_.at(layer.track_id.value()), frame);
+        const auto* frame = select_source_frame(layer.track_id, *clip, clip->source_time);
+        if (frame) compose_frame(canvas, *active_sources_.at(layer.track_id.value()), *frame);
       } else if (std::holds_alternative<MissingClipMedia>(layer.source)) {
         throw OfflineVideoRenderError{OfflineVideoRenderErrorCode::MissingMedia,
                                       "offline video clip references missing media"};

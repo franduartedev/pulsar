@@ -87,6 +87,12 @@ pulsar_apply_project_options(pulsar_visual_compositor_tests)
 pulsar_apply_compiler_warnings(pulsar_visual_compositor_tests)
 add_test(NAME pulsar.application.visual_compositor COMMAND pulsar_visual_compositor_tests)
 
+add_executable(pulsar_frame_coverage_parity_tests application/frame_coverage_parity_test.cpp)
+target_link_libraries(pulsar_frame_coverage_parity_tests PRIVATE pulsar::application)
+pulsar_apply_project_options(pulsar_frame_coverage_parity_tests)
+pulsar_apply_compiler_warnings(pulsar_frame_coverage_parity_tests)
+add_test(NAME pulsar.application.frame_coverage_parity COMMAND pulsar_frame_coverage_parity_tests)
+
 add_executable(pulsar_timeline_clip_resolver_tests
   application/timeline_clip_resolver_test.cpp
 )

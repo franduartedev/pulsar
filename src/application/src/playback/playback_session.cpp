@@ -204,7 +204,8 @@ void PlaybackSession::request_read_if_needed(const PresentationDecision& decisio
   if (read_in_flight_ || source_exhausted_ || availability_ != PlaybackAvailability::Ready) {
     return;
   }
-  if (!std::holds_alternative<PresentationStarved>(decision)) {
+  if (!std::holds_alternative<PresentationStarved>(decision) &&
+      scheduler_.buffered_sample_count() >= 2) {
     return;
   }
 

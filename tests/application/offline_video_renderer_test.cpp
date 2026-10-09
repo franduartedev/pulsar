@@ -37,6 +37,7 @@ struct FakeFrame {
   std::uint8_t red;
   std::uint8_t green;
   std::uint8_t blue;
+  std::optional<domain::MediaTime> duration{};
 };
 
 std::shared_ptr<const application::exporting::OfflineVideoPixelBuffer> image(const FakeFrame& frame) {
@@ -57,7 +58,7 @@ std::shared_ptr<const application::exporting::OfflineVideoPixelBuffer> image(con
 }
 
 application::exporting::OfflineVideoSourceFrame source_frame(const FakeFrame& frame) {
-  return application::exporting::OfflineVideoSourceFrame{frame.timestamp, std::nullopt, image(frame)};
+  return application::exporting::OfflineVideoSourceFrame{frame.timestamp, frame.duration, image(frame)};
 }
 
 class FakeSource final : public exporting::OfflineVideoSource {
@@ -292,7 +293,7 @@ void trim_source_offset_and_errors_are_explicit() {
 
   FakeFactory eof_factory;
   eof_factory.sources["offset.mp4"] = {
-      FakeFrame{domain::MediaTime{1, {1, 1}}, 2, 2, 0, 255, 0},
+      FakeFrame{domain::MediaTime{1, {1, 1}}, 2, 2, 0, 255, 0, domain::MediaTime{1, {1, 1}}},
   };
   exporting::OfflineVideoRenderer eof_renderer{plan, eof_factory};
   (void)eof_renderer.render_frame(domain::FrameNumber{0});

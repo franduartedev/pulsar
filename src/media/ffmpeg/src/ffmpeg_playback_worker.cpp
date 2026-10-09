@@ -267,7 +267,7 @@ application::VideoSample FFmpegPlaybackWorker::to_sample(const DecodedVisualVide
           ? std::optional<application::StreamTimestamp>{
                 application::StreamTimestamp{*frame.presentation_timestamp}}
           : std::nullopt,
-      std::nullopt,
+      frame.presentation_duration,
   };
 }
 

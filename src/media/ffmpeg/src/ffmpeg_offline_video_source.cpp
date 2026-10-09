@@ -63,12 +63,6 @@ FFmpegOfflineVideoSource::seek_to_presentation_timestamp(domain::MediaTime targe
     std::optional<application::exporting::OfflineVideoSourceFrame> lookahead;
     if (result.frame.has_value()) candidate = impl_->convert(*result.frame);
     if (result.lookahead.has_value()) lookahead = impl_->convert(*result.lookahead);
-    if (candidate.has_value() && lookahead.has_value() &&
-        candidate->presentation_timestamp.has_value() &&
-        lookahead->presentation_timestamp.has_value()) {
-      candidate->presentation_duration = *lookahead->presentation_timestamp -
-                                         *candidate->presentation_timestamp;
-    }
     return {std::move(candidate), std::move(lookahead), result.frames_decoded_after_seek};
   } catch (const application::exporting::OfflineVideoRenderError&) {
     throw;

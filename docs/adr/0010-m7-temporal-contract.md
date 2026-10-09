@@ -45,3 +45,24 @@ Los tipos nominales pequeños en application pueden representar `PlaybackPositio
 El clock real puede adaptarse a `std::chrono::steady_clock`, pero los tests usan un fake clock y nunca hacen `sleep`.
 
 Errores de overflow o de rango en aritmética temporal deben convertirse en comportamiento definido mediante excepción o resultado de error, nunca en UB ni drift silencioso.
+
+## PULSAR 1.2 — shared frame coverage correction
+
+Preview and export use `application::frame_coverage` as their single coverage
+contract. Positive explicit durations cover `[PTS, PTS + duration)`. The next
+frame takes precedence from its own PTS, even if the previous declared duration
+overlaps it. A declared end before the next PTS creates a presentation gap;
+composition leaves lower layers untouched, or opaque black when none cover it.
+Titles are applied after visual layers.
+
+Missing and nonpositive durations use the next PTS as their end. If that PTS is
+not yet available, consumers request more data rather than invent a frame period.
+At EOF with no known end, the final frame is held, bounded by the editorial clip
+range. A known terminal end still reports end-of-source. Export retains its
+strict failure for an explicitly proven premature source end; unknown duration
+alone is not evidence of truncation. No fallback depends on output FPS.
+
+FFmpeg preserves declared durations for both consumers; seeking must not replace
+them with the distance to lookahead. This intentionally corrects the previous
+export behavior for declared source gaps and the scheduler's overlapping-duration
+precedence. Approved on 2026-10-09.

@@ -1,4 +1,5 @@
 #include <pulsar/application/playback/presentation_scheduler.hpp>
+#include <pulsar/application/playback/frame_coverage.hpp>
 
 #include <type_traits>
 #include <utility>
@@ -88,61 +89,18 @@ PresentationDecision PresentationScheduler::evaluate_target(StreamTimestamp targ
       return PresentationTemporalError{*temporal_error_};
     }
 
-    if (stream_less(target, *start)) {
-      return PresentationGap{target, start};
+    const auto coverage = frame_coverage(target.value(), start->value(), current_->duration,
+        lookahead_ ? std::optional{lookahead_->presentation_timestamp->value()} : std::nullopt,
+        source_ended_, known_presentation_end_ ? std::optional{known_presentation_end_->value()} : std::nullopt,
+        terminal_end_known_);
+    const auto end = coverage.end ? std::optional{StreamTimestamp{*coverage.end}} : std::nullopt;
+    switch (coverage.kind) {
+    case FrameCoverageKind::Covered: return present_or_hold(*current_, coverage.terminal_end_unknown);
+    case FrameCoverageKind::Gap: return PresentationGap{StreamTimestamp{coverage.start}, end};
+    case FrameCoverageKind::Advance: (void)advance_past_current(); continue;
+    case FrameCoverageKind::NeedMore: return starved();
+    case FrameCoverageKind::Ended: return PresentationEnded{end, end.has_value() || terminal_end_known_};
     }
-
-    auto explicit_end = explicit_sample_end(*current_);
-    if (explicit_end.has_value()) {
-      if (stream_less(target, *explicit_end)) {
-        return present_or_hold(*current_, false);
-      }
-      if (lookahead_.has_value()) {
-        const auto next_start = sample_start(*lookahead_);
-        if (!next_start.has_value()) {
-          set_temporal_error("video sample is missing presentation timestamp");
-          return PresentationTemporalError{*temporal_error_};
-        }
-        if (stream_less(target, *next_start)) {
-          return PresentationGap{*explicit_end, next_start};
-        }
-        (void)advance_past_current();
-        continue;
-      }
-      if (source_ended_) {
-        return PresentationEnded{explicit_end, true};
-      }
-      return starved();
-    }
-
-    if (lookahead_.has_value()) {
-      const auto next_start = sample_start(*lookahead_);
-      if (!next_start.has_value()) {
-        set_temporal_error("video sample is missing presentation timestamp");
-        return PresentationTemporalError{*temporal_error_};
-      }
-      if (stream_less(target, *next_start)) {
-        return present_or_hold(*current_, false);
-      }
-      (void)advance_past_current();
-      continue;
-    }
-
-    if (stream_equal(target, *start)) {
-      return present_or_hold(*current_, false);
-    }
-
-    if (source_ended_) {
-      if (!terminal_end_known_) {
-        return present_or_hold(*current_, true);
-      }
-      if (known_presentation_end_.has_value() && stream_less(target, *known_presentation_end_)) {
-        return present_or_hold(*current_, false);
-      }
-      return PresentationEnded{known_presentation_end_, terminal_end_known_};
-    }
-
-    return starved();
   }
 }
 
@@ -224,15 +182,6 @@ void PresentationScheduler::set_temporal_error(std::string message) {
 
 std::optional<StreamTimestamp> PresentationScheduler::sample_start(const VideoSample& sample) const {
   return sample.presentation_timestamp;
-}
-
-std::optional<StreamTimestamp> PresentationScheduler::explicit_sample_end(
-    const VideoSample& sample) const {
-  if (!sample.presentation_timestamp.has_value() || !sample.duration.has_value()) {
-    return std::nullopt;
-  }
-
-  return StreamTimestamp{sample.presentation_timestamp->value() + *sample.duration};
 }
 
 bool PresentationScheduler::was_last_presented(const VideoSample& sample) const noexcept {

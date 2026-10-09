@@ -62,12 +62,10 @@ public:
 
 private:
   [[nodiscard]] PresentationDecision evaluate_target(StreamTimestamp target);
-  [[nodiscard]] PresentationDecision decide_for_current(StreamTimestamp target);
   [[nodiscard]] bool advance_past_current();
   void accept_sample(VideoSample sample);
   void set_temporal_error(std::string message);
   [[nodiscard]] std::optional<StreamTimestamp> sample_start(const VideoSample& sample) const;
-  [[nodiscard]] std::optional<StreamTimestamp> explicit_sample_end(const VideoSample& sample) const;
   [[nodiscard]] bool was_last_presented(const VideoSample& sample) const noexcept;
   [[nodiscard]] PresentationDecision present_or_hold(const VideoSample& sample,
                                                      bool terminal_end_unknown);

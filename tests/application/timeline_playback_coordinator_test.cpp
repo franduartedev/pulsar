@@ -93,14 +93,18 @@ public:
     }
     events_.push_back(PlaybackWorkerSample{
         generation,
-        VideoSample{next_ordinal_++, application::StreamTimestamp{last_target_ + time(1, Rational{1, 1000})},
-                    time(config_->read_sample_duration, Rational{1, 1000})}});
+        VideoSample{next_ordinal_++, application::StreamTimestamp{next_read_pts_},
+                     time(config_->read_sample_duration, Rational{1, 1000})}});
+    next_read_pts_ = next_read_pts_ + time(config_->read_sample_duration, Rational{1, 1000});
   }
 
   void request_seek_for_presentation(PlaybackGeneration generation,
                                      application::StreamTimestamp target) override {
     requested_targets_->push_back(target.value());
     last_target_ = target.value();
+    // Reads continue after the seek sample; prefetch must not synthesize a tiny
+    // overlapping replacement for the long frame used by clock tests.
+    next_read_pts_ = last_target_ + time(config_->sample_duration);
     if (!config_->emit_seek) return;
     if (config_->emit_fatal_on_seek) {
       events_.push_back(application::PlaybackWorkerFatalError{application::VideoSourceError{"fatal worker failure"}});
@@ -145,6 +149,7 @@ private:
   std::vector<MediaTime>* requested_targets_;
   std::deque<PlaybackWorkerEvent> events_;
   MediaTime last_target_{MediaTime::zero()};
+  MediaTime next_read_pts_{MediaTime::zero()};
   std::uint64_t next_ordinal_{1};
   std::optional<PlaybackGeneration> delayed_generation_;
 };

@@ -61,6 +61,7 @@ struct DecodedVisualVideoFrame {
   FFmpegVideoImageDescriptor image;
   std::optional<domain::MediaTime> presentation_timestamp;
   FFmpegVideoFrameLease frame;
+  std::optional<domain::MediaTime> presentation_duration{};
 };
 
 } // namespace pulsar::media::ffmpeg

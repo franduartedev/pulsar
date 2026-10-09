@@ -132,7 +132,7 @@ private:
 
   void compose_frame(composition::RgbaSurface& canvas, ActiveSource& active,
                      const OfflineVideoSourceFrame& source_frame);
-  [[nodiscard]] const OfflineVideoSourceFrame& select_source_frame(
+  [[nodiscard]] const OfflineVideoSourceFrame* select_source_frame(
       domain::TrackId track_id, const ResolvedClip& clip, domain::MediaTime source_time);
   void open_source(domain::TrackId track_id, const ResolvedClip& clip, domain::MediaTime source_time);
   void update_live_frame_metric() noexcept;

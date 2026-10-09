@@ -494,7 +494,7 @@ FFmpegOfflineVideoFrameConverter::convert(const DecodedVisualVideoFrame& frame) 
   }
 
   return application::exporting::OfflineVideoSourceFrame{
-      frame.presentation_timestamp, std::nullopt, std::move(pixels)};
+      frame.presentation_timestamp, frame.presentation_duration, std::move(pixels)};
 }
 
 FFmpegPreviewFrame FFmpegPreviewConverter::convert(const DecodedVisualVideoFrame& frame) const {
@@ -895,6 +895,7 @@ private:
   [[nodiscard]] DecodedVisualVideoFrame fresh_still() {
     DecodedVisualVideoFrame frame = *still_frame_;
     frame.physical_frame_id = next_visual_frame_id_++;
+    frame.presentation_duration = application::still_playable_duration();
     return frame;
   }
 
@@ -961,6 +962,8 @@ private:
           internal::convert_timestamp(frame_->best_effort_timestamp, stream_time_base_),
           FFmpegVideoFrameLease{
               std::make_shared<const FFmpegVideoFrameLease::Impl>(FramePtr{cloned_frame})},
+          frame_->duration > 0 ? std::optional{domain::MediaTime{frame_->duration, stream_time_base_}}
+                               : std::nullopt,
       };
       av_frame_unref(frame_.get());
       return visual_frame;
