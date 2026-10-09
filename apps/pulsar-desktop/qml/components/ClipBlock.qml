@@ -138,6 +138,7 @@ Rectangle {
         selected: block.selected
         muted: block.muted
         density: controller.waveformDensity
+        laneFill: block.audioClip ? 0.68 : 0.50   // peaks reach ~65% of an audio clip body, ~37% of a video clip body
         normalColor: block.audioClip ? Theme.waveformAudio : Theme.waveform
         selectedColor: block.audioClip ? Theme.waveformAudioSelected : Theme.waveformSelected
         pendingColor: Theme.waveformPending

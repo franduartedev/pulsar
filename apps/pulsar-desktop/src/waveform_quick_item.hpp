@@ -6,7 +6,10 @@
 #include <QQuickItem>
 #include <QString>
 
+#include <QPointF>
+
 #include <memory>
+#include <vector>
 
 class WaveformQuickItem : public QQuickItem {
   Q_OBJECT
@@ -14,6 +17,7 @@ class WaveformQuickItem : public QQuickItem {
   Q_PROPERTY(bool selected READ selected WRITE setSelected NOTIFY styleChanged)
   Q_PROPERTY(bool muted READ muted WRITE setMuted NOTIFY styleChanged)
   Q_PROPERTY(double density READ density WRITE setDensity NOTIFY inputChanged)
+  Q_PROPERTY(double laneFill READ laneFill WRITE setLaneFill NOTIFY styleChanged)   // share of the lane the loudest peak may reach
   Q_PROPERTY(int waveformState READ waveformState NOTIFY waveformStateChanged)
   Q_PROPERTY(bool hasUnavailableRange READ hasUnavailableRange NOTIFY waveformStateChanged)
   Q_PROPERTY(QColor normalColor READ normalColor WRITE setNormalColor NOTIFY styleChanged)
@@ -34,6 +38,8 @@ public:
   void setMuted(bool value);
   [[nodiscard]] double density() const noexcept { return density_; }
   void setDensity(double value);
+  [[nodiscard]] double laneFill() const noexcept { return lane_fill_; }
+  void setLaneFill(double value);
   [[nodiscard]] int waveformState() const noexcept { return state_; }
   [[nodiscard]] bool hasUnavailableRange() const noexcept { return has_unavailable_range_; }
   [[nodiscard]] QColor normalColor() const { return normal_color_; }
@@ -65,6 +71,11 @@ private:
   bool selected_{false};
   bool muted_{false};
   double density_{1.0};
+  double lane_fill_{0.9};
+  // Cached display geometry (see updatePaintNode).
+  const pulsar::application::WaveformGeometry* cache_source_{nullptr};
+  qreal cache_width_{0}, cache_height_{0}, cache_fill_{0};
+  std::vector<QPointF> body_cache_, edge_cache_;
   int state_{Missing};
   QColor normal_color_{QStringLiteral("#71a4ff")};
   QColor selected_color_{QStringLiteral("#c7dcff")};

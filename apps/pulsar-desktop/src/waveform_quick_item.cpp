@@ -19,8 +19,6 @@ constexpr int kAxisNode = 2;
 constexpr int kPendingNode = 3;
 constexpr int kUnavailableNode = 4;
 constexpr int kCoreNode = 5;
-// The core covers this fraction of the envelope's half-height around the axis.
-constexpr qreal kCoreFraction = 0.55;
 
 QSGGeometryNode* child_node(QSGNode* root, int child_index) {
   while (root->childCount() <= child_index) {
@@ -66,7 +64,7 @@ struct EnvelopePoint {
 // centre so the envelope interpolates between buckets instead of stair-stepping.
 constexpr int kMaxCollapsedPlateauColumns = 24;
 // Quiet audio still reads as a line: never thinner than this.
-constexpr qreal kMinBodyThickness = 1.6;
+constexpr qreal kMinBodyThickness = 1.2;
 
 QColor blend(QColor from, const QColor& to, qreal amount) {
   from.setRgbF(from.redF() + (to.redF() - from.redF()) * amount,
@@ -125,6 +123,61 @@ void build_envelope_runs(const std::vector<pulsar::application::WaveformSegment>
   }
 }
 
+// Display-only amplitude curve and lane fill. The engine hands over linear extrema scaled to the full
+// lane height; here they are re-expressed around the centre axis with a fixed perceptual curve (same
+// for every clip, never normalised per clip) and limited to `fill` of the lane.
+constexpr double kDisplayExponent = 0.6;
+std::vector<pulsar::application::WaveformSegment> shape_segments(
+    const std::vector<pulsar::application::WaveformSegment>& segments, qreal height, qreal fill) {
+  std::vector<pulsar::application::WaveformSegment> shaped;
+  shaped.reserve(segments.size());
+  const qreal axis = height / 2.0;
+  const qreal reach = axis * fill;
+  const auto map = [&](qreal offset) {   // offset: signed distance from the axis in px, + is up
+    const qreal amplitude = std::clamp(std::abs(offset) / axis, 0.0, 1.0);
+    return std::copysign(std::pow(amplitude, kDisplayExponent) * reach, offset);
+  };
+  for (auto segment : segments) {
+    segment.top = axis - map(axis - segment.top);
+    segment.bottom = axis - map(axis - segment.bottom);
+    shaped.push_back(segment);
+  }
+  return shaped;
+}
+
+// Smooth mirrored body: the larger excursion of each column becomes a symmetric half-height, averaged
+// horizontally with a fixed triangle window ([1 2 3 2 1]) inside each contiguous run of columns.
+// Display only: silence stays flat, the true peaks are drawn separately as the outline.
+std::vector<pulsar::application::WaveformSegment> smooth_body(
+    const std::vector<pulsar::application::WaveformSegment>& shaped, qreal height) {
+  constexpr int kRadius = 2;
+  const qreal axis = height / 2.0;
+  std::vector<qreal> half(shaped.size());
+  for (std::size_t i = 0; i < shaped.size(); ++i)
+    half[i] = std::max(axis - shaped[i].top, shaped[i].bottom - axis);
+  auto smoothed = shaped;
+  std::size_t run_start = 0;
+  while (run_start < shaped.size()) {
+    std::size_t run_end = run_start + 1;
+    while (run_end < shaped.size() && shaped[run_end].column == shaped[run_end - 1].column + 1U) ++run_end;
+    for (std::size_t i = run_start; i < run_end; ++i) {
+      qreal sum = 0.0, weights = 0.0;
+      for (int d = -kRadius; d <= kRadius; ++d) {
+        const auto j = static_cast<std::ptrdiff_t>(i) + d;
+        if (j < static_cast<std::ptrdiff_t>(run_start) || j >= static_cast<std::ptrdiff_t>(run_end)) continue;
+        const qreal w = kRadius + 1 - std::abs(d);
+        sum += w * half[static_cast<std::size_t>(j)];
+        weights += w;
+      }
+      const qreal h = sum / weights;
+      smoothed[i].top = axis - h;
+      smoothed[i].bottom = axis + h;
+    }
+    run_start = run_end;
+  }
+  return smoothed;
+}
+
 } // namespace
 
 WaveformQuickItem::WaveformQuickItem(QQuickItem* parent) : QQuickItem{parent} {
@@ -147,6 +200,10 @@ void WaveformQuickItem::setSelected(bool value) {
 void WaveformQuickItem::setMuted(bool value) {
   if (muted_ == value) return;
   muted_ = value; emit styleChanged(); update();
+}
+void WaveformQuickItem::setLaneFill(double value) {
+  if (!std::isfinite(value) || value <= 0.0 || value > 1.0 || lane_fill_ == value) return;
+  lane_fill_ = value; emit styleChanged(); update();
 }
 void WaveformQuickItem::setDensity(double value) {
   if (!std::isfinite(value) || value <= 0.0 || density_ == value) return;
@@ -179,6 +236,7 @@ void WaveformQuickItem::setPreparedGeometry(
   Q_ASSERT(QThread::currentThread() == thread());
   const bool state_changed = state_ != static_cast<int>(state);
   geometry_ = std::move(geometry);
+  cache_source_ = nullptr;   // new data: rebuild the display geometry
   state_ = static_cast<int>(state);
   has_available_waveform_ = has_available_waveform;
   const bool unavailable = geometry_ && !geometry_->unavailable_columns.empty();
@@ -193,51 +251,56 @@ QSGNode* WaveformQuickItem::updatePaintNode(QSGNode* old_node, UpdatePaintNodeDa
   auto* root = old_node == nullptr ? new QSGNode : old_node;
   // Envelope: filled body + crisp top/bottom edges, built from the engine's
   // per-column extrema. Muted drops saturation instead of only fading.
-  QColor edge_color = selected_ ? selected_color_ : normal_color_;
+  // Selection belongs to the clip chrome; the waveform only lifts a little so it never glares.
+  QColor edge_color = selected_ ? blend(normal_color_, selected_color_, 0.25) : normal_color_;
   QColor fill_color = edge_color;
-  fill_color.setAlphaF(selected_ ? 0.95 : 0.86);
-  QColor core_color = blend(edge_color, QColor{255, 255, 255}, selected_ ? 0.45 : 0.3);
-  core_color.setAlphaF(selected_ ? 0.9 : 0.75);
+  fill_color.setAlphaF(0.82);
+  edge_color.setAlphaF(0.38);   // subtle unsmoothed peak outline
   QColor axis_color = baseline_color_;
-  axis_color.setAlphaF(axis_color.alphaF() * 0.5);
+  axis_color.setAlphaF(axis_color.alphaF() * 0.22);
   if (muted_) {
     edge_color = blend(edge_color, QColor{0x8a, 0x93, 0xa0}, 0.8);
     edge_color.setAlphaF(edge_color.alphaF() * 0.6);
     fill_color = blend(fill_color, QColor{0x8a, 0x93, 0xa0}, 0.8);
     fill_color.setAlphaF(fill_color.alphaF() * 0.35);
-    core_color = blend(core_color, QColor{0x8a, 0x93, 0xa0}, 0.8);
-    core_color.setAlphaF(0.22);
     axis_color.setAlphaF(axis_color.alphaF() * 0.6);
   }
 
-  std::vector<EnvelopePoint> envelope;
-  std::vector<std::size_t> run_starts;
-  envelope.reserve(geometry_->segments.size() + 8U);
-  build_envelope_runs(geometry_->segments, height(), envelope, run_starts);
-  run_starts.push_back(envelope.size());
-  std::vector<QPointF> body;
-  std::vector<QPointF> core;
-  std::vector<QPointF> edges;
-  body.reserve(envelope.size() * 6U);
-  edges.reserve(envelope.size() * 4U);
-  core.reserve(envelope.size() * 6U);
-  // Same envelope pulled toward the axis: loud passages get a bright heart, quiet ones stay a thin line.
-  const qreal axis_y = height() / 2.0;
-  const auto toward_axis = [axis_y](qreal y) { return axis_y + (y - axis_y) * kCoreFraction; };
-  for (std::size_t run = 0; run + 1 < run_starts.size(); ++run) {
-    for (std::size_t k = run_starts[run]; k + 1 < run_starts[run + 1]; ++k) {
-      const auto& p = envelope[k];
-      const auto& q = envelope[k + 1];
-      body.emplace_back(p.x, p.top);    body.emplace_back(p.x, p.bottom);  body.emplace_back(q.x, q.top);
-      body.emplace_back(q.x, q.top);    body.emplace_back(p.x, p.bottom);  body.emplace_back(q.x, q.bottom);
-      core.emplace_back(p.x, toward_axis(p.top));    core.emplace_back(p.x, toward_axis(p.bottom)); core.emplace_back(q.x, toward_axis(q.top));
-      core.emplace_back(q.x, toward_axis(q.top));    core.emplace_back(p.x, toward_axis(p.bottom)); core.emplace_back(q.x, toward_axis(q.bottom));
-      edges.emplace_back(p.x, p.top);   edges.emplace_back(q.x, q.top);
-      edges.emplace_back(p.x, p.bottom); edges.emplace_back(q.x, q.bottom);
-    }
+  // Display geometry depends only on data, size and lane fill: rebuilt then, reused otherwise.
+  if (cache_source_ != geometry_.get() || cache_width_ != width() || cache_height_ != height() ||
+      cache_fill_ != lane_fill_) {
+    cache_source_ = geometry_.get(); cache_width_ = width(); cache_height_ = height(); cache_fill_ = lane_fill_;
+    const auto shaped = shape_segments(geometry_->segments, height(), lane_fill_);
+    const auto smooth = smooth_body(shaped, height());
+    const auto triangulate = [&](const std::vector<pulsar::application::WaveformSegment>& source,
+                                 std::vector<QPointF>* body, std::vector<QPointF>* edges) {
+      std::vector<EnvelopePoint> envelope;
+      std::vector<std::size_t> run_starts;
+      envelope.reserve(source.size() + 8U);
+      build_envelope_runs(source, height(), envelope, run_starts);
+      run_starts.push_back(envelope.size());
+      if (body) { body->clear(); body->reserve(envelope.size() * 6U); }
+      if (edges) { edges->clear(); edges->reserve(envelope.size() * 4U); }
+      for (std::size_t run = 0; run + 1 < run_starts.size(); ++run) {
+        for (std::size_t k = run_starts[run]; k + 1 < run_starts[run + 1]; ++k) {
+          const auto& p = envelope[k];
+          const auto& q = envelope[k + 1];
+          if (body) {
+            body->emplace_back(p.x, p.top);    body->emplace_back(p.x, p.bottom); body->emplace_back(q.x, q.top);
+            body->emplace_back(q.x, q.top);    body->emplace_back(p.x, p.bottom); body->emplace_back(q.x, q.bottom);
+          }
+          if (edges) {
+            edges->emplace_back(p.x, p.top);    edges->emplace_back(q.x, q.top);
+            edges->emplace_back(p.x, p.bottom); edges->emplace_back(q.x, q.bottom);
+          }
+        }
+      }
+    };
+    triangulate(smooth, &body_cache_, nullptr);
+    triangulate(shaped, nullptr, &edge_cache_);
   }
-  set_lines(child_node(root, kBodyNode), body, fill_color);
-  set_lines(child_node(root, kEdgeNode), edges, edge_color);
+  set_lines(child_node(root, kBodyNode), body_cache_, fill_color);
+  set_lines(child_node(root, kEdgeNode), edge_cache_, edge_color);
 
   std::vector<QPointF> baseline;
   if (has_available_waveform_ && !geometry_->segments.empty()) {
@@ -268,6 +331,6 @@ QSGNode* WaveformQuickItem::updatePaintNode(QSGNode* old_node, UpdatePaintNodeDa
     unavailable.emplace_back(std::clamp(x + 1.5, left_edge, right_edge), state_bottom);
   }
   set_lines(child_node(root, kUnavailableNode), unavailable, unavailable_color_);
-  set_lines(child_node(root, kCoreNode), core, core_color);
+  set_lines(child_node(root, kCoreNode), {}, fill_color);   // retired layer, kept empty
   return root;
 }
