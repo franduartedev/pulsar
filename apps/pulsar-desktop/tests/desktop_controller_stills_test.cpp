@@ -74,7 +74,8 @@ int main(int argc, char** argv) {
   PreviewImageProvider provider;
   DesktopController controller{provider, {}};
   const auto fixtures = fs::path{PULSAR_SOURCE_DIR} / "tests/fixtures";
-  const auto root = fs::temp_directory_path() / "pulsar-stills-test";
+  const auto root = fs::temp_directory_path() /
+      ("pulsar-stills-test-" + std::to_string(QCoreApplication::applicationPid()));
   fs::remove_all(root);
   fs::create_directories(root);
   const auto video = fixtures / "e6_video_a.mp4";
