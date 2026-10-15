@@ -278,6 +278,7 @@ void EditorSession::move_clip_to_visual_track(domain::ClipId clip, domain::Track
   if (!source || !target || target->kind() != domain::TrackKind::Video) {
     throw std::invalid_argument{"clip or visual target does not exist"};
   }
+  if (target->find_clip(clip)) return;
   processor_.move_clip(clip, track, source->timeline_start());
   selected_clip_ = clip;
   synchronize_document_state();
@@ -790,9 +791,9 @@ bool EditorSession::trim_selected_to_playhead(bool trim_start) {
 bool EditorSession::select_adjacent_clip(bool next) {
   struct Entry { domain::MediaTime start; std::size_t track; domain::ClipId id; };
   std::vector<Entry> order;
-  const auto& tracks = document_.timeline().tracks();
-  for (std::size_t index = 0; index < tracks.size(); ++index) {
-    for (const auto& clip : tracks[index].clips()) order.push_back(Entry{clip.timeline_start(), index, clip.id()});
+  for (const auto& view : views_) {
+    const auto* clip = document_.timeline().find_clip(view.id);
+    if (clip) order.push_back(Entry{clip->timeline_start(), view.track_index, clip->id()});
   }
   if (order.empty()) return false;
   std::sort(order.begin(), order.end(), [](const Entry& a, const Entry& b) {

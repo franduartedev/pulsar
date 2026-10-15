@@ -10,9 +10,11 @@ the initial canvas is opaque black. Titles are composited last.
 ## Stable canvas and eligibility
 
 `ProjectCanvas` records the editorial dimensions and frame rate when the first
-primary visual clip establishes them. A still-only canvas is provisional until
+visual clip establishes them (VIDEO 1 takes precedence; an otherwise empty
+project can establish it from VIDEO 2). A still-only canvas is provisional until
 the first real VIDEO 1 clip arrives (the historical real-video-first rule); then
-it freezes. Moving, deleting and reordering clips never alter it. Legacy v1–v5 projects synthesize it from their historical
+it freezes. Moving, deleting and reordering clips never alter it. Legacy v1–v5
+projects synthesize it from their historical
 VIDEO 1 master (real video first, otherwise the first still). Unreleased v6
 persists `CANVAS` alongside `VISUAL_TRACKS`; single-track projects whose canvas
 still matches their legacy master retain their older on-disk version. An empty
@@ -59,3 +61,14 @@ Single-track playback retains its established worker/mailbox path, using the
 same frame-coverage contract. Preview diagnostics expose completed, coalesced,
 discarded and replaced counts plus shared renderer layer/decoder/frame and
 scale/composition metrics. They are observations, not editorial policy inputs.
+
+## Track edits (E1.6)
+
+Adding an auxiliary visual track appends it to the top of `visual_track_ids`.
+Only an empty auxiliary track can be removed; VIDEO 1 is never removable.
+Reorder commands move auxiliary tracks above VIDEO 1 in the explicit stack,
+independently of the timeline's storage order. Inverse commands restore the
+original stack position, so undo/redo and v6 persistence use the same order.
+Clip insertion and moving can name any visual track; default Insert/Append
+continue to target VIDEO 1. Timeline lanes display top-to-bottom composition
+order, with audio lanes below them. VIDEO 1 alone contributes embedded audio.

@@ -237,6 +237,28 @@ int main(int argc, char** argv) {
       return true;
     }));
   }
+  // A stable canvas and titles still agree when all VIDEO 1 clips are removed.
+  const auto* primary_track = multi.timeline.find_track(multi.video_track_id);
+  std::vector<pulsar::domain::ClipId> primary_clips;
+  for (const auto& clip : primary_track->clips()) primary_clips.push_back(clip.id());
+  for (const auto id : primary_clips) multi.timeline.remove_clip(id);
+  REQUIRE(73, multi.canvas.has_value() &&
+      multi.timeline.find_track(multi.video_track_id)->clips().empty());
+  (void)repository.save(multi_path, multi);
+  REQUIRE(74, controller.openProject(QString::fromStdString(multi_path.string())));
+  const auto upper_only_plan = pulsar::application::exporting::ExportPlan::build(multi);
+  pulsar::application::exporting::OfflineVideoRenderer upper_only{upper_only_plan, sources, {&scaler, &multi_titles}};
+  controller.seekNormalized(0.5);
+  const auto expected_upper = upper_only.render_at(MediaTime{1, {1, 1}});
+  REQUIRE(75, wait_until([&] {
+    const auto actual = provider.requestImage(QStringLiteral("current"), nullptr, {});
+    if (actual.width() != expected_upper.width || actual.height() != expected_upper.height) return false;
+    for (int y = 0; y < actual.height(); ++y) {
+      if (std::memcmp(actual.constScanLine(y), expected_upper.pixels.data() +
+          std::size_t(y) * expected_upper.stride_bytes, std::size_t(expected_upper.width) * 4) != 0) return false;
+    }
+    return true;
+  }));
   fs::remove_all(root);
   return 0;
 }

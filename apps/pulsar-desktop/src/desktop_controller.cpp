@@ -1352,6 +1352,8 @@ void DesktopController::addVisualTrack() {
   if (!active_session_) return;
   try {
     const auto id = active_session_->add_visual_track();
+    active_session_->select_clip(std::nullopt);
+    active_session_->select_title(std::nullopt);
     selected_visual_track_key_ = QString::number(id.value());
     clearError();
     publishTimeline();

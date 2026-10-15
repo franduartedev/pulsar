@@ -89,10 +89,13 @@ int main(int argc, char** argv) {
   REQUIRE(40, controller.timelineTracks().size() == 2 &&
       controller.timelineTracks()[0].toMap().value("label").toString() == QStringLiteral("VIDEO 2") &&
       controller.timelineTracks()[1].toMap().value("primary").toBool());
-  REQUIRE(41, controller.previewAssetDrop(video_b, 0, 996.0, width).value("valid").toBool());
-  REQUIRE(42, controller.dropAsset(video_b, 0, 996.0, width) && clips(controller) == 2);
   const auto upper_id = controller.timelineTracks()[0].toMap().value("id").toString();
   const auto primary_id = controller.timelineTracks()[1].toMap().value("id").toString();
+  REQUIRE(50, controller.selectedVisualTrackKey() == upper_id && controller.selectedClipKey().isEmpty());
+  controller.selectVisualTrack(upper_id);
+  REQUIRE(49, controller.selectedVisualTrackKey() == upper_id && controller.selectedClipKey().isEmpty());
+  REQUIRE(41, controller.previewAssetDrop(video_b, 0, 996.0, width).value("valid").toBool());
+  REQUIRE(42, controller.dropAsset(video_b, 0, 996.0, width) && clips(controller) == 2);
   REQUIRE(43, controller.selectedVisualTrackKey() == upper_id);
   controller.moveSelectedClipToVisualTrack(primary_id);
   REQUIRE(44, controller.errorMessage().isEmpty() && controller.selectedVisualTrackKey() == primary_id);

@@ -224,7 +224,7 @@ Panel {
                          Text { x: 14; y: modelData.kind === "video" ? 7 : (parent.height - height) / 2
                                 text: pane.trackTitle(modelData.label); color: Theme.textPrimary; font.pixelSize: Theme.fontSizeS
                                 elide: Text.ElideRight; width: pane.gutterWidth - 20 }
-                         Text { visible: modelData.primary; x: 14; y: 27; text: "Base"; color: Theme.textSecondary; font.pixelSize: Theme.fontSizeXS }
+                         Text { visible: modelData.primary; x: 14; y: 27; text: modelData.visualIndex === 0 ? "Base" : "Principal"; color: Theme.textSecondary; font.pixelSize: Theme.fontSizeXS }
                          MouseArea {
                              id: headerMouse
                              x: 4; width: pane.gutterWidth - 4; height: parent.height

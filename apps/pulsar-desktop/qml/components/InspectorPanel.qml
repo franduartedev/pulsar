@@ -141,7 +141,7 @@ Panel {
             InspectorSection {
                 visible: inspector.trackSelected && inspector.selectedTrack !== undefined
                 first: true; heading: "PISTA DE VIDEO"
-                Text { width: parent.width; text: inspector.selectedTrack ? inspector.selectedTrack.label.replace("VIDEO", "Video") + (inspector.selectedTrack.primary ? " · Base" : "") : "";
+                Text { width: parent.width; text: inspector.selectedTrack ? inspector.selectedTrack.label.replace("VIDEO", "Video") + (inspector.selectedTrack.primary ? (inspector.selectedTrack.visualIndex === 0 ? " · Base" : " · Principal") : "") : "";
                        color: Theme.textPrimary; font.pixelSize: Theme.fontSizeM; font.bold: true }
                 Text { width: parent.width; wrapMode: Text.WordWrap;
                        text: inspector.selectedTrack && inspector.selectedTrack.primary ? "Pista principal: el audio del video se escucha desde acá." : "Las pistas superiores cubren las inferiores donde tienen imagen.";
@@ -386,7 +386,13 @@ Panel {
                     }
                 }
                 Text { visible: controller.selectedClipHasAudio; width: parent.width; wrapMode: Text.WordWrap; text: "Los fundidos son lineales, al empezar o terminar el clip."; color: Theme.textMuted; font.pixelSize: Theme.fontSizeXS }
-                Text { visible: !controller.selectedClipHasAudio; width: parent.width; wrapMode: Text.WordWrap; text: controller.selectedClipKind === "image" || controller.selectedClipKind === "color" ? "Las fotos y placas no tienen audio." : "Este clip no tiene audio."; color: Theme.textMuted; font.pixelSize: Theme.fontSizeS }
+                Text { visible: !controller.selectedClipHasAudio; width: parent.width; wrapMode: Text.WordWrap;
+                       text: controller.selectedClipKind === "image" || controller.selectedClipKind === "color"
+                           ? "Las fotos y placas no tienen audio."
+                           : (inspector.selectedTrack && !inspector.selectedTrack.primary
+                               ? "El audio de esta pista de video no se reproduce. Usá Video 1 para el sonido del clip."
+                               : "Este clip no tiene audio.");
+                       color: Theme.textMuted; font.pixelSize: Theme.fontSizeS }
             }
 
             // ---- MEDIO (informative) -----------------------------------------
