@@ -219,7 +219,8 @@ domain::ClipId EditorSession::append_video_asset(domain::MediaId media) {
 }
 
 domain::ClipId EditorSession::insert_video_asset(domain::MediaId media,
-                                                 domain::MediaTime timeline_start) {
+                                                  domain::MediaTime timeline_start,
+                                                  std::optional<domain::TrackId> target) {
   const auto asset = document_.find_asset(media);
   if (!asset.has_value()) {
     throw VideoIngestException{VideoIngestError::UnknownAsset, "unknown media asset"};
@@ -237,20 +238,49 @@ domain::ClipId EditorSession::insert_video_asset(domain::MediaId media,
                                "media has no usable duration or start is negative"};
   }
   const domain::TimeRange destination{timeline_start, timeline_start + duration};
-  const auto* track = document_.timeline().find_track(document_.video_track_id());
-  if (track != nullptr) {
-    for (const auto& clip : track->clips()) {
-      if (destination.overlaps(clip.timeline_range())) {
-        throw VideoIngestException{VideoIngestError::NoSpace,
-                                   "not enough room on the video track"};
-      }
+  const auto track_id = target.value_or(document_.video_track_id());
+  const auto* track = document_.timeline().find_track(track_id);
+  if (!track || track->kind() != domain::TrackKind::Video) {
+    throw VideoIngestException{VideoIngestError::NotAVisualTrack, "destination is not a visual track"};
+  }
+  for (const auto& clip : track->clips()) {
+    if (destination.overlaps(clip.timeline_range())) {
+      throw VideoIngestException{VideoIngestError::NoSpace,
+                                 "not enough room on the visual track"};
     }
   }
-  const auto clip = processor_.add_clip(media, domain::TimeRange{domain::MediaTime::zero(), duration},
-                                        timeline_start);
+  const auto clip = processor_.add_clip(track_id, media, domain::TimeRange{domain::MediaTime::zero(), duration},
+                                         timeline_start);
   selected_clip_ = clip;  // set before sync so the rebuilt read model marks it
   synchronize_document_state();
   return clip;
+}
+
+domain::TrackId EditorSession::add_visual_track() {
+  const auto id = processor_.add_track(domain::TrackKind::Video);
+  synchronize_document_state();
+  return id;
+}
+
+void EditorSession::remove_empty_visual_track(domain::TrackId track) {
+  processor_.remove_empty_visual_track(track);
+  synchronize_document_state();
+}
+
+void EditorSession::reorder_visual_track(domain::TrackId track, std::size_t index) {
+  processor_.reorder_visual_track(track, index);
+  synchronize_document_state();
+}
+
+void EditorSession::move_clip_to_visual_track(domain::ClipId clip, domain::TrackId track) {
+  const auto* source = document_.timeline().find_clip(clip);
+  const auto* target = document_.timeline().find_track(track);
+  if (!source || !target || target->kind() != domain::TrackKind::Video) {
+    throw std::invalid_argument{"clip or visual target does not exist"};
+  }
+  processor_.move_clip(clip, track, source->timeline_start());
+  selected_clip_ = clip;
+  synchronize_document_state();
 }
 
 domain::MediaTime EditorSession::timeline_duration() const noexcept {
@@ -292,9 +322,18 @@ void EditorSession::rebuild_read_model() {
   views_.clear();
   track_views_.clear();
   const auto& timeline = document_.timeline();
-  for (std::size_t track_index = 0; track_index < timeline.tracks().size(); ++track_index) {
-    const auto& track = timeline.tracks()[track_index];
-    track_views_.push_back(TimelineTrackView{track.id(), track.kind(), track_index});
+  // Viewer stack is bottom-to-top, timeline lanes are top-to-bottom.
+  for (auto it = document_.visual_track_ids().rbegin(); it != document_.visual_track_ids().rend(); ++it) {
+    track_views_.push_back(TimelineTrackView{*it, domain::TrackKind::Video, track_views_.size()});
+  }
+  for (const auto& track : timeline.tracks()) {
+    if (track.kind() == domain::TrackKind::Audio) {
+      track_views_.push_back(TimelineTrackView{track.id(), track.kind(), track_views_.size()});
+    }
+  }
+  for (const auto& track_view : track_views_) {
+    const auto& track = *timeline.find_track(track_view.id);
+    const auto track_index = track_view.index;
     for (const auto& clip : track.clips()) {
       const auto asset = document_.find_asset(clip.media_id());
       TimelineClipView view{clip.id(), track.id(), track.kind(), track_index,
@@ -304,7 +343,8 @@ void EditorSession::rebuild_read_model() {
                             time_text(clip.timeline_range().end()), time_text(clip.duration()),
                             !asset.has_value() || asset->availability() == application::MediaAvailability::Unavailable,
                             selected_clip_.has_value() && selected_clip_.value() == clip.id(),
-                            asset.has_value() && asset->audio().has_value()};
+                             asset.has_value() && asset->audio().has_value() &&
+                                 (track.kind() == domain::TrackKind::Audio || track.id() == document_.video_track_id())};
       views_.push_back(std::move(view));
     }
   }
@@ -792,7 +832,7 @@ static SeparablePlan plan_separation(const application::ProjectDocument& documen
   for (const auto& track : document.timeline().tracks()) {
     if (const auto* found = track.find_clip(clip_id)) {
       clip = found;
-      on_video_track = track.kind() == domain::TrackKind::Video;
+       on_video_track = track.id() == document.video_track_id();
       break;
     }
   }
@@ -814,7 +854,8 @@ static SeparablePlan plan_separation(const application::ProjectDocument& documen
 
 bool EditorSession::clip_has_audio(domain::ClipId clip) const {
   const auto found = std::find_if(views_.begin(), views_.end(), [&](const auto& view) { return view.id == clip; });
-  return found != views_.end() && found->has_audio;
+  return found != views_.end() && found->has_audio &&
+      (found->track_kind == domain::TrackKind::Audio || found->track_id == document_.video_track_id());
 }
 
 bool EditorSession::can_separate_audio(domain::ClipId video_clip) const {

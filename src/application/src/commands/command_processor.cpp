@@ -35,11 +35,22 @@ domain::TrackId CommandProcessor::add_track(domain::TrackKind kind) {
   return id;
 }
 
+void CommandProcessor::remove_empty_visual_track(domain::TrackId track_id) {
+  execute(RemoveTrackCommand{track_id});
+}
+
+void CommandProcessor::reorder_visual_track(domain::TrackId track_id, std::size_t visual_index) {
+  const auto& ids = document_.visual_track_ids();
+  const auto found = std::find(ids.begin(), ids.end(), track_id);
+  if (found != ids.end() && static_cast<std::size_t>(found - ids.begin()) == visual_index) return;
+  execute(ReorderVisualTrackCommand{track_id, visual_index});
+}
+
 void CommandProcessor::execute(Command command) {
   document_.ensure_new_edit_possible();
   const HistoryStateId before = document_.history_state_id();
   const HistoryStateId after = document_.next_history_state_id();
-  ExecutedCommand executed{command, build_inverse(document_, command), before, after, open_group_};
+  ExecutedCommand executed{command, build_inverse(document_, command), before, after, open_group_, document_.canvas_, {}};
 
   if (history_capacity_ != 0) {
     undo_stack_.push_back(executed);
@@ -47,6 +58,7 @@ void CommandProcessor::execute(Command command) {
   try {
     apply(document_, command, ApplyMode::NewEdit);
     document_.commit_new_edit();
+    if (history_capacity_ != 0) undo_stack_.back().canvas_after = document_.canvas_;
   } catch (...) {
     if (history_capacity_ != 0) {
       undo_stack_.pop_back();
@@ -194,6 +206,7 @@ bool CommandProcessor::undo_one() {
   redo_stack_.push_back(executed);
   try {
     apply(document_, redo_stack_.back().inverse, ApplyMode::HistoryRestore);
+    document_.canvas_ = executed.canvas_before;
     document_.commit_history_restore(executed.before_state_id);
   } catch (...) {
     redo_stack_.pop_back();
@@ -212,6 +225,7 @@ bool CommandProcessor::redo_one() {
   undo_stack_.push_back(executed);
   try {
     apply(document_, undo_stack_.back().forward, ApplyMode::HistoryRestore);
+    document_.canvas_ = executed.canvas_after;
     document_.commit_history_restore(executed.after_state_id);
   } catch (...) {
     undo_stack_.pop_back();
@@ -238,10 +252,6 @@ void CommandProcessor::apply(ProjectDocument& document, const Command& command, 
         auto& timeline = document.timeline_mutable();
 
         if constexpr (std::is_same_v<CommandType, AddTrackCommand>) {
-          if (concrete_command.kind == domain::TrackKind::Video &&
-              document.timeline().find_track(document.video_track_id()) != nullptr) {
-            throw std::invalid_argument{"project already has a video track"};
-          }
           if (mode == ApplyMode::NewEdit) {
             if (concrete_command.track_id != document.allocator_.next_track()) {
               throw std::invalid_argument{"new track id is not the next document id"};
@@ -249,12 +259,48 @@ void CommandProcessor::apply(ProjectDocument& document, const Command& command, 
             document.allocator_.ensure_track_consumable();
           }
           timeline.add_track(domain::Track{concrete_command.track_id, concrete_command.kind});
+          if (concrete_command.kind == domain::TrackKind::Video) {
+            document.visual_track_ids_.push_back(concrete_command.track_id);
+          }
           if (mode == ApplyMode::NewEdit) document.allocator_.consume_track();
         } else if constexpr (std::is_same_v<CommandType, RemoveTrackCommand>) {
           if (concrete_command.track_id == document.video_track_id()) {
-            throw std::invalid_argument{"cannot remove the video track"};
+            throw std::invalid_argument{"cannot remove the primary video track"};
+          }
+          const auto* track = timeline.find_track(concrete_command.track_id);
+          if (!track || !track->clips().empty() ||
+              (track->kind() != domain::TrackKind::Video && mode == ApplyMode::NewEdit)) {
+            throw std::invalid_argument{"only an empty auxiliary visual track can be removed"};
+          }
+          const bool visual = track->kind() == domain::TrackKind::Video;
+          if (visual && std::find(document.visual_track_ids_.begin(), document.visual_track_ids_.end(),
+                                  concrete_command.track_id) == document.visual_track_ids_.end()) {
+            throw std::invalid_argument{"visual track is not in the stack"};
           }
           timeline.remove_track(concrete_command.track_id);
+          if (visual) {
+            auto& ids = document.visual_track_ids_;
+            ids.erase(std::find(ids.begin(), ids.end(), concrete_command.track_id));
+          }
+        } else if constexpr (std::is_same_v<CommandType, RestoreEmptyVisualTrackCommand>) {
+          auto& ids = document.visual_track_ids_;
+          if (concrete_command.visual_index > ids.size() || timeline.find_track(concrete_command.track_id)) {
+            throw std::invalid_argument{"invalid visual track restoration"};
+          }
+          timeline.add_track(domain::Track{concrete_command.track_id, domain::TrackKind::Video});
+          ids.insert(ids.begin() + static_cast<std::ptrdiff_t>(concrete_command.visual_index),
+                     concrete_command.track_id);
+        } else if constexpr (std::is_same_v<CommandType, ReorderVisualTrackCommand>) {
+          auto& ids = document.visual_track_ids_;
+          const auto found = std::find(ids.begin(), ids.end(), concrete_command.track_id);
+          const auto primary = std::find(ids.begin(), ids.end(), document.video_track_id());
+          if (found == ids.end() || found == primary || concrete_command.visual_index >= ids.size() ||
+              concrete_command.visual_index <= static_cast<std::size_t>(primary - ids.begin())) {
+            throw std::invalid_argument{"invalid auxiliary visual track order"};
+          }
+          ids.erase(found);
+          ids.insert(ids.begin() + static_cast<std::ptrdiff_t>(concrete_command.visual_index),
+                     concrete_command.track_id);
         } else if constexpr (std::is_same_v<CommandType, AddClipCommand>) {
           bool promote_still_canvas = false;
           if (document.canvas_ && document.canvas_->provisional_still &&
@@ -272,8 +318,18 @@ void CommandProcessor::apply(ProjectDocument& document, const Command& command, 
             document.allocator_.ensure_clip_consumable();
           }
           timeline.insert_clip(concrete_command.track_id, concrete_command.clip);
-          if (!document.canvas_ && concrete_command.track_id == document.video_track_id_) {
+          if (!document.canvas_ && timeline.find_track(concrete_command.track_id)->kind() == domain::TrackKind::Video) {
+            // Legacy projects prefer VIDEO 1. A new project can establish its
+            // canvas from the first auxiliary visual clip when VIDEO 1 is empty.
             document.canvas_ = legacy_project_canvas(document.snapshot());
+            if (!document.canvas_) {
+              const auto asset = document.find_asset(concrete_command.clip.media_id());
+              if (asset && asset->metadata().nominal_frame_rate) {
+                const auto [width, height] = master_canvas_size(*asset);
+                document.canvas_ = ProjectCanvas{width, height, *asset->metadata().nominal_frame_rate,
+                                                 asset->is_still()};
+              }
+            }
           } else if (promote_still_canvas) {
             document.canvas_ = legacy_project_canvas(document.snapshot());
           }
@@ -354,7 +410,22 @@ Command CommandProcessor::build_inverse(const ProjectDocument& document, const C
         if constexpr (std::is_same_v<CommandType, AddTrackCommand>) {
           return RemoveTrackCommand{concrete_command.track_id};
         } else if constexpr (std::is_same_v<CommandType, RemoveTrackCommand>) {
-          throw std::invalid_argument{"removing a track is not a supported new edit"};
+          const auto* track = document.timeline().find_track(concrete_command.track_id);
+          if (!track || track->kind() != domain::TrackKind::Video ||
+              track->id() == document.video_track_id() || !track->clips().empty()) {
+            throw std::invalid_argument{"only an empty auxiliary visual track can be removed"};
+          }
+          const auto& ids = document.visual_track_ids();
+          const auto found = std::find(ids.begin(), ids.end(), concrete_command.track_id);
+          if (found == ids.end()) throw std::invalid_argument{"visual track is not in the stack"};
+          return RestoreEmptyVisualTrackCommand{concrete_command.track_id,
+              static_cast<std::size_t>(found - ids.begin())};
+        } else if constexpr (std::is_same_v<CommandType, ReorderVisualTrackCommand>) {
+          const auto& ids = document.visual_track_ids();
+          const auto found = std::find(ids.begin(), ids.end(), concrete_command.track_id);
+          if (found == ids.end()) throw std::invalid_argument{"visual track is not in the stack"};
+          return ReorderVisualTrackCommand{concrete_command.track_id,
+              static_cast<std::size_t>(found - ids.begin())};
         } else if constexpr (std::is_same_v<CommandType, AddClipCommand>) {
           return RemoveClipCommand{concrete_command.clip.id()};
         } else if constexpr (std::is_same_v<CommandType, RemoveClipCommand>) {

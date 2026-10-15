@@ -26,6 +26,8 @@ public:
   void execute(Command command);
 
   [[nodiscard]] domain::TrackId add_track(domain::TrackKind kind);
+  void remove_empty_visual_track(domain::TrackId track_id);
+  void reorder_visual_track(domain::TrackId track_id, std::size_t visual_index);
 
   [[nodiscard]] domain::ClipId add_clip(domain::MediaId media_id,
                                          domain::TimeRange source_range,
@@ -87,6 +89,8 @@ private:
     HistoryStateId before_state_id;
     HistoryStateId after_state_id;
     std::uint64_t group{0};  // 0 = standalone; otherwise shared by one grouped edit
+    std::optional<ProjectCanvas> canvas_before;
+    std::optional<ProjectCanvas> canvas_after;
   };
 
   enum class ApplyMode { NewEdit, HistoryRestore };

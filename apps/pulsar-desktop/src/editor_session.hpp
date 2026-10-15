@@ -74,6 +74,7 @@ enum class VideoIngestError {
   NoSpace,
   NotAudioAsset,
   NotAnAudioTrack,
+  NotAVisualTrack,
 };
 
 class VideoIngestException final : public std::invalid_argument {
@@ -208,6 +209,10 @@ public:
   [[nodiscard]] application::CommandProcessor& processor() noexcept { return processor_; }
   [[nodiscard]] const std::vector<TimelineClipView>& timeline_views() const noexcept { return views_; }
   [[nodiscard]] const std::vector<TimelineTrackView>& track_views() const noexcept { return track_views_; }
+  [[nodiscard]] domain::TrackId add_visual_track();
+  void remove_empty_visual_track(domain::TrackId track);
+  void reorder_visual_track(domain::TrackId track, std::size_t bottom_to_top_index);
+  void move_clip_to_visual_track(domain::ClipId clip, domain::TrackId track);
   [[nodiscard]] std::optional<domain::ClipId> selected_clip() const noexcept { return selected_clip_; }
   [[nodiscard]] domain::MediaTime timeline_duration() const noexcept;
   [[nodiscard]] std::uint64_t read_model_generation() const noexcept { return read_model_generation_; }
@@ -293,7 +298,8 @@ public:
   // existing clip throws VideoIngestException{NoSpace} and changes nothing.
   // One undoable command; selects the new clip.
   [[nodiscard]] domain::ClipId insert_video_asset(domain::MediaId media,
-                                                  domain::MediaTime timeline_start);
+                                                   domain::MediaTime timeline_start,
+                                                   std::optional<domain::TrackId> target = std::nullopt);
   [[nodiscard]] domain::ClipId insert_video_asset_at_playhead(domain::MediaId media);
   // Drag & drop of an audio-only library item onto an AUDIO track at `timeline_start`.
   // Same contract as the video ingest: overlap throws NoSpace and changes nothing.

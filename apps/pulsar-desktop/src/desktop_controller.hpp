@@ -91,6 +91,7 @@ class DesktopController final : public QObject {
   Q_PROPERTY(QAbstractItemModel* mediaAssets READ mediaAssets NOTIFY assetsChanged)
   Q_PROPERTY(QString selectedAssetId READ selectedAssetId NOTIFY assetsChanged)
   Q_PROPERTY(QString selectedClipKey READ selectedClipKey NOTIFY timelineChanged)
+  Q_PROPERTY(QString selectedVisualTrackKey READ selectedVisualTrackKey NOTIFY timelineChanged)
   Q_PROPERTY(double selectedClipGainDb READ selectedClipGainDb NOTIFY timelineChanged)
   Q_PROPERTY(bool selectedClipMuted READ selectedClipMuted NOTIFY timelineChanged)
   Q_PROPERTY(double selectedClipFadeIn READ selectedClipFadeIn NOTIFY timelineChanged)    // seconds
@@ -161,6 +162,7 @@ public:
   [[nodiscard]] QAbstractItemModel* mediaAssets() { return &asset_model_; }
   [[nodiscard]] QString selectedAssetId() const { return selected_asset_id_; }
   [[nodiscard]] QString selectedClipKey() const { return selected_clip_key_; }
+  [[nodiscard]] QString selectedVisualTrackKey() const { return selected_visual_track_key_; }
   [[nodiscard]] double selectedClipGainDb() const;
   [[nodiscard]] bool selectedClipMuted() const;
   [[nodiscard]] QString selectedClipKind() const;
@@ -203,6 +205,11 @@ public:
   Q_INVOKABLE void seekToEnd();
   Q_INVOKABLE void closeMedia();
   Q_INVOKABLE void selectTimelineClip(const QString& clip_key);
+  Q_INVOKABLE void selectVisualTrack(const QString& track_key);
+  Q_INVOKABLE void addVisualTrack();
+  Q_INVOKABLE void removeVisualTrack(const QString& track_key);
+  Q_INVOKABLE void shiftVisualTrack(const QString& track_key, int direction);
+  Q_INVOKABLE void moveSelectedClipToVisualTrack(const QString& track_key);
   Q_INVOKABLE void seekTimelineAt(double pixel, double width);
   Q_INVOKABLE void setTimelineZoom(double zoom);
   // Wheel zoom: scales the view by `factor`, keeping the time under `pixel` under the cursor.
@@ -402,7 +409,7 @@ private:
   std::thread export_thread_;
   std::atomic_bool export_cancel_requested_{false};
   std::uint64_t export_generation_{0};
-  QString status_{"Vacío"}; QString technical_status_{"Preview CPU"}; QString media_name_; QString metadata_; QString error_message_; QString preview_source_; QString viewer_state_{"empty"}; QString position_text_{"00:00:00.000"}; QString duration_text_{"--:--:--.---"}; QString debug_metrics_; QVariantList timeline_ruler_ticks_; QVariantList timeline_tracks_; QString timeline_duration_text_{"00:00:00.000"}; QString selected_clip_key_;
+  QString status_{"Vacío"}; QString technical_status_{"Preview CPU"}; QString media_name_; QString metadata_; QString error_message_; QString preview_source_; QString viewer_state_{"empty"}; QString position_text_{"00:00:00.000"}; QString duration_text_{"--:--:--.---"}; QString debug_metrics_; QVariantList timeline_ruler_ticks_; QVariantList timeline_tracks_; QString timeline_duration_text_{"00:00:00.000"}; QString selected_clip_key_; QString selected_visual_track_key_;
   TimelineClipListModel timeline_model_;
   // Clip thumbnails (decoration): one bounded cache + one worker; see thumbnail_service.hpp.
   std::shared_ptr<ThumbnailCache> thumb_cache_{std::make_shared<ThumbnailCache>()};

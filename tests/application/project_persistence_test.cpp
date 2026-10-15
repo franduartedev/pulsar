@@ -203,7 +203,7 @@ void canvas_survives_primary_move_and_auxiliary_edits() {
   assert(document.canvas() == canvas);
   auto reordered = document.snapshot();
   reordered.timeline.add_track(domain::Track{domain::TrackId{10}, domain::TrackKind::Video});
-  reordered.visual_track_ids = {domain::TrackId{10}, domain::TrackId{9}, document.video_track_id()};
+  reordered.visual_track_ids = {document.video_track_id(), domain::TrackId{10}, domain::TrackId{9}};
   reordered.allocator_state.next_track_id = 11;
   assert(ProjectDocument::restore(ProjectCodec::decode(ProjectCodec::encode(reordered))).canvas() == canvas);
   processor.remove_clip(clip);
@@ -216,6 +216,24 @@ void canvas_survives_primary_move_and_auxiliary_edits() {
   assert(ProjectDocument::restore(ProjectCodec::decode(empty_bytes)).canvas() == canvas);
   assert(processor.undo() && document.canvas() == canvas);
   assert(processor.undo() && document.canvas() == canvas);
+
+  // An initially empty VIDEO 1 does not prevent the first VIDEO 2 picture
+  // from establishing a durable canvas. Undo restores the previous state.
+  ProjectDocument fresh;
+  CommandProcessor fresh_commands{fresh};
+  const auto aux_media = fresh_commands.import_asset("visual.mp4", FakeProbe{});
+  auto aux_state = ProjectCodec::decode(ProjectCodec::encode(fresh.snapshot()));
+  aux_state.tracks.push_back({domain::TrackId{9}, domain::TrackKind::Video, {}});
+  aux_state.visual_track_ids.push_back(domain::TrackId{9});
+  aux_state.allocator_state.next_track_id = 10;
+  auto aux_document = ProjectDocument::restore(aux_state);
+  CommandProcessor aux_commands{aux_document};
+  assert(!aux_document.canvas());
+  (void)aux_commands.add_clip(domain::TrackId{9}, aux_media, TimeRange{t(0), t(4)}, t(0));
+  assert(aux_document.canvas() == canvas);
+  assert(application::exporting::ExportPlan::build(aux_document.snapshot()).output_width() == 1920);
+  assert(aux_commands.undo() && !aux_document.canvas());
+  assert(aux_commands.redo() && aux_document.canvas() == canvas);
 }
 
 void builtin_locator_roundtrip() {

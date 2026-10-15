@@ -551,26 +551,59 @@ void DesktopController::publishTimeline() {
   refreshAssetsIfChanged();
   recomputeTimelineViewport();
   selected_clip_key_ = active_session_->selected_clip() ? QString::number(active_session_->selected_clip()->value()) : QString{};
+  if (active_session_->selected_clip()) {
+    for (const auto& view : active_session_->timeline_views()) {
+      if (view.id == *active_session_->selected_clip()) {
+        selected_visual_track_key_ = view.track_kind == pulsar::domain::TrackKind::Video
+            ? QString::number(view.track_id.value()) : QString{};
+        break;
+      }
+    }
+  }
+  if (!selected_visual_track_key_.isEmpty()) {
+    bool ok = false;
+    const auto id = selected_visual_track_key_.toULongLong(&ok);
+    const auto* track = ok ? active_session_->document().timeline().find_track(pulsar::domain::TrackId{id}) : nullptr;
+    if (!track || track->kind() != pulsar::domain::TrackKind::Video) selected_visual_track_key_.clear();
+  }
   timeline_model_.refresh(*active_session_, *timeline_view_start_, *timeline_view_duration_, thumbnailLookup());
   title_model_.refresh(active_session_->titles(), active_session_->selected_title(), *timeline_view_start_, *timeline_view_duration_);
   requestThumbnails();
   timeline_tracks_.clear();
+  int audio_number = 0;
+  const auto& visual_ids = active_session_->document().visual_track_ids();
+  std::unordered_map<std::uint64_t, int> video_numbers;
+  video_numbers[active_session_->document().video_track_id().value()] = 1;
+  int next_video_number = 2;
+  for (const auto& stored : active_session_->document().timeline().tracks()) {
+    if (stored.kind() == pulsar::domain::TrackKind::Video &&
+        stored.id() != active_session_->document().video_track_id()) video_numbers[stored.id().value()] = next_video_number++;
+  }
   for (const auto& track : active_session_->track_views()) {
     QVariantMap value;
     value.insert("id", static_cast<qulonglong>(track.id.value()));
     value.insert("index", static_cast<int>(track.index));
     value.insert("kind", track.kind == pulsar::domain::TrackKind::Audio ? "audio" : "video");
+    const auto found = std::find(visual_ids.begin(), visual_ids.end(), track.id);
+    const bool primary = track.id == active_session_->document().video_track_id();
+    const int visual_index = found == visual_ids.end() ? -1 : static_cast<int>(found - visual_ids.begin());
+    const auto* source_track = active_session_->document().timeline().find_track(track.id);
+    value.insert("primary", primary);
+    value.insert("empty", source_track && source_track->clips().empty());
+    value.insert("visualIndex", visual_index);
+    value.insert("canRaise", !primary && visual_index < static_cast<int>(visual_ids.size()) - 1);
+    value.insert("canLower", !primary && visual_index > 1);
     value.insert("label", track.kind == pulsar::domain::TrackKind::Audio
-                              ? QStringLiteral("AUDIO %1").arg(static_cast<int>(track.index))
-                              : QStringLiteral("VIDEO 1"));
+                               ? QStringLiteral("AUDIO %1").arg(++audio_number)
+                               : QStringLiteral("VIDEO %1").arg(video_numbers.at(track.id.value())));
     timeline_tracks_.push_back(value);
   }
   const auto duration = active_session_->timeline_duration();
   has_media_ = duration > MediaTime::zero();
   has_video_media_ = false;
-  if (const auto* video_track = active_session_->document().timeline().find_track(
-          active_session_->document().video_track_id()); video_track != nullptr) {
-    has_video_media_ = !video_track->clips().empty();
+  for (const auto id : visual_ids) {
+    if (const auto* video_track = active_session_->document().timeline().find_track(id);
+        video_track && !video_track->clips().empty()) { has_video_media_ = true; break; }
   }
   timeline_duration_text_ = formatTime(duration);
   duration_text_ = formatTime(duration);
@@ -1184,6 +1217,7 @@ void DesktopController::ingestVideoAsset(const QString& media_id, bool append) {
         break;
       case pulsar::desktop::VideoIngestError::NotAudioAsset:
       case pulsar::desktop::VideoIngestError::NotAnAudioTrack:
+      case pulsar::desktop::VideoIngestError::NotAVisualTrack:
         setError(QStringLiteral("Ese medio no se puede colocar en esa pista."));
         break;
     }
@@ -1279,8 +1313,14 @@ void DesktopController::separateSelectedAudio() {
   publishTimeline();
 }
 
-void DesktopController::selectTimelineClip(const QString& key) { if (!active_session_) return; if (key.isEmpty()) { active_session_->select_title(std::nullopt); active_session_->select_clip(std::nullopt); } else { bool ok=false; auto value=key.toULongLong(&ok); if (ok && value) {
+void DesktopController::selectTimelineClip(const QString& key) { if (!active_session_) return; if (key.isEmpty()) { active_session_->select_title(std::nullopt); active_session_->select_clip(std::nullopt); selected_visual_track_key_.clear(); } else { bool ok=false; auto value=key.toULongLong(&ok); if (ok && value) {
       active_session_->select_clip(pulsar::domain::ClipId{value});
+      for (const auto& view : active_session_->timeline_views()) {
+        if (view.id == pulsar::domain::ClipId{value} && view.track_kind == pulsar::domain::TrackKind::Video) {
+          selected_visual_track_key_ = QString::number(view.track_id.value());
+          break;
+        }
+      }
       // The Inspector's MEDIO block follows the clip you picked, not the last library item.
       if (const auto* clip = active_session_->document().timeline().find_clip(pulsar::domain::ClipId{value}); clip != nullptr &&
           QString::number(clip->media_id().value()) != selected_asset_id_ && asset_model_.contains(QString::number(clip->media_id().value()))) {
@@ -1295,6 +1335,83 @@ void DesktopController::selectTimelineClip(const QString& key) { if (!active_ses
         emit assetsChanged();
       }
     } } publishTimeline(); }
+
+void DesktopController::selectVisualTrack(const QString& key) {
+  if (!active_session_) return;
+  bool ok = false;
+  const auto id = key.toULongLong(&ok);
+  const auto* track = ok ? active_session_->document().timeline().find_track(pulsar::domain::TrackId{id}) : nullptr;
+  if (!track || track->kind() != pulsar::domain::TrackKind::Video) return;
+  selected_visual_track_key_ = key;
+  active_session_->select_clip(std::nullopt);
+  active_session_->select_title(std::nullopt);
+  publishTimeline();
+}
+
+void DesktopController::addVisualTrack() {
+  if (!active_session_) return;
+  try {
+    const auto id = active_session_->add_visual_track();
+    selected_visual_track_key_ = QString::number(id.value());
+    clearError();
+    publishTimeline();
+  } catch (const std::exception& error) {
+    logCause("add visual track failed", error);
+    setError(QStringLiteral("No se pudo agregar la pista de video."));
+  }
+}
+
+void DesktopController::removeVisualTrack(const QString& key) {
+  if (!active_session_) return;
+  bool ok = false;
+  const auto id = key.toULongLong(&ok);
+  if (!ok || !id) return;
+  try {
+    active_session_->remove_empty_visual_track(pulsar::domain::TrackId{id});
+    if (selected_visual_track_key_ == key) selected_visual_track_key_.clear();
+    clearError();
+    publishTimeline();
+  } catch (const std::exception& error) {
+    logCause("remove visual track failed", error);
+    setError(QStringLiteral("Solo podés quitar una pista de video vacía; Video 1 siempre permanece."));
+  }
+}
+
+void DesktopController::shiftVisualTrack(const QString& key, int direction) {
+  if (!active_session_ || (direction != -1 && direction != 1)) return;
+  bool ok = false;
+  const auto id = key.toULongLong(&ok);
+  if (!ok || !id) return;
+  const auto& ids = active_session_->document().visual_track_ids();
+  const auto found = std::find(ids.begin(), ids.end(), pulsar::domain::TrackId{id});
+  if (found == ids.end()) return;
+  try {
+    active_session_->reorder_visual_track(*found, static_cast<std::size_t>(found - ids.begin() + direction));
+    clearError();
+    clearProgram("loading");
+    publishTimeline();
+  } catch (const std::exception& error) {
+    logCause("reorder visual track failed", error);
+    setError(QStringLiteral("No se pudo cambiar el orden de la pista."));
+  }
+}
+
+void DesktopController::moveSelectedClipToVisualTrack(const QString& key) {
+  if (!active_session_ || !active_session_->selected_clip()) return;
+  bool ok = false;
+  const auto id = key.toULongLong(&ok);
+  if (!ok || !id) return;
+  try {
+    active_session_->move_clip_to_visual_track(*active_session_->selected_clip(), pulsar::domain::TrackId{id});
+    selected_visual_track_key_ = key;
+    clearError();
+    clearProgram("loading");
+    publishTimeline();
+  } catch (const std::exception& error) {
+    logCause("move clip to visual track failed", error);
+    setError(QStringLiteral("No hay espacio para el clip en esa pista de video."));
+  }
+}
 double DesktopController::selectedClipGainDb() const {
   if (!active_session_ || !active_session_->selected_clip()) return 0.0;
   const auto* clip = active_session_->document().timeline().find_clip(*active_session_->selected_clip());
@@ -1377,7 +1494,9 @@ void DesktopController::stepFrame(int direction) {
     // Stepping back from the very end of a clip belongs to that clip.
     if (range.contains(position) || (direction < 0 && range.end() == position)) { at = &clip; break; }
   }
-  pulsar::domain::FrameRate rate{30, 1};
+  // Gaps (including an empty VIDEO 1) follow the fixed project clock.
+  pulsar::domain::FrameRate rate = active_session_->document().canvas()
+      ? active_session_->document().canvas()->frame_rate : pulsar::domain::FrameRate{30, 1};
   const auto frame_rate_of = [&](const pulsar::domain::Clip& clip) -> std::optional<pulsar::domain::FrameRate> {
     const auto asset = active_session_->document().find_asset(clip.media_id());
     if (!asset || !asset->has_video()) return std::nullopt;
@@ -1837,7 +1956,7 @@ DesktopController::DropResolution DesktopController::resolveAssetDrop(const QStr
   const auto asset = active_session_->document().find_asset(pulsar::domain::MediaId{value});
   if (!asset) { result.reason = QStringLiteral("Medio no encontrado."); return result; }
   if (asset->availability() != pulsar::application::MediaAvailability::Available) { result.reason = QStringLiteral("El medio no está disponible."); return result; }
-  if (below_tracks && asset->has_video()) { result.reason = QStringLiteral("Los videos y fotos van en la pista de video."); return result; }
+  if (below_tracks && asset->has_video()) { result.reason = QStringLiteral("Soltá videos o fotos sobre una pista de video."); return result; }
   const pulsar::desktop::TimelineTrackView* track = below_tracks ? nullptr : &tracks[static_cast<std::size_t>(lane)];
   const bool video_lane = track != nullptr && track->kind == pulsar::domain::TrackKind::Video;
   if (video_lane && !asset->has_video()) { result.reason = QStringLiteral("Los audios van en una pista de audio."); return result; }
@@ -1897,7 +2016,7 @@ bool DesktopController::dropAsset(const QString& media_id, int lane, double pixe
     return false;
   }
   try {
-    if (drop.video) (void)active_session_->insert_video_asset(drop.media, drop.start);
+  if (drop.video) (void)active_session_->insert_video_asset(drop.media, drop.start, drop.track);
     else if (drop.new_track) (void)active_session_->insert_audio_asset_auto(drop.media, drop.start, true);
     else (void)active_session_->insert_audio_asset(drop.media, drop.track, drop.start);
   } catch (const std::exception& error) {
@@ -2209,21 +2328,12 @@ void DesktopController::trimTitle(const QString& key, bool trim_start, double pi
   }
 }
 
-// The picture the export would produce is "canvas sized": the first video clip's size, even.
+// The persisted project canvas stays fixed even when VIDEO 1 becomes empty.
 std::optional<std::pair<int, int>> DesktopController::projectCanvasSize() const {
   if (!active_session_) return std::nullopt;
-  const auto* track = active_session_->document().timeline().find_track(active_session_->document().video_track_id());
-  if (track == nullptr) return std::nullopt;
-  std::vector<pulsar::application::MediaAsset> assets;
-  assets.reserve(track->clips().size());
-  for (const auto& clip : track->clips()) {
-    auto asset = active_session_->document().find_asset(clip.media_id());
-    if (asset && asset->has_video() && asset->metadata().width > 0 && asset->metadata().height > 0) assets.push_back(std::move(*asset));
-  }
-  const auto* master = pulsar::application::pick_master_asset(
-      assets, [](const pulsar::application::MediaAsset& asset) { return &asset; });
-  if (master == nullptr) return std::nullopt;
-  return pulsar::application::master_canvas_size(*master);
+  const auto canvas = active_session_->document().canvas();
+  if (!canvas) return std::nullopt;
+  return std::pair{canvas->width, canvas->height};
 }
 
 void DesktopController::composeTitlesOnPreview(pulsar::media::ffmpeg::FFmpegPreviewFrame& frame, MediaTime time) {

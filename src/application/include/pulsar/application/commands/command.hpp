@@ -20,6 +20,16 @@ struct RemoveTrackCommand {
   domain::TrackId track_id;
 };
 
+struct RestoreEmptyVisualTrackCommand {
+  domain::TrackId track_id;
+  std::size_t visual_index;
+};
+
+struct ReorderVisualTrackCommand {
+  domain::TrackId track_id;
+  std::size_t visual_index; // bottom-to-top position
+};
+
 struct AddClipCommand {
   domain::TrackId track_id;
   domain::Clip clip;
@@ -100,7 +110,8 @@ struct ReplaceTitleCommand {
   domain::Title title;
 };
 
-using Command = std::variant<AddTrackCommand, RemoveTrackCommand, AddClipCommand, RemoveClipCommand, MoveClipCommand,
+using Command = std::variant<AddTrackCommand, RemoveTrackCommand, RestoreEmptyVisualTrackCommand,
+                             ReorderVisualTrackCommand, AddClipCommand, RemoveClipCommand, MoveClipCommand,
                              TrimClipStartCommand, TrimClipEndCommand, SplitClipCommand,
                              SetClipAudioGainCommand, SetClipMutedCommand, SetClipFadesCommand, RestoreClipCommand,
                              RestoreSplitCommand, ImportAssetCommand, RemoveAssetCommand,

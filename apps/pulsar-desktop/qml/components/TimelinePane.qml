@@ -159,6 +159,19 @@ Panel {
             onPressed: function(mouse) { pane.forceActiveFocus(); controller.seekTimelineAt(mouse.x - pane.gutterWidth, pane.timelineWidth) }
             onPositionChanged: function(mouse) { if (pressed) controller.seekTimelineAt(mouse.x - pane.gutterWidth, pane.timelineWidth) }
         }
+        Rectangle {
+            z: 4
+            x: 6; y: 3; width: pane.gutterWidth - 12; height: 22
+            radius: Theme.radiusS
+            color: addTrackMouse.containsMouse ? Theme.bgHover : Theme.bgElevated
+            border.width: 1; border.color: Theme.borderStrong
+            Text { anchors.centerIn: parent; text: "+ Video"; color: Theme.textPrimary; font.pixelSize: Theme.fontSizeXS }
+            MouseArea {
+                id: addTrackMouse
+                anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                onClicked: controller.addVisualTrack()
+            }
+        }
     }
 
     // ---- Tracks -----------------------------------------------------------
@@ -192,15 +205,63 @@ Panel {
                 }
                 Repeater {
                     model: controller.timelineTracks
-                    delegate: Item {
+                     delegate: Item {
+                         id: lane
+                         z: 2
+                         readonly property string trackKey: String(modelData.id)
                         y: pane.titleLaneH + modelData.index * pane.trackLaneHeight
                         width: contentArea.width
                         height: pane.trackLaneHeight
                         // Lane (empty space is real background) + header gutter.
-                        Rectangle { anchors.fill: parent; color: modelData.kind === "audio" ? Theme.laneAudio : Theme.laneVideo }
-                        Rectangle { width: pane.gutterWidth; anchors.top: parent.top; anchors.bottom: parent.bottom; color: Theme.bgElevated }
-                        Rectangle { width: 3; anchors.left: parent.left; anchors.top: parent.top; anchors.bottom: parent.bottom; color: modelData.kind === "audio" ? Theme.waveformAudio : Theme.waveform; opacity: 0.85 }
-                        Text { x: 14; anchors.verticalCenter: parent.verticalCenter; text: pane.trackTitle(modelData.label); color: Theme.textPrimary; font.pixelSize: Theme.fontSizeS; elide: Text.ElideRight; width: pane.gutterWidth - 22 }
+                         readonly property bool activeVisual: modelData.kind === "video" && controller.selectedVisualTrackKey === String(modelData.id)
+                         readonly property bool dropTarget: pane.dropVisible && pane.dropLane === modelData.index && pane.dropValid
+                         Rectangle { anchors.fill: parent; color: modelData.kind === "audio" ? Theme.laneAudio : Theme.laneVideo
+                                     border.width: lane.dropTarget ? 1 : 0; border.color: Theme.accent }
+                         Rectangle { width: pane.gutterWidth; anchors.top: parent.top; anchors.bottom: parent.bottom
+                                     color: lane.activeVisual ? Theme.accentDim : Theme.bgElevated
+                                     border.width: lane.activeVisual ? 1 : 0; border.color: Theme.accent }
+                         Rectangle { width: 3; anchors.left: parent.left; anchors.top: parent.top; anchors.bottom: parent.bottom; color: modelData.kind === "audio" ? Theme.waveformAudio : Theme.waveform; opacity: 0.85 }
+                         Text { x: 14; y: modelData.kind === "video" ? 7 : (parent.height - height) / 2
+                                text: pane.trackTitle(modelData.label); color: Theme.textPrimary; font.pixelSize: Theme.fontSizeS
+                                elide: Text.ElideRight; width: pane.gutterWidth - 20 }
+                         Text { visible: modelData.primary; x: 14; y: 27; text: "Base"; color: Theme.textSecondary; font.pixelSize: Theme.fontSizeXS }
+                         MouseArea {
+                             id: headerMouse
+                             x: 4; width: pane.gutterWidth - 4; height: parent.height
+                             hoverEnabled: true; cursorShape: modelData.kind === "video" ? Qt.PointingHandCursor : Qt.ArrowCursor
+                             onClicked: if (modelData.kind === "video") controller.selectVisualTrack(String(modelData.id))
+                         }
+                         Row {
+                             visible: modelData.kind === "video" && !modelData.primary && (headerMouse.containsMouse || lane.activeVisual)
+                             x: 12; y: parent.height - 22; z: 2; spacing: 3
+                             Repeater {
+                                 model: [ {label: "↑", allowed: modelData.canRaise, direction: 1, tip: "Subir pista"},
+                                          {label: "↓", allowed: modelData.canLower, direction: -1, tip: "Bajar pista"},
+                                          {label: "×", allowed: modelData.empty, direction: 0, tip: "Quitar pista vacía"} ]
+                                 delegate: Rectangle {
+                                     id: actionButton
+                                     readonly property string actionTip: modelData.tip
+                                     readonly property bool actionAllowed: modelData.allowed
+                                     Accessible.name: modelData.tip
+                                     width: 22; height: 20; radius: Theme.radiusS
+                                     opacity: modelData.allowed ? 1 : 0.35
+                                     color: actionMouse.containsMouse && modelData.allowed ? Theme.bgHover : Theme.bgElevated
+                                     Text { anchors.centerIn: parent; text: modelData.label; color: Theme.textPrimary; font.pixelSize: Theme.fontSizeS }
+                                     Rectangle {
+                                         visible: actionMouse.containsMouse && actionButton.actionAllowed
+                                         z: 5; y: -24; width: hint.implicitWidth + 12; height: 20; radius: Theme.radiusS
+                                         color: Theme.bgElevated; border.color: Theme.borderStrong
+                                         Text { id: hint; anchors.centerIn: parent; text: actionButton.actionTip; color: Theme.textPrimary; font.pixelSize: Theme.fontSizeXS }
+                                     }
+                                     MouseArea {
+                                         id: actionMouse; anchors.fill: parent; hoverEnabled: true
+                                         enabled: modelData.allowed; cursorShape: Qt.PointingHandCursor
+                                         onClicked: if (modelData.direction === 0) controller.removeVisualTrack(lane.trackKey)
+                                                    else controller.shiftVisualTrack(lane.trackKey, modelData.direction)
+                                     }
+                                 }
+                             }
+                         }
                         Rectangle { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; height: 1; color: Theme.bgRoot }
                     }
                 }
@@ -208,7 +269,7 @@ Panel {
                 // starts before the zoomed view never paints over the headers.
                 Item {
                     id: clipLayer
-                    z: 2
+                     z: 3
                     x: pane.gutterWidth
                     width: pane.timelineWidth
                     height: contentArea.height
@@ -275,7 +336,7 @@ Panel {
                 Item {
                     id: titleLayer
                     visible: pane.titleLaneH > 0
-                    x: pane.gutterWidth; z: 2
+                     x: pane.gutterWidth; z: 3
                     width: pane.timelineWidth; height: pane.titleLaneH
                     clip: true
                     Repeater {
@@ -297,7 +358,9 @@ Panel {
                 }
                 // Empty lane: click selects nothing and seeks; drag scrubs.
                 MouseArea {
-                    anchors.fill: parent
+                    x: pane.gutterWidth
+                    width: parent.width - pane.gutterWidth
+                    height: parent.height
                     z: 1
                     acceptedButtons: Qt.LeftButton
                     onPressed: function(mouse) {

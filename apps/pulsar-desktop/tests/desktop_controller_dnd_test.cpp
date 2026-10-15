@@ -83,6 +83,29 @@ int main(int argc, char** argv) {
   REQUIRE(10, !controller.previewAssetDrop(video_b, 9, 10.0, width).value("valid").toBool());     // no such lane
   REQUIRE(11, !controller.dropAsset(video_b, -1, 10.0, width));
 
+  // Auxiliary lane is above VIDEO 1. Library drops target that lane, and an
+  // existing selected clip can move back to the primary without changing time.
+  controller.addVisualTrack();
+  REQUIRE(40, controller.timelineTracks().size() == 2 &&
+      controller.timelineTracks()[0].toMap().value("label").toString() == QStringLiteral("VIDEO 2") &&
+      controller.timelineTracks()[1].toMap().value("primary").toBool());
+  REQUIRE(41, controller.previewAssetDrop(video_b, 0, 996.0, width).value("valid").toBool());
+  REQUIRE(42, controller.dropAsset(video_b, 0, 996.0, width) && clips(controller) == 2);
+  const auto upper_id = controller.timelineTracks()[0].toMap().value("id").toString();
+  const auto primary_id = controller.timelineTracks()[1].toMap().value("id").toString();
+  REQUIRE(43, controller.selectedVisualTrackKey() == upper_id);
+  controller.moveSelectedClipToVisualTrack(primary_id);
+  REQUIRE(44, controller.errorMessage().isEmpty() && controller.selectedVisualTrackKey() == primary_id);
+  controller.removeVisualTrack(upper_id);
+  REQUIRE(45, controller.timelineTracks().size() == 1);
+  controller.undoEdit(); // restore the empty auxiliary track
+  REQUIRE(46, controller.timelineTracks().size() == 2);
+  controller.undoEdit(); // move the clip back to VIDEO 2
+  REQUIRE(47, controller.selectedVisualTrackKey() == upper_id);
+  controller.undoEdit(); // remove the dropped clip
+  controller.undoEdit(); // remove VIDEO 2, preserving original state below
+  REQUIRE(48, clips(controller) == 1 && controller.timelineTracks().size() == 1);
+
   // Audio: its own lane only. A video on an audio lane (and the reverse) is refused clearly.
   controller.openPath(q(root / "music.wav"));
   REQUIRE(12, wait_until([&] { return assets(controller) == 3 && !controller.busy(); }));

@@ -1,5 +1,6 @@
 #include <pulsar/application/commands/command_processor.hpp>
 #include <pulsar/application/media/media_probe.hpp>
+#include <pulsar/application/project/project_codec.hpp>
 #include <pulsar/domain/ids/ids.hpp>
 #include <pulsar/domain/time/media_time.hpp>
 #include <pulsar/domain/time/rational.hpp>
@@ -34,7 +35,7 @@ public:
     result.path = path;
     result.video_streams.push_back(application::VideoStreamInfo{
         2, "h264", 1920, 1080, Rational{1, 1000}, MediaTime{100000, Rational{1, 1000}},
-        std::nullopt});
+         domain::FrameRate{30, 1}});
     return result;
   }
 };
@@ -58,6 +59,51 @@ void add_undo_redo() {
   assert(document.timeline().find_clip(clip) == nullptr);
   assert(processor.redo());
   assert(document.timeline().find_clip(clip) != nullptr);
+}
+
+void visual_track_history_and_targeting() {
+  application::ProjectDocument document;
+  CommandProcessor processor{document};
+  FakeProbe probe;
+  const auto media = import(document, processor, probe);
+  const auto primary = document.video_track_id();
+  const auto clip = processor.add_clip(media, TimeRange{t(0), t(5)}, t(0));
+  const auto canvas = document.canvas();
+  const auto upper = processor.add_track(domain::TrackKind::Video);
+  const auto top = processor.add_track(domain::TrackKind::Video);
+  assert((document.visual_track_ids() == std::vector{primary, upper, top}));
+  processor.reorder_visual_track(top, 1);
+  assert((document.visual_track_ids() == std::vector{primary, top, upper}));
+  assert(processor.undo() && (document.visual_track_ids() == std::vector{primary, upper, top}));
+  assert(processor.redo() && (document.visual_track_ids() == std::vector{primary, top, upper}));
+  processor.move_clip(clip, upper, t(0));
+  assert(document.timeline().find_track(primary)->clips().empty());
+  assert(document.canvas() == canvas);
+  const auto saved = application::ProjectCodec::encode(document.snapshot());
+  assert(saved.starts_with("PULSAR_PROJECT 6\n"));
+  assert(saved.find("CANVAS 1920 1080 30 1\n") != std::string::npos);
+  const auto reopened = application::ProjectDocument::restore(application::ProjectCodec::decode(saved));
+  assert(reopened.visual_track_ids() == document.visual_track_ids());
+  assert(reopened.canvas() == canvas);
+  bool rejected = false;
+  try { processor.remove_empty_visual_track(upper); }
+  catch (const std::invalid_argument&) { rejected = true; }
+  assert(rejected && document.timeline().find_track(upper));
+  processor.move_clip(clip, top, t(1));
+  processor.remove_empty_visual_track(upper);
+  assert((document.visual_track_ids() == std::vector{primary, top}));
+  assert(processor.undo() && (document.visual_track_ids() == std::vector{primary, top, upper}));
+  assert(processor.redo() && (document.visual_track_ids() == std::vector{primary, top}));
+  assert(processor.undo());
+  assert(processor.undo() && document.timeline().find_track(upper)->find_clip(clip));
+  rejected = false;
+  try { processor.remove_empty_visual_track(primary); }
+  catch (const std::invalid_argument&) { rejected = true; }
+  assert(rejected);
+  rejected = false;
+  try { processor.reorder_visual_track(upper, 0); }
+  catch (const std::invalid_argument&) { rejected = true; }
+  assert(rejected);
 }
 
 void remove_move_and_exact_restore() {
@@ -201,6 +247,7 @@ void capacity_zero_and_noncopyable() {
 } // namespace
 
 int main() {
+  visual_track_history_and_targeting();
   add_undo_redo();
   remove_move_and_exact_restore();
   trims_restore_exact_values();

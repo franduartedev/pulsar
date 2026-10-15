@@ -100,8 +100,10 @@ Panel {
     // What the Inspector is describing right now (drives the context chip and which groups appear).
     readonly property bool titleSelected: controller.selectedTitleKey.length > 0
     readonly property bool clipSelected: controller.selectedClipKey.length > 0
+    readonly property bool trackSelected: !titleSelected && !clipSelected && controller.selectedVisualTrackKey.length > 0
+    readonly property var selectedTrack: controller.timelineTracks.find(function(t) { return String(t.id) === controller.selectedVisualTrackKey }) || null
     readonly property string contextLabel: titleSelected ? "TÍTULO"
-        : (!clipSelected ? "" : (controller.selectedClipKind === "image" ? "FOTO"
+        : (!clipSelected ? (trackSelected ? "PISTA" : "") : (controller.selectedClipKind === "image" ? "FOTO"
         : (controller.selectedClipKind === "color" ? "PLACA"
         : (controller.selectedClipKind === "audio" ? "AUDIO" : "VIDEO"))))
 
@@ -129,11 +131,24 @@ Panel {
 
             // ---- Nothing selected ------------------------------------------
             Column {
-                visible: !inspector.titleSelected && !inspector.clipSelected && inspector.summary.length === 0
+                visible: !inspector.titleSelected && !inspector.clipSelected && !inspector.trackSelected && inspector.summary.length === 0
                 width: parent.width
                 spacing: 6
                 Text { width: parent.width; text: "Nada seleccionado"; color: Theme.textSecondary; font.pixelSize: Theme.fontSizeM }
                 Text { width: parent.width; wrapMode: Text.WordWrap; text: "Elegí un clip o un título en la timeline para ver y ajustar sus propiedades."; color: Theme.textMuted; font.pixelSize: Theme.fontSizeS }
+            }
+
+            InspectorSection {
+                visible: inspector.trackSelected && inspector.selectedTrack !== undefined
+                first: true; heading: "PISTA DE VIDEO"
+                Text { width: parent.width; text: inspector.selectedTrack ? inspector.selectedTrack.label.replace("VIDEO", "Video") + (inspector.selectedTrack.primary ? " · Base" : "") : "";
+                       color: Theme.textPrimary; font.pixelSize: Theme.fontSizeM; font.bold: true }
+                Text { width: parent.width; wrapMode: Text.WordWrap;
+                       text: inspector.selectedTrack && inspector.selectedTrack.primary ? "Pista principal: el audio del video se escucha desde acá." : "Las pistas superiores cubren las inferiores donde tienen imagen.";
+                       color: Theme.textSecondary; font.pixelSize: Theme.fontSizeS }
+                PButton { visible: !!inspector.selectedTrack && !inspector.selectedTrack.primary && inspector.selectedTrack.empty;
+                          width: parent.width; height: Theme.controlHeightSmall; text: "Quitar pista vacía";
+                          onClicked: controller.removeVisualTrack(controller.selectedVisualTrackKey) }
             }
 
             // ---- TÍTULO ------------------------------------------------------
@@ -279,6 +294,19 @@ Panel {
                     enabled: controller.canDuplicate
                     onClicked: controller.duplicateSelected()
                 }
+                Text {
+                    visible: controller.selectedClipKind !== "audio" && controller.timelineTracks.filter(function(t) { return t.kind === "video" }).length > 1
+                    text: "Mover a otra pista"; color: Theme.textSecondary; font.pixelSize: Theme.fontSizeXS
+                }
+                Repeater {
+                    model: controller.selectedClipKind !== "audio" ? controller.timelineTracks : []
+                    delegate: PButton {
+                        visible: modelData.kind === "video" && controller.selectedVisualTrackKey !== String(modelData.id)
+                        width: parent.width; height: Theme.controlHeightSmall
+                        text: "Mover a " + modelData.label.replace("VIDEO", "Video")
+                        onClicked: controller.moveSelectedClipToVisualTrack(String(modelData.id))
+                    }
+                }
             }
 
             // ---- AUDIO ---------------------------------------------------------
@@ -364,7 +392,7 @@ Panel {
             // ---- MEDIO (informative) -----------------------------------------
             InspectorSection {
                 // The controller only describes the active source; hide it when the selection is a title.
-                visible: inspector.summary.length > 0 && !inspector.titleSelected
+                 visible: inspector.summary.length > 0 && !inspector.titleSelected && !inspector.trackSelected
                 first: !inspector.clipSelected; heading: "MEDIO"
                 // The clip above already names its media; avoid saying it twice.
                 Text { visible: !inspector.clipSelected || inspector.selName !== controller.mediaName; width: parent.width; text: controller.mediaName; color: Theme.textSecondary; font.pixelSize: Theme.fontSizeS; elide: Text.ElideMiddle }
@@ -373,7 +401,7 @@ Panel {
 
             // ---- Technical details (collapsed) ---------------------------------
             Column {
-                visible: inspector.rows.length > 0 && !inspector.titleSelected
+                 visible: inspector.rows.length > 0 && !inspector.titleSelected && !inspector.trackSelected
                 width: parent.width
                 spacing: 8
                 Item {

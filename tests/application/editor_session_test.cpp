@@ -1726,6 +1726,23 @@ void duplicate_and_fades_in_the_session() {
 }
 
 int main() {
+  {
+    EditorSession session;
+    const auto media = session.processor().import_asset("visual.mp4", Probe{});
+    const auto upper = session.add_visual_track();
+    const auto clip = session.insert_video_asset(media, MediaTime::zero(), upper);
+    assert(session.document().timeline().find_track(session.document().video_track_id())->clips().empty());
+    assert(session.timeline_views().size() == 1 && session.timeline_views()[0].track_id == upper);
+    assert(session.track_views().front().id == upper);
+    const auto primary = session.document().video_track_id();
+    session.move_clip_to_visual_track(clip, primary);
+    assert(session.timeline_views()[0].track_id == primary);
+    assert(session.undo() && session.timeline_views()[0].track_id == upper);
+    session.move_clip_to_visual_track(clip, primary);
+    session.remove_empty_visual_track(upper);
+    assert(session.track_views().size() == 1);
+    assert(session.undo() && session.track_views().front().id == upper);
+  }
   viewport_is_exactly_guarded();
   zoom_and_pan_preserve_editorial_time_mapping();
   editing_actions_use_document_commands();
