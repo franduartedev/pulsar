@@ -23,6 +23,7 @@ public:
   [[nodiscard]] const std::vector<domain::TrackId>& visual_track_ids() const noexcept {
     return visual_track_ids_;
   }
+  [[nodiscard]] const std::optional<ProjectCanvas>& canvas() const noexcept { return canvas_; }
   [[nodiscard]] domain::TrackId next_track_id() const { return allocator_.next_track(); }
   [[nodiscard]] std::vector<MediaAsset> assets() const { return assets_; }
   // Allocation-free view for UI read models. Valid until the next asset edit.
@@ -102,6 +103,7 @@ private:
   domain::Timeline timeline_;
   domain::TrackId video_track_id_;
   std::vector<domain::TrackId> visual_track_ids_;
+  std::optional<ProjectCanvas> canvas_;
   std::vector<MediaAsset> assets_;
   std::vector<domain::Title> titles_;
   std::uint64_t asset_revision_{0};

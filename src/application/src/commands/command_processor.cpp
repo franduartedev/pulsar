@@ -1,4 +1,5 @@
 #include <pulsar/application/commands/command_processor.hpp>
+#include <pulsar/application/composition/project_canvas.hpp>
 
 #include <algorithm>
 #include <stdexcept>
@@ -255,6 +256,14 @@ void CommandProcessor::apply(ProjectDocument& document, const Command& command, 
           }
           timeline.remove_track(concrete_command.track_id);
         } else if constexpr (std::is_same_v<CommandType, AddClipCommand>) {
+          bool promote_still_canvas = false;
+          if (document.canvas_ && document.canvas_->provisional_still &&
+              concrete_command.track_id == document.video_track_id_) {
+            const auto* primary = timeline.find_track(document.video_track_id_);
+            const bool has_still = primary && !primary->clips().empty();
+            const auto asset = document.find_asset(concrete_command.clip.media_id());
+            promote_still_canvas = has_still && asset && !asset->is_still();
+          }
           if (mode == ApplyMode::NewEdit) {
             if (concrete_command.clip.id() != document.allocator_.next_clip()) {
               throw std::invalid_argument{"new clip id is not the next document id"};
@@ -263,6 +272,11 @@ void CommandProcessor::apply(ProjectDocument& document, const Command& command, 
             document.allocator_.ensure_clip_consumable();
           }
           timeline.insert_clip(concrete_command.track_id, concrete_command.clip);
+          if (!document.canvas_ && concrete_command.track_id == document.video_track_id_) {
+            document.canvas_ = legacy_project_canvas(document.snapshot());
+          } else if (promote_still_canvas) {
+            document.canvas_ = legacy_project_canvas(document.snapshot());
+          }
           if (mode == ApplyMode::NewEdit) {
             document.allocator_.consume_clip();
           }

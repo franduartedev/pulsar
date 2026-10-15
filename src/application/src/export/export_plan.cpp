@@ -1,6 +1,5 @@
 #include <pulsar/application/export/export_plan.hpp>
-#include <pulsar/application/composition/title_compositor.hpp>
-
+#include <pulsar/application/composition/project_canvas.hpp>
 #include <pulsar/domain/timeline/track_kind.hpp>
 
 #include <limits>
@@ -11,20 +10,6 @@ namespace pulsar::application::exporting {
 namespace {
 
 domain::FrameRate audio_rate() { return domain::FrameRate{48'000, 1}; }
-
-[[nodiscard]] std::int64_t checked_even_dimension(int dimension) {
-  if (dimension <= 0) {
-    throw ExportPlanError{ExportPlanErrorCode::InvalidDimensions,
-                          "video dimensions must be strictly positive"};
-  }
-  const auto value = static_cast<std::int64_t>(dimension);
-  if ((value % 2) == 0) return value;
-  if (value == std::numeric_limits<std::int64_t>::max()) {
-    throw ExportPlanError{ExportPlanErrorCode::Overflow,
-                          "normalized video dimension overflows"};
-  }
-  return value + 1;
-}
 
 [[nodiscard]] std::int64_t checked_frame_index(domain::MediaTime time,
                                                domain::FrameRate rate,
@@ -55,18 +40,6 @@ domain::FrameRate audio_rate() { return domain::FrameRate{48'000, 1}; }
                           "timeline references unavailable media"};
   }
   return *found->second;
-}
-
-[[nodiscard]] domain::FrameRate require_frame_rate(const MediaAsset& asset) {
-  if (!asset.has_video() || !asset.metadata().nominal_frame_rate.has_value()) {
-    throw ExportPlanError{ExportPlanErrorCode::InvalidFrameRate,
-                          "video master has no nominal frame rate"};
-  }
-  try {
-    return *asset.metadata().nominal_frame_rate;
-  } catch (const std::invalid_argument&) {
-    throw ExportPlanError{ExportPlanErrorCode::InvalidFrameRate, "video frame rate is invalid"};
-  }
 }
 
 } // namespace
@@ -141,22 +114,28 @@ ExportPlan ExportPlan::build(const ProjectSnapshot& input, ExportProfile profile
   const MediaAsset* master = pick_master_asset(
       video_track->clips(),
       [&](const domain::Clip& clip) -> const MediaAsset* { return &find_asset(assets, clip.media_id()); });
-  if (master == nullptr) {
+  bool has_visual_content = false;
+  for (const auto id : input.visual_track_ids) {
+    if (!input.timeline.find_track(id)->clips().empty()) has_visual_content = true;
+  }
+  if (!has_visual_content) {
     throw ExportPlanError{ExportPlanErrorCode::NoVideoMaster,
-                          "project has no video asset on its video track"};
+                          "project has no visual content"};
   }
-
-  const auto frame_rate = require_frame_rate(*master);
-  const auto canvas = master_canvas_size(*master);
-  auto width = checked_even_dimension(canvas.first);
-  auto height = checked_even_dimension(canvas.second);
-  if (profile.max_output_width() > 0 && profile.max_output_height() > 0 &&
-      (width > profile.max_output_width() || height > profile.max_output_height())) {
-    const auto fit = composition::fit_geometry(static_cast<int>(width), static_cast<int>(height),
-                                               profile.max_output_width(), profile.max_output_height());
-    width = checked_even_dimension(fit.scaled_width);
-    height = checked_even_dimension(fit.scaled_height);
+  if (master && !effective_project_canvas(input)) {
+    throw ExportPlanError{ExportPlanErrorCode::InvalidFrameRate,
+                          "video master has no nominal frame rate"};
   }
+  VisualRenderContext visual = [&] {
+    try {
+      return VisualRenderContext::build(input, profile.max_output_width(), profile.max_output_height());
+    } catch (const std::invalid_argument& error) {
+      throw ExportPlanError{ExportPlanErrorCode::NoVideoMaster, error.what()};
+    }
+  }();
+  const auto frame_rate = visual.frame_rate;
+  const auto width = visual.width;
+  const auto height = visual.height;
   const auto editorial_duration = input.timeline.duration();
   const auto frame_count = output_frame_count(editorial_duration, frame_rate);
   if (frame_count <= 0) {
@@ -165,7 +144,7 @@ ExportPlan ExportPlan::build(const ProjectSnapshot& input, ExportProfile profile
   const auto output_duration = output_frame_time(domain::FrameNumber{frame_count}, frame_rate);
   const auto samples = exporting::audio_sample_count(output_duration);
 
-  return ExportPlan{input, profile, master->id(), frame_rate, editorial_duration,
+  return ExportPlan{input, profile, master ? std::optional{master->id()} : std::nullopt, frame_rate, editorial_duration,
                     output_duration, frame_count, width, height, samples};
 }
 

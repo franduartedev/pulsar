@@ -39,7 +39,8 @@ public:
   void run() {
     std::uint64_t rendered_epoch = 0;
     std::uint64_t observed_epoch = 0;
-    std::optional<exporting::ExportPlan> plan;
+    std::optional<VisualRenderContext> context;
+    std::shared_ptr<const ProjectSnapshot> rendered_snapshot;
     std::unique_ptr<exporting::OfflineVideoRenderer> renderer;
     while (true) {
       std::optional<Request> job;
@@ -55,7 +56,8 @@ public:
           // new timeline is empty or the caller switched back to one track.
           lock.unlock();
           renderer.reset();
-          plan.reset();
+          context.reset();
+          rendered_snapshot.reset();
           rendered_epoch = 0;
           continue;
         }
@@ -66,9 +68,10 @@ public:
       try {
         if (rendered_epoch != job->epoch) {
           renderer.reset();
-          plan.reset();
-          plan.emplace(exporting::ExportPlan::build(*job->snapshot));
-          renderer = std::make_unique<exporting::OfflineVideoRenderer>(*plan, *sources,
+          context.reset();
+          rendered_snapshot = job->snapshot;
+          context.emplace(VisualRenderContext::build(*rendered_snapshot));
+          renderer = std::make_unique<exporting::OfflineVideoRenderer>(*rendered_snapshot, *context, *sources,
               exporting::OfflineVideoRenderOptions{scaler.get(), nullptr},
               [this, generation = job->epoch] { return stop.load() || epoch.load() != generation; });
           rendered_epoch = job->epoch;
@@ -81,6 +84,7 @@ public:
         result.error = error.what();
         // A failed source is not reused as if it were a completed decode state.
         renderer.reset();
+        rendered_snapshot.reset();
         rendered_epoch = 0;
       }
       {

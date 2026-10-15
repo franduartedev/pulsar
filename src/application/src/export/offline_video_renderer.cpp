@@ -48,8 +48,16 @@ OfflineVideoRenderer::OfflineVideoRenderer(const ExportPlan& plan,
                                            OfflineVideoSourceFactory& source_factory,
                                            OfflineVideoRenderOptions options,
                                            std::function<bool()> is_cancelled)
-    : plan_{plan}, source_factory_{source_factory}, options_{options},
+    : snapshot_{plan.snapshot()}, context_{plan.visual_context()}, export_frame_count_{plan.frame_count()},
+      source_factory_{source_factory}, options_{options},
       is_cancelled_{std::move(is_cancelled)} {}
+
+OfflineVideoRenderer::OfflineVideoRenderer(const ProjectSnapshot& snapshot, VisualRenderContext context,
+                                           OfflineVideoSourceFactory& source_factory,
+                                           OfflineVideoRenderOptions options,
+                                           std::function<bool()> is_cancelled)
+    : snapshot_{snapshot}, context_{std::move(context)}, source_factory_{source_factory},
+      options_{options}, is_cancelled_{std::move(is_cancelled)} {}
 
 OfflineVideoRenderer::~OfflineVideoRenderer() = default;
 
@@ -194,8 +202,8 @@ void OfflineVideoRenderer::compose_frame(composition::RgbaSurface& canvas, Activ
                                   "offline video source pixel buffer is truncated"};
   }
 
-  const auto output_width = plan_.output_width();
-  const auto output_height = plan_.output_height();
+  const auto output_width = context_.width;
+  const auto output_height = context_.height;
   const auto geometry = composition::fit_geometry(source.width, source.height, static_cast<int>(output_width),
                                                   static_cast<int>(output_height));
   const auto scaled_width = static_cast<std::int64_t>(geometry.scaled_width);
@@ -239,30 +247,30 @@ OfflineVideoFrame OfflineVideoRenderer::render_frame(domain::FrameNumber frame_i
     throw OfflineVideoRenderError{OfflineVideoRenderErrorCode::InternalInvariant,
                                   "offline video frames must be rendered sequentially"};
   }
-  if (frame_index.value() < 0 || frame_index.value() >= plan_.frame_count()) {
+  if (!export_frame_count_ || frame_index.value() < 0 || frame_index.value() >= *export_frame_count_) {
     throw OfflineVideoRenderError{OfflineVideoRenderErrorCode::InternalInvariant,
                                   "offline video frame index is outside the export plan"};
   }
 
-  const auto timeline_time = output_frame_time(frame_index, plan_.frame_rate());
+  const auto timeline_time = output_frame_time(frame_index, context_.frame_rate);
   auto output = render_time(frame_index, timeline_time);
   ++next_frame_index_;
   return output;
 }
 
 OfflineVideoFrame OfflineVideoRenderer::render_at(domain::MediaTime timeline_time) {
-  if (timeline_time < domain::MediaTime::zero() || timeline_time >= plan_.editorial_duration()) {
+  if (timeline_time < domain::MediaTime::zero() || timeline_time >= context_.editorial_duration) {
     throw OfflineVideoRenderError{OfflineVideoRenderErrorCode::InternalInvariant,
                                   "preview time is outside the editorial range"};
   }
-  return render_time(domain::FrameNumber{output_frame_index_at(timeline_time, plan_.frame_rate(),
+  return render_time(domain::FrameNumber{output_frame_index_at(timeline_time, context_.frame_rate,
       domain::RoundingMode::Floor)}, timeline_time);
 }
 
 OfflineVideoFrame OfflineVideoRenderer::render_time(domain::FrameNumber frame_index,
                                                     domain::MediaTime timeline_time) {
   check_cancelled();
-  const auto composition = resolve_visual_composition(plan_.snapshot(), timeline_time);
+  const auto composition = resolve_visual_composition(snapshot_, timeline_time);
   std::ostringstream diagnostic;
   diagnostic << "frame_index=" << frame_index.value()
              << " timeline_time=" << static_cast<double>(timeline_time);
@@ -275,8 +283,7 @@ OfflineVideoFrame OfflineVideoRenderer::render_time(domain::FrameNumber frame_in
   metrics_.peak_active_layers = std::max(metrics_.peak_active_layers, active_layers);
 
   try {
-    auto canvas = composition::black_surface(static_cast<int>(plan_.output_width()),
-                                              static_cast<int>(plan_.output_height()));
+    auto canvas = composition::black_surface(context_.width, context_.height);
     for (const auto& layer : composition.layers) {
       check_cancelled();
       diagnostic << " track_id=" << layer.track_id.value();
@@ -296,10 +303,10 @@ OfflineVideoFrame OfflineVideoRenderer::render_time(domain::FrameNumber frame_in
     check_cancelled();
     OfflineVideoFrame output{frame_index, timeline_time, canvas.width, canvas.height,
         canvas.stride_bytes, OfflinePixelFormat::Rgba8888, std::move(canvas.pixels)};
-    if (options_.titles != nullptr && !plan_.snapshot().titles.empty()) {
+    if (options_.titles != nullptr && !snapshot_.titles.empty()) {
       // Titles ride on the finished output frame: the same compositor the preview uses.
       options_.titles->composite(composition::RgbaCanvas{output.width, output.height, output.stride_bytes, output.pixels.data()},
-                                 plan_.snapshot().titles, timeline_time);
+                                  snapshot_.titles, timeline_time);
     }
     ++metrics_.output_frames;
     return output;

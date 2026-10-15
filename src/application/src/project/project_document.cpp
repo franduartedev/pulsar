@@ -1,4 +1,5 @@
 #include <pulsar/application/project/project_document.hpp>
+#include <pulsar/application/composition/project_canvas.hpp>
 
 #include <pulsar/domain/timeline/track_kind.hpp>
 
@@ -158,6 +159,11 @@ ProjectDocument ProjectDocument::restore(const ProjectRestoreState& state) {
     throw std::invalid_argument{"designated video track is absent"};
   }
   validate_visual_track_ids(timeline, state.video_track_id, state.visual_track_ids);
+  if (state.canvas && (state.canvas->width <= 0 || state.canvas->height <= 0 ||
+                       state.canvas->width > 32768 || state.canvas->height > 32768 ||
+                       static_cast<std::int64_t>(state.canvas->width) * state.canvas->height > 64'000'000)) {
+    throw std::invalid_argument{"invalid project canvas dimensions"};
+  }
   if (state.allocator_state.next_media_id == 0 ||
       state.allocator_state.next_media_id <= max_media_id ||
       state.allocator_state.next_media_id == std::numeric_limits<std::uint64_t>::max()) {
@@ -203,6 +209,7 @@ ProjectDocument ProjectDocument::restore(const ProjectRestoreState& state) {
   restored.video_track_id_ = state.video_track_id;
   restored.visual_track_ids_ = state.visual_track_ids;
   restored.assets_ = state.assets;
+  restored.canvas_ = state.canvas ? state.canvas : legacy_project_canvas(restored.snapshot());
   restored.allocator_.state = state.allocator_state;
   restored.current_history_state_id_ = 1;
   restored.saved_history_state_id_ = 1;
@@ -352,7 +359,7 @@ void ProjectDocument::validate_clip_for_track(domain::TrackId track_id,
 ProjectSnapshot ProjectDocument::snapshot() const {
   return ProjectSnapshot{timeline_, assets_, video_track_id_, allocator_.state,
                          current_history_state_id_, saved_history_state_id_, next_history_state_id_,
-                         document_generation_, titles_, visual_track_ids_};
+                          document_generation_, titles_, visual_track_ids_, canvas_};
 }
 
 void ProjectDocument::ensure_new_edit_possible() const {

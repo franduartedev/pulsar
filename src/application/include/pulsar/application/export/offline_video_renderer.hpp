@@ -117,6 +117,10 @@ struct OfflineVideoRenderOptions {
 class OfflineVideoRenderer final {
 public:
   OfflineVideoRenderer(const ExportPlan& plan, OfflineVideoSourceFactory& source_factory,
+                        OfflineVideoRenderOptions options = {},
+                        std::function<bool()> is_cancelled = {});
+  OfflineVideoRenderer(const ProjectSnapshot& snapshot, VisualRenderContext context,
+                       OfflineVideoSourceFactory& source_factory,
                        OfflineVideoRenderOptions options = {},
                        std::function<bool()> is_cancelled = {});
   ~OfflineVideoRenderer();
@@ -143,7 +147,9 @@ private:
   [[nodiscard]] OfflineVideoFrame render_time(domain::FrameNumber frame_index,
                                              domain::MediaTime timeline_time);
 
-  const ExportPlan& plan_;
+  const ProjectSnapshot& snapshot_;
+  VisualRenderContext context_;
+  std::optional<std::int64_t> export_frame_count_;
   OfflineVideoSourceFactory& source_factory_;
   OfflineVideoRenderOptions options_;
   std::map<std::uint64_t, std::unique_ptr<ActiveSource>> active_sources_;

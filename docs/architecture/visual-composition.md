@@ -1,10 +1,32 @@
 # Visual composition (PULSAR 1.2 / E1)
 
 `visual_track_ids` is the explicit bottom-to-top stack. VIDEO 1 remains the
-primary canvas/FPS master and the only visual track contributing embedded audio.
+compatibility anchor that establishes the canvas/FPS and the only visual track
+contributing embedded audio.
 Editorial gaps and declared source presentation gaps do not paint a layer.
 Opaque fitted pictures (including their letterbox bars) cover lower layers;
 the initial canvas is opaque black. Titles are composited last.
+
+## Stable canvas and eligibility
+
+`ProjectCanvas` records the editorial dimensions and frame rate when the first
+primary visual clip establishes them. A still-only canvas is provisional until
+the first real VIDEO 1 clip arrives (the historical real-video-first rule); then
+it freezes. Moving, deleting and reordering clips never alter it. Legacy v1–v5 projects synthesize it from their historical
+VIDEO 1 master (real video first, otherwise the first still). Unreleased v6
+persists `CANVAS` alongside `VISUAL_TRACKS`; single-track projects whose canvas
+still matches their legacy master retain their older on-disk version. An empty
+VIDEO 1 can therefore coexist with a valid, persistent canvas and VIDEO 2
+content. An audio-only project has no canvas and cannot export visual output.
+
+`VisualRenderContext` validates the stack and canvas and supplies render size,
+editorial duration and frame clock. It does not check asset availability.
+The exact-time resolver checks only active visual layers. Preview constructs
+this context directly; an active unavailable visual layer reports an error,
+whereas offline audio or visual clips inactive at the requested time do not
+block the picture. Export builds the same context **after** its stricter
+whole-output media validation; VIDEO 1 need not currently contain a clip when
+another visual track provides the picture and the canvas is established.
 
 ## Shared renderer and preview
 

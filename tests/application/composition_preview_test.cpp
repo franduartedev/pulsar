@@ -1,6 +1,8 @@
 #include <pulsar/application/playback/composition_preview.hpp>
 #include <pulsar/application/playback/timeline_playback_coordinator.hpp>
 #include <pulsar/application/project/project_document.hpp>
+#include <pulsar/application/composition/project_canvas.hpp>
+#include <pulsar/application/project/project_codec.hpp>
 
 #include <atomic>
 #include <cassert>
@@ -22,6 +24,9 @@ application::ProjectSnapshot snapshot() {
   value.timeline.insert_clip(domain::TrackId{9},
       domain::Clip{domain::ClipId{9}, domain::MediaId{1}, {t(2), t(10)}, t(0)});
   value.visual_track_ids.push_back(domain::TrackId{9});
+  value.allocator_state.next_media_id = 2;
+  value.allocator_state.next_clip_id = 10;
+  value.allocator_state.next_track_id = 10;
   return value;
 }
 
@@ -109,4 +114,72 @@ int main() {
   preview.request(t(0));
   result = await(preview);
   assert(result.error && !result.surface);
+
+  // Preview and export share exact pixels, but only export validates all
+  // participating media across the entire timeline.
+  auto available = snapshot();
+  available.canvas = application::effective_project_canvas(available);
+  preview.configure(available);
+  preview.request(t(3));
+  result = await(preview);
+  assert(!result.error && result.surface && result.surface->pixels[0] == 50);
+  Factory export_factory{gate};
+  auto plan = ex::ExportPlan::build(available);
+  ex::OfflineVideoRenderer export_renderer{plan, export_factory};
+  const auto exported = export_renderer.render_at(t(3));
+  assert(result.surface->pixels == exported.pixels);
+
+  auto upper_only = available;
+  upper_only.timeline.remove_clip(domain::ClipId{1});
+  assert(application::VisualRenderContext::build(upper_only).width == 2);
+  const auto upper_plan = ex::ExportPlan::build(upper_only);
+  assert(upper_plan.output_width() == 2 && upper_plan.output_height() == 2);
+  assert(upper_plan.frame_rate().rational() == available.canvas->frame_rate.rational());
+  assert(!upper_plan.master_video_asset_id());
+  ex::OfflineVideoRenderer upper_export{upper_plan, export_factory};
+  const auto upper_export_frame = upper_export.render_at(t(3));
+  assert(upper_export_frame.pixels[0] == 50);
+  preview.configure(upper_only);
+  preview.request(t(3));
+  result = await(preview);
+  assert(!result.error && result.surface && result.surface->pixels == upper_export_frame.pixels);
+  const auto saved = application::ProjectCodec::encode(upper_only);
+  assert(saved.find("CANVAS 2 2 1 1\n") != std::string::npos);
+  auto restored = application::ProjectDocument::restore(application::ProjectCodec::decode(saved));
+  assert(restored.canvas() == upper_only.canvas);
+  assert(ex::ExportPlan::build(restored.snapshot()).output_width() == 2);
+
+  auto unrelated_audio = upper_only;
+  unrelated_audio.assets.push_back(application::MediaAsset::audio_only(
+      domain::MediaId{2}, "offline.wav", t(10),
+      application::AudioAssetMetadata{0, 48000, 2, {1, 48000}, t(10)},
+      application::MediaAvailability::Unavailable));
+  unrelated_audio.timeline.add_track(domain::Track{domain::TrackId{10}, domain::TrackKind::Audio});
+  unrelated_audio.timeline.insert_clip(domain::TrackId{10},
+      domain::Clip{domain::ClipId{10}, domain::MediaId{2}, {t(0), t(10)}, t(0)});
+  preview.configure(unrelated_audio);
+  preview.request(t(3));
+  result = await(preview);
+  assert(!result.error && result.surface);
+  bool export_rejected = false;
+  try { (void)ex::ExportPlan::build(unrelated_audio); }
+  catch (const ex::ExportPlanError& error) {
+    export_rejected = error.code() == ex::ExportPlanErrorCode::MissingMedia;
+  }
+  assert(export_rejected);
+
+  auto offline_upper = unrelated_audio;
+  offline_upper.timeline.remove_clip(domain::ClipId{9});
+  offline_upper.timeline.insert_clip(domain::TrackId{9},
+      domain::Clip{domain::ClipId{9}, domain::MediaId{1}, {t(2), t(10)}, t(2)});
+  offline_upper.assets.front() = application::MediaAsset{domain::MediaId{1}, "picture", 0, t(10),
+      application::VideoAssetMetadata{"test", 2, 2, {1, 1}, domain::FrameRate{1, 1}, std::nullopt},
+      application::MediaAvailability::Unavailable};
+  preview.configure(offline_upper);
+  preview.request(t(0)); // offline layer inactive: black, no visual error
+  result = await(preview);
+  assert(!result.error && result.surface && result.surface->pixels[0] == 0);
+  preview.request(t(3));
+  result = await(preview);
+  assert(result.error && !result.surface); // active offline layer fails deterministically
 }

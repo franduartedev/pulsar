@@ -1,4 +1,5 @@
 #include <pulsar/application/project/project_codec.hpp>
+#include <pulsar/application/composition/project_canvas.hpp>
 
 #include <algorithm>
 #include <charconv>
@@ -192,13 +193,19 @@ std::vector<const domain::Track*> sorted_tracks(const domain::Timeline& timeline
 std::string ProjectCodec::encode(const ProjectSnapshot& snapshot) {
   try {
     validate_visual_track_ids(snapshot.timeline, snapshot.video_track_id, snapshot.visual_track_ids);
+    if (snapshot.canvas && (snapshot.canvas->width <= 0 || snapshot.canvas->height <= 0 ||
+                            snapshot.canvas->width > 32768 || snapshot.canvas->height > 32768 ||
+                            static_cast<std::int64_t>(snapshot.canvas->width) * snapshot.canvas->height > 64'000'000)) {
+      throw std::invalid_argument{"invalid project canvas dimensions"};
+    }
   } catch (const std::invalid_argument& error) {
     throw ProjectCodecError{error.what()};
   }
-  const bool needs_v6 = snapshot.visual_track_ids.size() > 1;
+  const bool needs_v6 = snapshot.visual_track_ids.size() > 1 ||
+      (snapshot.canvas && snapshot.canvas != legacy_project_canvas(snapshot));
   const std::size_t record_count = 1 + 1 + snapshot.timeline.tracks().size() + 1 +
                                    snapshot.assets.size() + snapshot.titles.size() +
-                                   (needs_v6 ? 1 : 0);
+                                    (needs_v6 ? 1 + (snapshot.canvas ? 1 : 0) : 0);
   std::size_t clip_count = 0;
   for (const auto& track : snapshot.timeline.tracks()) clip_count += track.clips().size();
   if (record_count + clip_count + 2 > max_records) {
@@ -231,6 +238,13 @@ std::string ProjectCodec::encode(const ProjectSnapshot& snapshot) {
     output << "VISUAL_TRACKS";
     for (const auto id : snapshot.visual_track_ids) output << ' ' << id.value();
     output << '\n';
+    if (snapshot.canvas) {
+      output << "CANVAS " << snapshot.canvas->width << ' ' << snapshot.canvas->height << ' '
+             << snapshot.canvas->frame_rate.rational().numerator() << ' '
+             << snapshot.canvas->frame_rate.rational().denominator();
+      if (snapshot.canvas->provisional_still) output << " STILL";
+      output << '\n';
+    }
   }
 
   std::vector<const MediaAsset*> assets;
@@ -426,6 +440,24 @@ ProjectRestoreState ProjectCodec::decode(std::string_view bytes) {
           state.visual_track_ids.emplace_back(unsigned_number(tokens[i], line_number, "visual track id"));
         }
         section = Section::Assets;
+      } else if (tokens[0].text == "CANVAS") {
+        if (!version6 || section != Section::Assets || state.canvas ||
+            (tokens.size() != 5 && tokens.size() != 6) ||
+            (tokens.size() == 6 && tokens[5].text != "STILL")) {
+          parse_fail(line_number, "invalid CANVAS");
+        }
+        const auto width = unsigned_number(tokens[1], line_number, "canvas width");
+        const auto height = unsigned_number(tokens[2], line_number, "canvas height");
+        const auto numerator = unsigned_number(tokens[3], line_number, "canvas fps numerator");
+        const auto denominator = unsigned_number(tokens[4], line_number, "canvas fps denominator");
+        if (width == 0 || height == 0 || width > 32768 || height > 32768 ||
+            width * height > 64'000'000 ||
+            numerator == 0 || denominator == 0 || numerator > INT32_MAX || denominator > INT32_MAX) {
+          parse_fail(line_number, "invalid canvas geometry or frame rate");
+        }
+        state.canvas = ProjectCanvas{static_cast<int>(width), static_cast<int>(height),
+            domain::FrameRate{static_cast<std::int64_t>(numerator), static_cast<std::int64_t>(denominator)},
+            tokens.size() == 6};
       } else if (tokens[0].text == "ASSET") {
         if (!video_track || (section != Section::Assets) || tokens.size() < 4) parse_fail(line_number, "invalid ASSET");
         if (tokens.size() >= 3 && tokens[2].text == "AUDIO_ONLY") {

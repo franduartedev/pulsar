@@ -1,6 +1,7 @@
 #include <pulsar/application/commands/command_processor.hpp>
 #include <pulsar/application/project/project_codec.hpp>
 #include <pulsar/application/project/project_document.hpp>
+#include <pulsar/application/export/export_plan.hpp>
 #include <pulsar/project_file/file_project_repository.hpp>
 
 #include <cassert>
@@ -83,6 +84,7 @@ void visual_stack_versions_and_validation() {
   using domain::TrackId;
   using domain::TrackKind;
   const auto legacy = ProjectCodec::encode(make_document().snapshot());
+  const auto legacy_plan = application::exporting::ExportPlan::build(make_document().snapshot());
   for (int version = 1; version <= 5; ++version) {
     auto bytes = legacy;
     bytes.replace(15, 1, std::to_string(version));
@@ -90,6 +92,12 @@ void visual_stack_versions_and_validation() {
     const auto document = ProjectDocument::restore(state);
     assert(state.visual_track_ids == std::vector<TrackId>{state.video_track_id});
     assert(document.visual_track_ids() == state.visual_track_ids);
+    assert(document.canvas() == make_document().canvas());
+    const auto migrated_plan = application::exporting::ExportPlan::build(document.snapshot());
+    assert(migrated_plan.output_width() == legacy_plan.output_width());
+    assert(migrated_plan.output_height() == legacy_plan.output_height());
+    assert(migrated_plan.frame_rate().rational() == legacy_plan.frame_rate().rational());
+    assert(migrated_plan.frame_count() == legacy_plan.frame_count());
     assert(ProjectCodec::encode(document.snapshot()) == legacy);
   }
 
@@ -107,6 +115,11 @@ void visual_stack_versions_and_validation() {
   assert(restored.visual_track_ids() == snapshot.visual_track_ids);
   assert(restored.snapshot().visual_track_ids == snapshot.visual_track_ids);
   assert(ProjectCodec::encode(restored.snapshot()) == bytes);
+  // Earlier unreleased v6 records without CANVAS still migrate from VIDEO 1.
+  auto early_v6 = bytes;
+  const auto canvas_record = early_v6.find("CANVAS ");
+  early_v6.erase(canvas_record, early_v6.find('\n', canvas_record) - canvas_record + 1);
+  assert(ProjectDocument::restore(ProjectCodec::decode(early_v6)).canvas() == snapshot.canvas);
 
   for (const auto& invalid : std::vector<std::vector<TrackId>>{
            {}, {TrackId{9}, TrackId{3}}, {TrackId{1}, TrackId{9}},
@@ -153,6 +166,56 @@ void visual_stack_versions_and_validation() {
   try { (void)ProjectCodec::decode(old_multivideo); }
   catch (const ProjectCodecError&) { rejected = true; }
   assert(rejected);
+}
+
+void canvas_survives_primary_move_and_auxiliary_edits() {
+  ProjectDocument initial;
+  CommandProcessor setup{initial};
+  const auto media = setup.import_asset("visual.mp4", FakeProbe{});
+  const auto clip = setup.add_clip(media, TimeRange{t(0), t(4)}, t(0));
+  const auto canvas = initial.canvas();
+  assert(canvas && canvas->width == 1920 && canvas->height == 1080);
+  auto state = ProjectCodec::decode(ProjectCodec::encode(initial.snapshot()));
+  state.tracks.push_back({domain::TrackId{9}, domain::TrackKind::Video, {}});
+  state.visual_track_ids.push_back(domain::TrackId{9});
+  state.allocator_state.next_track_id = 10;
+  auto document = ProjectDocument::restore(state);
+  CommandProcessor processor{document};
+  processor.move_clip(clip, domain::TrackId{9}, t(0));
+  assert(document.canvas() == canvas);
+  auto plan = application::exporting::ExportPlan::build(document.snapshot());
+  assert(plan.output_width() == 1920 && plan.output_height() == 1080);
+  assert(plan.frame_rate().rational() == canvas->frame_rate.rational());
+  assert(!plan.master_video_asset_id());
+  const auto persisted = ProjectCodec::encode(document.snapshot());
+  assert(persisted.find("CANVAS 1920 1080 30000 1001\n") != std::string::npos);
+  assert(ProjectDocument::restore(ProjectCodec::decode(persisted)).canvas() == canvas);
+  for (const auto invalid : {"CANVAS 0 1080 30000 1001\n", "CANVAS 1920 1080 0 1\n",
+                             "CANVAS 1920 1080 30000 1001\nCANVAS 1920 1080 30000 1001\n"}) {
+    auto damaged = persisted;
+    damaged.replace(damaged.find("CANVAS "), std::string{"CANVAS 1920 1080 30000 1001\n"}.size(), invalid);
+    bool rejected = false;
+    try { (void)ProjectCodec::decode(damaged); }
+    catch (const ProjectCodecError&) { rejected = true; }
+    assert(rejected);
+  }
+  processor.move_clip(clip, domain::TrackId{9}, t(2));
+  assert(document.canvas() == canvas);
+  auto reordered = document.snapshot();
+  reordered.timeline.add_track(domain::Track{domain::TrackId{10}, domain::TrackKind::Video});
+  reordered.visual_track_ids = {domain::TrackId{10}, domain::TrackId{9}, document.video_track_id()};
+  reordered.allocator_state.next_track_id = 11;
+  assert(ProjectDocument::restore(ProjectCodec::decode(ProjectCodec::encode(reordered))).canvas() == canvas);
+  processor.remove_clip(clip);
+  assert(document.canvas() == canvas);
+  auto empty_singleton = document.snapshot();
+  empty_singleton.timeline.remove_track(domain::TrackId{9});
+  empty_singleton.visual_track_ids = {document.video_track_id()};
+  const auto empty_bytes = ProjectCodec::encode(empty_singleton);
+  assert(empty_bytes.starts_with("PULSAR_PROJECT 6\n"));
+  assert(ProjectDocument::restore(ProjectCodec::decode(empty_bytes)).canvas() == canvas);
+  assert(processor.undo() && document.canvas() == canvas);
+  assert(processor.undo() && document.canvas() == canvas);
 }
 
 void builtin_locator_roundtrip() {
@@ -471,6 +534,7 @@ void repository_normalizes_codec_failures() {
 }
 
 int main() {
+  canvas_survives_primary_move_and_auxiliary_edits();
   visual_stack_versions_and_validation();
   codec_roundtrip_and_canonical_output();
   builtin_locator_roundtrip();

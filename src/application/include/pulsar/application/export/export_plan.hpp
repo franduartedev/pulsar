@@ -1,6 +1,7 @@
 #pragma once
 
 #include <pulsar/application/project/project_snapshot.hpp>
+#include <pulsar/application/composition/visual_render_context.hpp>
 #include <pulsar/domain/time/frame_number.hpp>
 #include <pulsar/domain/time/frame_rate.hpp>
 #include <pulsar/domain/time/media_time.hpp>
@@ -124,7 +125,8 @@ public:
   [[nodiscard]] std::uint64_t document_generation() const noexcept {
     return snapshot_.document_generation;
   }
-  [[nodiscard]] domain::MediaId master_video_asset_id() const noexcept { return master_video_asset_id_; }
+  [[nodiscard]] std::optional<domain::MediaId> master_video_asset_id() const noexcept { return master_video_asset_id_; }
+  [[nodiscard]] const VisualRenderContext& visual_context() const noexcept { return visual_context_; }
   [[nodiscard]] domain::FrameRate frame_rate() const noexcept { return frame_rate_; }
   [[nodiscard]] domain::MediaTime editorial_duration() const noexcept { return editorial_duration_; }
   [[nodiscard]] domain::MediaTime output_duration() const noexcept { return output_duration_; }
@@ -138,7 +140,7 @@ public:
   [[nodiscard]] std::int64_t audio_sample_count() const noexcept { return audio_sample_count_; }
 
 private:
-  ExportPlan(ProjectSnapshot snapshot, ExportProfile profile, domain::MediaId master_video_asset_id,
+  ExportPlan(ProjectSnapshot snapshot, ExportProfile profile, std::optional<domain::MediaId> master_video_asset_id,
              domain::FrameRate frame_rate, domain::MediaTime editorial_duration,
              domain::MediaTime output_duration, std::int64_t frame_count,
              std::int64_t output_width, std::int64_t output_height,
@@ -146,11 +148,12 @@ private:
       : snapshot_{std::move(snapshot)}, profile_{profile}, master_video_asset_id_{master_video_asset_id},
         frame_rate_{frame_rate}, editorial_duration_{editorial_duration}, output_duration_{output_duration},
         frame_count_{frame_count}, output_width_{output_width}, output_height_{output_height},
-        audio_sample_count_{audio_sample_count} {}
+        audio_sample_count_{audio_sample_count}, visual_context_{static_cast<int>(output_width),
+            static_cast<int>(output_height), frame_rate, editorial_duration} {}
 
   ProjectSnapshot snapshot_;
   ExportProfile profile_;
-  domain::MediaId master_video_asset_id_;
+  std::optional<domain::MediaId> master_video_asset_id_;
   domain::FrameRate frame_rate_;
   domain::MediaTime editorial_duration_;
   domain::MediaTime output_duration_;
@@ -158,6 +161,7 @@ private:
   std::int64_t output_width_;
   std::int64_t output_height_;
   std::int64_t audio_sample_count_;
+  VisualRenderContext visual_context_;
 };
 
 } // namespace pulsar::application::exporting
