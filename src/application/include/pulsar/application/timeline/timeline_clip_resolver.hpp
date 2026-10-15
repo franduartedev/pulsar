@@ -33,6 +33,7 @@ struct ResolvedClip {
   int video_stream_index;
   std::filesystem::path source_locator;
   std::optional<AudioSourceBinding> audio;
+  domain::VisualTransform visual_transform{};
 };
 
 // Canonical editorial mapping shared by video and embedded-audio playback.

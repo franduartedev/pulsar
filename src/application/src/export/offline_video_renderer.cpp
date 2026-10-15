@@ -1,4 +1,5 @@
 #include <pulsar/application/export/offline_video_renderer.hpp>
+#include <pulsar/application/composition/composition_plan.hpp>
 #include <pulsar/application/composition/visual_composition_resolver.hpp>
 #include <pulsar/application/playback/frame_coverage.hpp>
 
@@ -81,13 +82,13 @@ void OfflineVideoRenderer::check_cancelled() const {
   }
 }
 
-void OfflineVideoRenderer::open_source(domain::TrackId track_id, const ResolvedClip& clip,
+void OfflineVideoRenderer::open_source(domain::TrackId track_id, const VisualLayerPlan& layer,
                                       domain::MediaTime source_time) {
   check_cancelled();
   active_sources_.erase(track_id.value());
   std::unique_ptr<OfflineVideoSource> source;
   try {
-    source = source_factory_.open(clip.source_locator, clip.video_stream_index);
+    source = source_factory_.open(layer.source_locator, layer.video_stream_index);
   } catch (const OfflineVideoRenderError&) {
     throw;
   } catch (const std::exception& error) {
@@ -112,9 +113,9 @@ void OfflineVideoRenderer::open_source(domain::TrackId track_id, const ResolvedC
   metrics_.decoded_source_frames += seek_result.frames_decoded_after_seek;
   metrics_.conversion_count += seek_result.frames_decoded_after_seek;
   active_sources_[track_id.value()] = std::make_unique<ActiveSource>(ActiveSource{
-      clip.clip_id,
-      clip.media_id,
-      clip.video_stream_index,
+      layer.clip_id,
+      layer.media_id,
+      layer.video_stream_index,
       source_time,
       std::move(source),
       std::move(seek_result.candidate),
@@ -125,16 +126,16 @@ void OfflineVideoRenderer::open_source(domain::TrackId track_id, const ResolvedC
 }
 
 const OfflineVideoSourceFrame* OfflineVideoRenderer::select_source_frame(
-    domain::TrackId track_id, const ResolvedClip& clip, domain::MediaTime source_time) {
+    domain::TrackId track_id, const VisualLayerPlan& layer, domain::MediaTime source_time) {
   const auto found = active_sources_.find(track_id.value());
   const auto* active_source = found == active_sources_.end() ? nullptr : found->second.get();
   const bool same_segment =
-      active_source && active_source->clip_id == clip.clip_id &&
-      active_source->media_id == clip.media_id &&
-      active_source->video_stream_index == clip.video_stream_index &&
+      active_source && active_source->clip_id == layer.clip_id &&
+      active_source->media_id == layer.media_id &&
+      active_source->video_stream_index == layer.video_stream_index &&
       source_time >= active_source->last_source_time;
   if (!same_segment) {
-    open_source(track_id, clip, source_time);
+    open_source(track_id, layer, source_time);
   }
 
   auto& active = *active_sources_.at(track_id.value());
@@ -194,7 +195,8 @@ const OfflineVideoSourceFrame* OfflineVideoRenderer::select_source_frame(
 }
 
 void OfflineVideoRenderer::compose_frame(composition::RgbaSurface& canvas, ActiveSource& active,
-                                         const OfflineVideoSourceFrame& source_frame) {
+                                         const OfflineVideoSourceFrame& source_frame,
+                                         const domain::VisualTransform& transform) {
   const auto& source = *source_frame.image;
   const auto source_size = checked_buffer_size(source.width, source.height, source.stride_bytes);
   if (source.pixels.size() < source_size) {
@@ -206,12 +208,47 @@ void OfflineVideoRenderer::compose_frame(composition::RgbaSurface& canvas, Activ
   const auto output_height = context_.height;
   const auto geometry = composition::fit_geometry(source.width, source.height, static_cast<int>(output_width),
                                                   static_cast<int>(output_height));
+  // Default transform keeps the exact E1 opaque path (bars included, top wins).
+  if (transform.is_default()) {
+    const composition::RgbaSurface* placed = &source;
+    const auto scaled_width = static_cast<std::int64_t>(geometry.scaled_width);
+    const auto scaled_height = static_cast<std::int64_t>(geometry.scaled_height);
+    if (scaled_width != source.width || scaled_height != source.height) {
+      if (options_.scaler != nullptr) {
+        if (!active.scaled_cache || active.scaled_cache->source != source_frame.image || active.scaled_cache->width != scaled_width ||
+            active.scaled_cache->height != scaled_height) {
+          active.scaled_cache.reset();
+          const auto start = std::chrono::steady_clock::now();
+          active.scaled_cache = ActiveSource::ScaledCache{source_frame.image, scaled_width, scaled_height,
+              options_.scaler->scale(source, static_cast<int>(scaled_width), static_cast<int>(scaled_height))};
+          metrics_.scale_nanoseconds += static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+              std::chrono::steady_clock::now() - start).count());
+        }
+        placed = &active.scaled_cache->scaled;
+      }
+    }
+    if (placed != &source) {
+      if (placed->width != scaled_width || placed->height != scaled_height) {
+        throw OfflineVideoRenderError{OfflineVideoRenderErrorCode::ConversionFailed, "offline frame scaler returned an unexpected picture"};
+      }
+    }
+    try {
+      const auto start = std::chrono::steady_clock::now();
+      composition::composite_opaque_layer(canvas, *placed, geometry);
+      metrics_.composite_nanoseconds += static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+          std::chrono::steady_clock::now() - start).count());
+    } catch (const std::invalid_argument& error) {
+      throw OfflineVideoRenderError{OfflineVideoRenderErrorCode::ConversionFailed, error.what()};
+    }
+    return;
+  }
+
+  if (transform.opacity <= 0.0) return; // fully transparent: lower layers show through
+  // Transformed reference path: fit without bars, then bilinear source-over.
+  const composition::RgbaSurface* fitted = &source;
+  composition::RgbaSurface fitted_owned;
   const auto scaled_width = static_cast<std::int64_t>(geometry.scaled_width);
   const auto scaled_height = static_cast<std::int64_t>(geometry.scaled_height);
-
-  // Same size: straight row copy. Different size: the media adapter's scaler (bicubic/lanczos
-  // through libswscale) when provided, otherwise the basic nearest-neighbour fallback.
-  const OfflineVideoPixelBuffer* placed = &source;
   if (scaled_width != source.width || scaled_height != source.height) {
     if (options_.scaler != nullptr) {
       if (!active.scaled_cache || active.scaled_cache->source != source_frame.image || active.scaled_cache->width != scaled_width ||
@@ -223,23 +260,28 @@ void OfflineVideoRenderer::compose_frame(composition::RgbaSurface& canvas, Activ
         metrics_.scale_nanoseconds += static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
             std::chrono::steady_clock::now() - start).count());
       }
-      placed = &active.scaled_cache->scaled;
+      fitted = &active.scaled_cache->scaled;
+    } else {
+      try {
+        fitted_owned = composition::fitted_image_nearest(source, geometry);
+      } catch (const std::invalid_argument& error) {
+        throw OfflineVideoRenderError{OfflineVideoRenderErrorCode::ConversionFailed, error.what()};
+      }
+      fitted = &fitted_owned;
     }
   }
-  if (placed != &source) {
-    if (placed->width != scaled_width || placed->height != scaled_height) {
-      throw OfflineVideoRenderError{OfflineVideoRenderErrorCode::ConversionFailed, "offline frame scaler returned an unexpected picture"};
-    }
+  if (fitted->width != scaled_width || fitted->height != scaled_height) {
+    throw OfflineVideoRenderError{OfflineVideoRenderErrorCode::ConversionFailed,
+                                  "fitted picture has unexpected size"};
   }
   try {
     const auto start = std::chrono::steady_clock::now();
-    composition::composite_opaque_layer(canvas, *placed, geometry);
+    composition::composite_transformed_layer(canvas, *fitted, transform);
     metrics_.composite_nanoseconds += static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
         std::chrono::steady_clock::now() - start).count());
   } catch (const std::invalid_argument& error) {
     throw OfflineVideoRenderError{OfflineVideoRenderErrorCode::ConversionFailed, error.what()};
   }
-
 }
 
 OfflineVideoFrame OfflineVideoRenderer::render_frame(domain::FrameNumber frame_index) {
@@ -270,34 +312,40 @@ OfflineVideoFrame OfflineVideoRenderer::render_at(domain::MediaTime timeline_tim
 OfflineVideoFrame OfflineVideoRenderer::render_time(domain::FrameNumber frame_index,
                                                     domain::MediaTime timeline_time) {
   check_cancelled();
-  const auto composition = resolve_visual_composition(snapshot_, timeline_time);
+  CompositionPlan plan;
+  try {
+    plan = evaluate_composition_plan(snapshot_, context_, timeline_time);
+  } catch (const CompositionPlanError& error) {
+    if (error.code() == CompositionPlanErrorCode::MissingMedia) {
+      throw OfflineVideoRenderError{OfflineVideoRenderErrorCode::MissingMedia,
+                                    "offline video clip references missing media"};
+    }
+    throw OfflineVideoRenderError{OfflineVideoRenderErrorCode::InternalInvariant,
+                                  "timeline ended before the export plan"};
+  }
   std::ostringstream diagnostic;
   diagnostic << "frame_index=" << frame_index.value()
              << " timeline_time=" << static_cast<double>(timeline_time);
-  std::uint64_t active_layers = 0;
   // Evict inactive tracks before opening new ones, including their scaled caches.
-  for (const auto& layer : composition.layers) {
-    if (std::holds_alternative<ResolvedClip>(layer.source)) ++active_layers;
-    else active_sources_.erase(layer.track_id.value());
+  for (auto it = active_sources_.begin(); it != active_sources_.end();) {
+    const bool still_active = std::any_of(plan.layers.begin(), plan.layers.end(),
+        [&](const VisualLayerPlan& layer) { return layer.track_id.value() == it->first; });
+    if (!still_active) it = active_sources_.erase(it);
+    else ++it;
   }
-  metrics_.peak_active_layers = std::max(metrics_.peak_active_layers, active_layers);
+  metrics_.peak_active_layers =
+      std::max(metrics_.peak_active_layers, static_cast<std::uint64_t>(plan.layers.size()));
 
   try {
     auto canvas = composition::black_surface(context_.width, context_.height);
-    for (const auto& layer : composition.layers) {
+    for (const auto& layer : plan.layers) {
       check_cancelled();
       diagnostic << " track_id=" << layer.track_id.value();
-      if (const auto* clip = std::get_if<ResolvedClip>(&layer.source)) {
-        diagnostic << " clip_id=" << clip->clip_id.value() << " media_id=" << clip->media_id.value()
-                   << " source_time=" << static_cast<double>(clip->source_time);
-        const auto* frame = select_source_frame(layer.track_id, *clip, clip->source_time);
-        if (frame) compose_frame(canvas, *active_sources_.at(layer.track_id.value()), *frame);
-      } else if (std::holds_alternative<MissingClipMedia>(layer.source)) {
-        throw OfflineVideoRenderError{OfflineVideoRenderErrorCode::MissingMedia,
-                                      "offline video clip references missing media"};
-      } else if (std::holds_alternative<TimelineEnded>(layer.source)) {
-        throw OfflineVideoRenderError{OfflineVideoRenderErrorCode::InternalInvariant,
-                                      "timeline ended before the export plan"};
+      diagnostic << " clip_id=" << layer.clip_id.value() << " media_id=" << layer.media_id.value()
+                 << " source_time=" << static_cast<double>(layer.source_time);
+      const auto* frame = select_source_frame(layer.track_id, layer, layer.source_time);
+      if (frame) {
+        compose_frame(canvas, *active_sources_.at(layer.track_id.value()), *frame, layer.transform);
       }
     }
     check_cancelled();
