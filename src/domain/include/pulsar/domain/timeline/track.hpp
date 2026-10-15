@@ -48,6 +48,7 @@ private:
   void set_clip_audio_gain(ClipId id, double gain_db);
   void set_clip_muted(ClipId id, bool muted);
   void set_clip_fades(ClipId id, MediaTime fade_in, MediaTime fade_out);
+  void set_clip_visual_transform(ClipId id, VisualTransform transform);
 
   TrackId id_;
   TrackKind kind_;

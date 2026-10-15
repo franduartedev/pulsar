@@ -623,6 +623,19 @@ void EditorSession::set_clip_fades(domain::ClipId clip, domain::MediaTime fade_i
   synchronize_document_state();
 }
 
+void EditorSession::set_clip_visual_transform(domain::ClipId clip, domain::VisualTransform transform) {
+  if (document_.timeline().find_clip(clip) == nullptr) {
+    throw std::invalid_argument{"unknown clip"};
+  }
+  domain::validate_visual_transform(transform);
+  processor_.set_clip_visual_transform(clip, transform);
+  synchronize_document_state();
+}
+
+void EditorSession::reset_clip_visual_transform(domain::ClipId clip) {
+  set_clip_visual_transform(clip, domain::VisualTransform{});
+}
+
 void EditorSession::duplicate_selected() {
   if (selected_title_.has_value()) {
     const auto* title = document_.find_title(*selected_title_);

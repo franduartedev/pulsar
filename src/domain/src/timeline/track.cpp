@@ -180,6 +180,19 @@ void Track::set_clip_fades(ClipId id, MediaTime fade_in, MediaTime fade_out) {
                     original.visual_transform()};
 }
 
+void Track::set_clip_visual_transform(ClipId id, VisualTransform transform) {
+  validate_visual_transform(transform);
+  const auto iterator = std::find_if(
+      clips_.begin(), clips_.end(), [id](const Clip& clip) { return clip.id() == id; });
+  if (iterator == clips_.end()) {
+    throw std::invalid_argument{"clip id does not exist in track"};
+  }
+  const Clip original = *iterator;
+  *iterator = Clip{original.id(), original.media_id(), original.source_range(),
+                    original.timeline_start(), original.audio_gain_db(), original.muted(),
+                    original.fade_in(), original.fade_out(), transform};
+}
+
 MediaTime Track::duration() const {
   MediaTime result = MediaTime::zero();
 

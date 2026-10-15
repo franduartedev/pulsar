@@ -77,6 +77,11 @@ struct SetClipFadesCommand {
   domain::MediaTime fade_out;
 };
 
+struct SetClipVisualTransformCommand {
+  domain::ClipId clip_id;
+  domain::VisualTransform transform;
+};
+
 // Value-only inverse operations. They are not user-facing editing tools.
 struct RestoreClipCommand {
   domain::TrackId track_id;
@@ -113,7 +118,8 @@ struct ReplaceTitleCommand {
 using Command = std::variant<AddTrackCommand, RemoveTrackCommand, RestoreEmptyVisualTrackCommand,
                              ReorderVisualTrackCommand, AddClipCommand, RemoveClipCommand, MoveClipCommand,
                              TrimClipStartCommand, TrimClipEndCommand, SplitClipCommand,
-                             SetClipAudioGainCommand, SetClipMutedCommand, SetClipFadesCommand, RestoreClipCommand,
+                             SetClipAudioGainCommand, SetClipMutedCommand, SetClipFadesCommand,
+                             SetClipVisualTransformCommand, RestoreClipCommand,
                              RestoreSplitCommand, ImportAssetCommand, RemoveAssetCommand,
                              AddTitleCommand, RemoveTitleCommand, ReplaceTitleCommand>;
 

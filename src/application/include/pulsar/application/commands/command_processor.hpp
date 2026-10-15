@@ -48,6 +48,8 @@ public:
   void set_clip_muted(domain::ClipId clip_id, bool muted);
   // Linear audio fades at the clip start / end (zero = none); one undo step. No-op when unchanged.
   void set_clip_fades(domain::ClipId clip_id, domain::MediaTime fade_in, domain::MediaTime fade_out);
+  // Visual transform (position/scale/rotation/opacity); one undo step. No-op when unchanged.
+  void set_clip_visual_transform(domain::ClipId clip_id, domain::VisualTransform transform);
   [[nodiscard]] domain::ClipId split_clip(domain::ClipId clip_id,
                                            domain::MediaTime split_timeline_position);
   [[nodiscard]] domain::MediaId import_asset(const std::filesystem::path& source_locator,

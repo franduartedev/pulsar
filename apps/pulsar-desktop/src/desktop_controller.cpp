@@ -1463,6 +1463,58 @@ void DesktopController::setSelectedClipFades(double fade_in_seconds, double fade
     setError(QStringLiteral("No se pudo aplicar el cambio."));
   }
 }
+double DesktopController::selectedClipPosX() const {
+  if (!active_session_ || !active_session_->selected_clip()) return 0.0;
+  const auto* clip = active_session_->document().timeline().find_clip(*active_session_->selected_clip());
+  return clip ? clip->visual_transform().position_x : 0.0;
+}
+double DesktopController::selectedClipPosY() const {
+  if (!active_session_ || !active_session_->selected_clip()) return 0.0;
+  const auto* clip = active_session_->document().timeline().find_clip(*active_session_->selected_clip());
+  return clip ? clip->visual_transform().position_y : 0.0;
+}
+double DesktopController::selectedClipScale() const {
+  if (!active_session_ || !active_session_->selected_clip()) return 1.0;
+  const auto* clip = active_session_->document().timeline().find_clip(*active_session_->selected_clip());
+  return clip ? clip->visual_transform().scale : 1.0;
+}
+double DesktopController::selectedClipRotation() const {
+  if (!active_session_ || !active_session_->selected_clip()) return 0.0;
+  const auto* clip = active_session_->document().timeline().find_clip(*active_session_->selected_clip());
+  return clip ? clip->visual_transform().rotation_degrees : 0.0;
+}
+double DesktopController::selectedClipOpacity() const {
+  if (!active_session_ || !active_session_->selected_clip()) return 1.0;
+  const auto* clip = active_session_->document().timeline().find_clip(*active_session_->selected_clip());
+  return clip ? clip->visual_transform().opacity : 1.0;
+}
+void DesktopController::setSelectedClipTransform(double pos_x, double pos_y, double scale,
+                                                  double rotation_degrees, double opacity) {
+  if (!active_session_ || !active_session_->selected_clip()) return;
+  try {
+    active_session_->set_clip_visual_transform(
+        *active_session_->selected_clip(),
+        pulsar::domain::VisualTransform{pos_x, pos_y, scale, rotation_degrees, opacity});
+    clearError();
+    clearProgram(has_video_media_ ? "loading" : "empty");
+    publishTimeline();
+  } catch (const std::exception& error) {
+    logCause("transform edit failed", error);
+    setError(QStringLiteral("Esa transformación no es válida."));
+  }
+}
+void DesktopController::resetSelectedClipTransform() {
+  if (!active_session_ || !active_session_->selected_clip()) return;
+  try {
+    active_session_->reset_clip_visual_transform(*active_session_->selected_clip());
+    clearError();
+    clearProgram(has_video_media_ ? "loading" : "empty");
+    publishTimeline();
+  } catch (const std::exception& error) {
+    logCause("transform reset failed", error);
+    setError(QStringLiteral("No se pudo restablecer la transformación."));
+  }
+}
 void DesktopController::duplicateSelected() {
   if (!active_session_) return;
   try {

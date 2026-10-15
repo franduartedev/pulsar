@@ -33,6 +33,7 @@ public:
   void set_clip_audio_gain(ClipId clip_id, double gain_db);
   void set_clip_muted(ClipId clip_id, bool muted);
   void set_clip_fades(ClipId clip_id, MediaTime fade_in, MediaTime fade_out);
+  void set_clip_visual_transform(ClipId clip_id, VisualTransform transform);
 
   // Internal value restoration used by application history; validates the complete replacement
   // before publishing it.

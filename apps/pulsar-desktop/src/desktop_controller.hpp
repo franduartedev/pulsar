@@ -96,6 +96,11 @@ class DesktopController final : public QObject {
   Q_PROPERTY(bool selectedClipMuted READ selectedClipMuted NOTIFY timelineChanged)
   Q_PROPERTY(double selectedClipFadeIn READ selectedClipFadeIn NOTIFY timelineChanged)    // seconds
   Q_PROPERTY(double selectedClipFadeOut READ selectedClipFadeOut NOTIFY timelineChanged)  // seconds
+  Q_PROPERTY(double selectedClipPosX READ selectedClipPosX NOTIFY timelineChanged)
+  Q_PROPERTY(double selectedClipPosY READ selectedClipPosY NOTIFY timelineChanged)
+  Q_PROPERTY(double selectedClipScale READ selectedClipScale NOTIFY timelineChanged)
+  Q_PROPERTY(double selectedClipRotation READ selectedClipRotation NOTIFY timelineChanged)
+  Q_PROPERTY(double selectedClipOpacity READ selectedClipOpacity NOTIFY timelineChanged)
   Q_PROPERTY(bool canDuplicate READ canDuplicate NOTIFY timelineChanged)
   Q_PROPERTY(QString selectedClipKind READ selectedClipKind NOTIFY timelineChanged)   // video | image | color | audio | ""
   Q_PROPERTY(bool selectedClipHasAudio READ selectedClipHasAudio NOTIFY timelineChanged)
@@ -168,6 +173,11 @@ public:
   [[nodiscard]] QString selectedClipKind() const;
   [[nodiscard]] double selectedClipFadeIn() const;
   [[nodiscard]] double selectedClipFadeOut() const;
+  [[nodiscard]] double selectedClipPosX() const;
+  [[nodiscard]] double selectedClipPosY() const;
+  [[nodiscard]] double selectedClipScale() const;
+  [[nodiscard]] double selectedClipRotation() const;
+  [[nodiscard]] double selectedClipOpacity() const;
   [[nodiscard]] bool canDuplicate() const { return active_session_ && active_session_->can_duplicate_selected(); }
   [[nodiscard]] bool selectedClipHasAudio() const {
     return active_session_ && active_session_->selected_clip().has_value() &&
@@ -233,6 +243,9 @@ public:
   Q_INVOKABLE void setSelectedClipGainDb(double gain_db);
   Q_INVOKABLE void toggleSelectedClipMute();
   Q_INVOKABLE void setSelectedClipFades(double fade_in_seconds, double fade_out_seconds);
+  Q_INVOKABLE void setSelectedClipTransform(double pos_x, double pos_y, double scale,
+                                             double rotation_degrees, double opacity);
+  Q_INVOKABLE void resetSelectedClipTransform();
   Q_INVOKABLE void duplicateSelected();
   // ---- Drag & drop from the library. `lane` is the index of the timeline track under the
   // cursor, `pixel` the x inside the timeline area. The preview and the drop share one resolver,

@@ -252,6 +252,9 @@ public:
   void set_clip_muted(domain::ClipId clip, bool muted);
   // Linear audio fades of a clip with sound (zero = none). One undo step.
   void set_clip_fades(domain::ClipId clip, domain::MediaTime fade_in, domain::MediaTime fade_out);
+  // Visual transform of a clip (position/scale/rotation/opacity). One undo step.
+  void set_clip_visual_transform(domain::ClipId clip, domain::VisualTransform transform);
+  void reset_clip_visual_transform(domain::ClipId clip);
   // "Duplicar": a copy of the selected clip (or title) right after the original, on the same
   // track, with the same source range, gain, mute and fades. One undo step; the copy becomes the
   // selection. Throws DuplicateException{NoSpace} (nothing changes) when the room is taken.
