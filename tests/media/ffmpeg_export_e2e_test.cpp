@@ -19,6 +19,7 @@ extern "C" {
 
 #include <cassert>
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -32,6 +33,11 @@ extern "C" {
 namespace {
 using namespace pulsar;
 namespace exporting = application::exporting;
+
+std::filesystem::path isolated_root(const char* name) {
+  static const auto run_id = std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
+  return std::filesystem::temp_directory_path() / (std::string{name} + "-" + run_id);
+}
 
 domain::MediaTime seconds(std::int64_t value) {
   return domain::MediaTime{value, domain::Rational{1, 1}};
@@ -370,7 +376,7 @@ void rational_fps_evidence(const std::filesystem::path& source,
 }
 
 void export_reference_project_and_inspect() {
-  const auto root = std::filesystem::temp_directory_path() / "pulsar-e6-reference";
+  const auto root = isolated_root("pulsar-e6-reference");
   std::filesystem::create_directories(root);
   const auto a = std::filesystem::path{PULSAR_SOURCE_DIR} / "tests/fixtures/e6_video_a.mp4";
   const auto b = std::filesystem::path{PULSAR_SOURCE_DIR} / "tests/fixtures/e6_video_b.mp4";
@@ -500,7 +506,7 @@ void export_reference_project_and_inspect() {
 // 0.127 s, off the physical sample grid. Regression for RenderFailed with
 // "audio sample request escaped source range".
 void export_unaligned_source_range_succeeds() {
-  const auto root = std::filesystem::temp_directory_path() / "pulsar-e7-unaligned-audio";
+  const auto root = isolated_root("pulsar-e7-unaligned-audio");
   std::filesystem::create_directories(root);
   const auto destination = root / "unaligned.mp4";
   std::filesystem::remove(destination);
@@ -528,7 +534,7 @@ void export_unaligned_source_range_succeeds() {
 // before and after the separation yields the same audio (the embedded track is
 // muted and the independent clip carries identical timeline/source ranges).
 void export_after_separate_audio_matches_original() {
-  const auto root = std::filesystem::temp_directory_path() / "pulsar-separate-audio-e2e";
+  const auto root = isolated_root("pulsar-separate-audio-e2e");
   std::filesystem::create_directories(root);
   const auto source = std::filesystem::path{PULSAR_SOURCE_DIR} / "tests/fixtures/e6_video_a.mp4";
   media::ffmpeg::FFmpegMediaProbe probe;
