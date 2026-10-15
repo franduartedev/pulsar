@@ -309,6 +309,54 @@ Panel {
                 }
             }
 
+            // ---- TRANSFORMACIÓN (E2.1 mínimo) ----------------------------------
+            InspectorSection {
+                visible: inspector.clipSelected && controller.selectedClipKind !== "audio"
+                heading: "TRANSFORMACIÓN"
+                FieldRow {
+                    label: "Pos X"
+                    Stepper {
+                        valueText: Number(controller.selectedClipPosX).toFixed(2)
+                        onDecrement: controller.setSelectedClipTransform(controller.selectedClipPosX - 0.05, controller.selectedClipPosY, controller.selectedClipScale, controller.selectedClipRotation, controller.selectedClipOpacity)
+                        onIncrement: controller.setSelectedClipTransform(controller.selectedClipPosX + 0.05, controller.selectedClipPosY, controller.selectedClipScale, controller.selectedClipRotation, controller.selectedClipOpacity)
+                    }
+                }
+                FieldRow {
+                    label: "Pos Y"
+                    Stepper {
+                        valueText: Number(controller.selectedClipPosY).toFixed(2)
+                        onDecrement: controller.setSelectedClipTransform(controller.selectedClipPosX, controller.selectedClipPosY - 0.05, controller.selectedClipScale, controller.selectedClipRotation, controller.selectedClipOpacity)
+                        onIncrement: controller.setSelectedClipTransform(controller.selectedClipPosX, controller.selectedClipPosY + 0.05, controller.selectedClipScale, controller.selectedClipRotation, controller.selectedClipOpacity)
+                    }
+                }
+                FieldRow {
+                    label: "Escala"
+                    Stepper {
+                        valueText: Number(controller.selectedClipScale).toFixed(2)
+                        onDecrement: controller.setSelectedClipTransform(controller.selectedClipPosX, controller.selectedClipPosY, Math.max(0.01, controller.selectedClipScale - 0.05), controller.selectedClipRotation, controller.selectedClipOpacity)
+                        onIncrement: controller.setSelectedClipTransform(controller.selectedClipPosX, controller.selectedClipPosY, Math.min(100, controller.selectedClipScale + 0.05), controller.selectedClipRotation, controller.selectedClipOpacity)
+                    }
+                }
+                FieldRow {
+                    label: "Rotación"
+                    Stepper {
+                        valueText: Number(controller.selectedClipRotation).toFixed(0) + "°"
+                        onDecrement: controller.setSelectedClipTransform(controller.selectedClipPosX, controller.selectedClipPosY, controller.selectedClipScale, controller.selectedClipRotation - 5, controller.selectedClipOpacity)
+                        onIncrement: controller.setSelectedClipTransform(controller.selectedClipPosX, controller.selectedClipPosY, controller.selectedClipScale, controller.selectedClipRotation + 5, controller.selectedClipOpacity)
+                    }
+                }
+                FieldRow {
+                    label: "Opacidad"
+                    Stepper {
+                        valueText: Math.round(controller.selectedClipOpacity * 100) + " %"
+                        onDecrement: controller.setSelectedClipTransform(controller.selectedClipPosX, controller.selectedClipPosY, controller.selectedClipScale, controller.selectedClipRotation, Math.max(0, controller.selectedClipOpacity - 0.05))
+                        onIncrement: controller.setSelectedClipTransform(controller.selectedClipPosX, controller.selectedClipPosY, controller.selectedClipScale, controller.selectedClipRotation, Math.min(1, controller.selectedClipOpacity + 0.05))
+                    }
+                }
+                PButton { width: parent.width; height: Theme.controlHeightSmall; text: "Restablecer"; onClicked: controller.resetSelectedClipTransform() }
+                Text { width: parent.width; wrapMode: Text.WordWrap; text: "Posición en anchos/alto del lienzo. Escala uniforme y giro en grados."; color: Theme.textMuted; font.pixelSize: Theme.fontSizeXS }
+            }
+
             // ---- AUDIO ---------------------------------------------------------
             InspectorSection {
                 visible: inspector.clipSelected
