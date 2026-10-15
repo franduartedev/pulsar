@@ -201,7 +201,13 @@ std::string ProjectCodec::encode(const ProjectSnapshot& snapshot) {
   } catch (const std::invalid_argument& error) {
     throw ProjectCodecError{error.what()};
   }
-  const bool needs_v6 = snapshot.visual_track_ids.size() > 1 ||
+  bool has_visual_transforms = false;
+  for (const auto& track : snapshot.timeline.tracks()) {
+    for (const auto& clip : track.clips()) {
+      if (!clip.visual_transform().is_default()) has_visual_transforms = true;
+    }
+  }
+  const bool needs_v6 = snapshot.visual_track_ids.size() > 1 || has_visual_transforms ||
       (snapshot.canvas && snapshot.canvas != legacy_project_canvas(snapshot));
   const std::size_t record_count = 1 + 1 + snapshot.timeline.tracks().size() + 1 +
                                    snapshot.assets.size() + snapshot.titles.size() +
@@ -322,6 +328,12 @@ std::string ProjectCodec::encode(const ProjectSnapshot& snapshot) {
         append_time(output, clip.fade_in());
         output << ' ';
         append_time(output, clip.fade_out());
+      }
+      if (!clip.visual_transform().is_default()) {
+        const auto& transform = clip.visual_transform();
+        output << " CLIP_TRANSFORM " << std::setprecision(17) << transform.position_x << ' '
+               << transform.position_y << ' ' << transform.scale << ' '
+               << transform.rotation_degrees << ' ' << transform.opacity;
       }
       output << "\n";
     }
@@ -556,7 +568,7 @@ ProjectRestoreState ProjectCodec::decode(std::string_view bytes) {
         section = Section::Assets;
       } else if (tokens[0].text == "CLIP") {
         if (!video_track || (section != Section::Assets && section != Section::Clips) ||
-            (tokens.size() != 13 && tokens.size() != 16 && tokens.size() != 23))
+            tokens.size() < 13)
           parse_fail(line_number, "invalid CLIP");
         std::size_t i = 1;
         const auto clip_id = domain::ClipId{unsigned_number(tokens[i++], line_number, "clip id")};
@@ -569,21 +581,36 @@ ProjectRestoreState ProjectCodec::decode(std::string_view bytes) {
         bool muted = false;
         auto fade_in = domain::MediaTime::zero();
         auto fade_out = domain::MediaTime::zero();
-        if (tokens.size() >= 16) {
-          if (tokens[i].quoted || tokens[i].text != "CLIP_AUDIO") {
-            parse_fail(line_number, "invalid CLIP audio properties");
+        domain::VisualTransform visual_transform;
+        bool saw_audio = false;
+        bool saw_fade = false;
+        bool saw_transform = false;
+        while (i < tokens.size()) {
+          if (!tokens[i].quoted && tokens[i].text == "CLIP_AUDIO" && !saw_audio) {
+            saw_audio = true;
+            if (i + 2 >= tokens.size()) parse_fail(line_number, "invalid CLIP audio properties");
+            ++i;
+            audio_gain_db = double_number(tokens[i++], line_number, "clip audio gain");
+            const auto mute_value = unsigned_number(tokens[i++], line_number, "clip mute");
+            if (mute_value > 1) parse_fail(line_number, "invalid clip mute");
+            muted = mute_value != 0;
+          } else if (!tokens[i].quoted && tokens[i].text == "CLIP_FADE" && !saw_fade) {
+            saw_fade = true;
+            ++i;
+            fade_in = media_time(tokens, i, line_number, "clip fade in");
+            fade_out = media_time(tokens, i, line_number, "clip fade out");
+          } else if (version6 && !tokens[i].quoted && tokens[i].text == "CLIP_TRANSFORM" && !saw_transform) {
+            saw_transform = true;
+            if (i + 5 >= tokens.size()) parse_fail(line_number, "invalid CLIP transform");
+            ++i;
+            visual_transform.position_x = double_number(tokens[i++], line_number, "clip position x");
+            visual_transform.position_y = double_number(tokens[i++], line_number, "clip position y");
+            visual_transform.scale = double_number(tokens[i++], line_number, "clip scale");
+            visual_transform.rotation_degrees = double_number(tokens[i++], line_number, "clip rotation");
+            visual_transform.opacity = double_number(tokens[i++], line_number, "clip opacity");
+          } else {
+            parse_fail(line_number, "invalid or duplicate CLIP properties");
           }
-          ++i;
-          audio_gain_db = double_number(tokens[i++], line_number, "clip audio gain");
-          const auto mute_value = unsigned_number(tokens[i++], line_number, "clip mute");
-          if (mute_value > 1) parse_fail(line_number, "invalid clip mute");
-          muted = mute_value != 0;
-        }
-        if (tokens.size() == 23) {
-          if (tokens[i].quoted || tokens[i].text != "CLIP_FADE") parse_fail(line_number, "invalid CLIP fade properties");
-          ++i;
-          fade_in = media_time(tokens, i, line_number, "clip fade in");
-          fade_out = media_time(tokens, i, line_number, "clip fade out");
         }
         if (i != tokens.size()) parse_fail(line_number, "extra CLIP fields");
         const auto track = std::find_if(state.tracks.begin(), state.tracks.end(),
@@ -595,8 +622,8 @@ ProjectRestoreState ProjectCodec::decode(std::string_view bytes) {
         }
         try {
           track->clips.emplace_back(clip_id, media_id,
-                                   domain::TimeRange{source_start, source_end}, timeline_start,
-                                   audio_gain_db, muted, fade_in, fade_out);
+                                    domain::TimeRange{source_start, source_end}, timeline_start,
+                                    audio_gain_db, muted, fade_in, fade_out, visual_transform);
         } catch (const std::exception& error) {
           parse_fail(line_number, error.what());
         }

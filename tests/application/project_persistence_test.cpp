@@ -236,6 +236,38 @@ void canvas_survives_primary_move_and_auxiliary_edits() {
   assert(aux_commands.redo() && aux_document.canvas() == canvas);
 }
 
+void visual_transform_v6_roundtrip_and_validation() {
+  auto snapshot = make_document().snapshot();
+  const auto* original = snapshot.timeline.find_clip(domain::ClipId{1});
+  assert(original);
+  const auto clip_id = original->id();
+  snapshot.timeline.restore_clip(snapshot.video_track_id,
+      domain::Clip{original->id(), original->media_id(), original->source_range(),
+                   original->timeline_start(), original->audio_gain_db(), original->muted(),
+                   original->fade_in(), original->fade_out(), {0.125, -0.25, 0.75, 32.5, 0.4}});
+  const auto encoded = ProjectCodec::encode(snapshot);
+  assert(encoded.starts_with("PULSAR_PROJECT 6\n"));
+  assert(encoded.find("CLIP_TRANSFORM 0.125 -0.25 0.75 32.5 0.40000000000000002") != std::string::npos);
+  const auto restored = ProjectDocument::restore(ProjectCodec::decode(encoded));
+  assert((restored.timeline().find_clip(clip_id)->visual_transform() ==
+          domain::VisualTransform{0.125, -0.25, 0.75, 32.5, 0.4}));
+
+  const auto default_bytes = ProjectCodec::encode(make_document().snapshot());
+  assert(default_bytes.find("CLIP_TRANSFORM") == std::string::npos);
+  assert(ProjectDocument::restore(ProjectCodec::decode(default_bytes))
+             .timeline().find_clip(domain::ClipId{1})->visual_transform().is_default());
+
+  for (const auto* bad : {"nan 0 1 0 1", "0 0 0 0 1", "0 0 1 0 1.1", "11 0 1 0 1"}) {
+    auto damaged = encoded;
+    const auto begin = damaged.find("CLIP_TRANSFORM ") + std::string{"CLIP_TRANSFORM "}.size();
+    damaged.replace(begin, damaged.find('\n', begin) - begin, bad);
+    bool rejected = false;
+    try { (void)ProjectCodec::decode(damaged); }
+    catch (const ProjectCodecError&) { rejected = true; }
+    assert(rejected);
+  }
+}
+
 void builtin_locator_roundtrip() {
   ProjectDocument document;
   CommandProcessor processor{document};
@@ -552,6 +584,7 @@ void repository_normalizes_codec_failures() {
 }
 
 int main() {
+  visual_transform_v6_roundtrip_and_validation();
   canvas_survives_primary_move_and_auxiliary_edits();
   visual_stack_versions_and_validation();
   codec_roundtrip_and_canonical_output();

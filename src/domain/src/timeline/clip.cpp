@@ -1,15 +1,16 @@
 #include <pulsar/domain/timeline/clip.hpp>
 
-#include <stdexcept>
 #include <cmath>
+#include <stdexcept>
 
 namespace pulsar::domain {
 
 Clip::Clip(ClipId id, MediaId media_id, TimeRange source_range, MediaTime timeline_start,
-           double audio_gain_db, bool muted, MediaTime fade_in, MediaTime fade_out)
+           double audio_gain_db, bool muted, MediaTime fade_in, MediaTime fade_out,
+           VisualTransform visual_transform)
     : id_{id}, media_id_{media_id}, source_range_{source_range},
       timeline_start_{timeline_start}, audio_gain_db_{audio_gain_db}, muted_{muted},
-      fade_in_{fade_in}, fade_out_{fade_out} {
+      fade_in_{fade_in}, fade_out_{fade_out}, visual_transform_{visual_transform} {
   if (source_range_.duration() <= MediaTime::zero()) {
     throw std::invalid_argument{"clip source range duration must be positive"};
   }
@@ -27,6 +28,18 @@ Clip::Clip(ClipId id, MediaId media_id, TimeRange source_range, MediaTime timeli
   if (fade_in_ < MediaTime::zero() || fade_out_ < MediaTime::zero() || fade_in_ > maximum_fade ||
       fade_out_ > maximum_fade) {
     throw std::invalid_argument{"clip fades must be between zero and the supported maximum"};
+  }
+  validate_visual_transform(visual_transform_);
+}
+
+void validate_visual_transform(const VisualTransform& value) {
+  if (!std::isfinite(value.position_x) || !std::isfinite(value.position_y) ||
+      !std::isfinite(value.scale) || !std::isfinite(value.rotation_degrees) ||
+      !std::isfinite(value.opacity) || value.position_x < -10.0 || value.position_x > 10.0 ||
+      value.position_y < -10.0 || value.position_y > 10.0 || value.scale < 0.01 ||
+      value.scale > 100.0 || value.rotation_degrees < -36000.0 ||
+      value.rotation_degrees > 36000.0 || value.opacity < 0.0 || value.opacity > 1.0) {
+    throw std::invalid_argument{"visual transform is non-finite or outside supported range"};
   }
 }
 
