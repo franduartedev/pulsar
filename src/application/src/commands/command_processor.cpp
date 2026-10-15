@@ -258,6 +258,9 @@ void CommandProcessor::apply(ProjectDocument& document, const Command& command, 
             }
             document.allocator_.ensure_track_consumable();
           }
+          if (concrete_command.kind == domain::TrackKind::Video) {
+            document.visual_track_ids_.reserve(document.visual_track_ids_.size() + 1);
+          }
           timeline.add_track(domain::Track{concrete_command.track_id, concrete_command.kind});
           if (concrete_command.kind == domain::TrackKind::Video) {
             document.visual_track_ids_.push_back(concrete_command.track_id);
@@ -287,6 +290,7 @@ void CommandProcessor::apply(ProjectDocument& document, const Command& command, 
           if (concrete_command.visual_index > ids.size() || timeline.find_track(concrete_command.track_id)) {
             throw std::invalid_argument{"invalid visual track restoration"};
           }
+          ids.reserve(ids.size() + 1);
           timeline.add_track(domain::Track{concrete_command.track_id, domain::TrackKind::Video});
           ids.insert(ids.begin() + static_cast<std::ptrdiff_t>(concrete_command.visual_index),
                      concrete_command.track_id);
