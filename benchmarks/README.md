@@ -31,3 +31,14 @@ decoders: 1/3; retained source frames: 2/6 for FFmpeg. The benchmark asserts
 these state bounds and output size; it excludes audio and encoding. Ordinary
 single-track operation is measured alongside the layered case. These are
 observations, not hard thresholds across different machines.
+
+## E2.1 transform baseline (diagnostic, same machine)
+
+Synthetic reusable RGBA, 60 frames at 1920×1080: default 1 layer 0.332 s
+(180.5 fps); transformed 1 layer 3.836 s (15.6 fps); transformed 3 layers
+3.661 s (16.4 fps). Real MPEG-4/FFmpeg: default 1 layer 0.610 s (98.4 fps);
+transformed 1 layer 3.825 s (15.7 fps); transformed 3 layers 4.337 s
+(13.8 fps). Peak decoders 1/1/3; retained source frames 2/2/6 (FFmpeg).
+The transformed CPU path is a deterministic bilinear source-over reference;
+it is ~6× slower than the default opaque path and is not optimized in E2.1.
+Default single-track behavior is unchanged from E1.

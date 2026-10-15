@@ -43,7 +43,8 @@ public:
   std::shared_ptr<const ex::OfflineVideoPixelBuffer> image;
 };
 
-app::ProjectSnapshot project(int layers, const std::filesystem::path& locator) {
+app::ProjectSnapshot project(int layers, const std::filesystem::path& locator,
+                            bool transformed = false) {
   app::ProjectDocument document;
   auto snapshot = document.snapshot();
   snapshot.canvas = app::ProjectCanvas{width, height, rate};
@@ -56,14 +57,21 @@ app::ProjectSnapshot project(int layers, const std::filesystem::path& locator) {
     }
     snapshot.assets.emplace_back(media, locator, 0, duration,
         app::VideoAssetMetadata{"raw", width, height, {1, 30}, rate, std::nullopt});
+    d::VisualTransform transform;
+    if (transformed && index > 0) {
+      transform = d::VisualTransform{0.2 * index, -0.1 * index, 0.5, 15.0 * index, 0.8};
+    } else if (transformed && layers == 1) {
+      transform = d::VisualTransform{0.1, 0.05, 0.75, 30.0, 0.9};
+    }
     snapshot.timeline.insert_clip(track, d::Clip{d::ClipId{media.value()}, media,
-        {d::MediaTime::zero(), duration}, d::MediaTime::zero()});
+        {d::MediaTime::zero(), duration}, d::MediaTime::zero(), 0.0, false,
+        d::MediaTime::zero(), d::MediaTime::zero(), transform});
   }
   return snapshot;
 }
 
-void run(int layers, const std::filesystem::path& locator, bool real_media) {
-  const auto snapshot = project(layers, locator);
+void run(int layers, const std::filesystem::path& locator, bool real_media, bool transformed = false) {
+  const auto snapshot = project(layers, locator, transformed);
   const auto plan = ex::ExportPlan::build(snapshot);
   Factory factory;
   pulsar::media::ffmpeg::FFmpegOfflineVideoSourceFactory ffmpeg;
@@ -80,7 +88,8 @@ void run(int layers, const std::filesystem::path& locator, bool real_media) {
   if (metrics.peak_active_decoders > static_cast<std::uint64_t>(layers) ||
       metrics.peak_live_source_frames > static_cast<std::uint64_t>(2 * layers) ||
       metrics.output_frames != frames) throw std::runtime_error{"unbounded renderer state"};
-  std::cout << (real_media ? "FFmpeg " : "CPU synthetic ") << layers << " layers, " << width << 'x' << height << ", " << frames
+  std::cout << (real_media ? "FFmpeg " : "CPU synthetic ") << (transformed ? "transformed " : "default ")
+            << layers << " layers, " << width << 'x' << height << ", " << frames
             << " frames: " << elapsed << " s (" << frames / elapsed << " fps); peak decoders "
             << metrics.peak_active_decoders << ", peak retained source frames "
             << metrics.peak_live_source_frames << '\n';
@@ -91,6 +100,7 @@ int main(int argc, char** argv) {
   const bool real_media = argc == 2;
   if (argc > 2) throw std::invalid_argument{"pass one 1080p 30 fps 2-second video path"};
   const std::filesystem::path locator = real_media ? argv[1] : "synthetic";
-  run(1, locator, real_media);
-  run(3, locator, real_media);
+  run(1, locator, real_media, false);
+  run(1, locator, real_media, true);
+  run(3, locator, real_media, true);
 }

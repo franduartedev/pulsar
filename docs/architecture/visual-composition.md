@@ -72,3 +72,26 @@ original stack position, so undo/redo and v6 persistence use the same order.
 Clip insertion and moving can name any visual track; default Insert/Append
 continue to target VIDEO 1. Timeline lanes display top-to-bottom composition
 order, with audio lanes below them. VIDEO 1 alone contributes embedded audio.
+
+## Transform model and composition plan (E2.1)
+
+`VisualTransform` (position X/Y in canvas fractions, uniform scale, clockwise
+rotation degrees, opacity) lives on the clip and is renderer-independent: no
+Qt/QML, Viewer, preview or proxy sizes enter the persisted semantics. The
+default transform renders pixel-identical to E1 (opaque fit with bars, top
+wins). A transformed layer composites its bar-less fitted picture with
+deterministic bilinear resampling and straight source-over scaled by opacity;
+outside the picture the canvas is untouched, so lower layers show through.
+The CPU implementation is the oracle/reference; no GPU path exists.
+
+`evaluate_composition_plan(snapshot, context, t)` produces the small
+renderer-neutral `CompositionPlan` (bottom-to-top active `VisualLayerPlan`s
+with source identity, source time and resolved transform). Gaps are omitted;
+active unavailable visuals fail deterministically in both preview and export.
+Preview (`render_at`) and export (`render_frame`) consume the same plan and
+the same composite operation, so transformed pixels keep parity. Decoded-frame
+or proxy dimensions never redefine geometry: the base is the E1 aspect fit and
+transforms apply in canvas space, so a future proxy only substitutes decode
+sources. Alpha converges on premultiplied source-over (titles already blend
+that way); video layers stay opaque-canvased with effective alpha from
+opacity × source alpha, integer-rounded and deterministic.
