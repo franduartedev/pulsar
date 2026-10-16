@@ -240,7 +240,7 @@ set_tests_properties(pulsar.desktop.ingest_integration
   PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;PULSAR_RECOVERY_DIR=${CMAKE_CURRENT_BINARY_DIR}/recovery-ingest")
 
 # Release-safety desktop tests (same sources as the other controller tests).
-foreach(pair "safety|pulsar.desktop.safety" "shutdown|pulsar.desktop.shutdown" "batch|pulsar.desktop.batch" "title_parity|pulsar.desktop.title_parity" "recovery|pulsar.desktop.recovery" "dnd|pulsar.desktop.dnd" "gate100|pulsar.desktop.gate100" "stills|pulsar.desktop.stills" "polish|pulsar.desktop.polish" "audition|pulsar.desktop.audition")
+foreach(pair "safety|pulsar.desktop.safety" "shutdown|pulsar.desktop.shutdown" "batch|pulsar.desktop.batch" "title_parity|pulsar.desktop.title_parity" "recovery|pulsar.desktop.recovery" "dnd|pulsar.desktop.dnd" "gate100|pulsar.desktop.gate100" "stills|pulsar.desktop.stills" "polish|pulsar.desktop.polish" "workspace|pulsar.desktop.workspace" "audition|pulsar.desktop.audition")
   string(REPLACE "|" ";" parts "${pair}")
   list(GET parts 0 short)
   list(GET parts 1 test_name)
@@ -285,6 +285,7 @@ foreach(pair "safety|pulsar.desktop.safety" "shutdown|pulsar.desktop.shutdown" "
   set_tests_properties(${test_name} PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;PULSAR_RECOVERY_DIR=${CMAKE_CURRENT_BINARY_DIR}/recovery-${short}" TIMEOUT 300)
 endforeach()
 target_link_libraries(pulsar_desktop_polish_tests PRIVATE Qt6::Test)
+target_link_libraries(pulsar_desktop_workspace_tests PRIVATE Qt6::Test)
 # The audition test needs the sound pack of the source tree (installed builds find it next to the binary).
 set_property(TEST pulsar.desktop.audition APPEND PROPERTY ENVIRONMENT "PULSAR_ASSETS_DIR=${CMAKE_SOURCE_DIR}/assets")
 endif()
