@@ -125,10 +125,34 @@ void composite_transformed_layer(RgbaSurface& canvas, const RgbaSurface& fitted,
   const double fw = static_cast<double>(fitted.width);
   const double fh = static_cast<double>(fitted.height);
 
-  for (int dy = 0; dy < canvas.height; ++dy) {
+  // Only destination pixel centres inside the transformed picture's axis-aligned
+  // bounds can contribute. Keep a one-pixel conservative fringe so the acceptance
+  // and bilinear edge tests below remain the pixel authority; this changes no
+  // sampling math, but avoids scanning an entire canvas for a small overlay.
+  const auto transformed_x = [&](double x, double y) {
+    return cx + ox + scale * (cos_a * x + sin_a * y);
+  };
+  const auto transformed_y = [&](double x, double y) {
+    return cy + oy + scale * (-sin_a * x + cos_a * y);
+  };
+  const double half_w = fw * 0.5;
+  const double half_h = fh * 0.5;
+  const double xs[] = {transformed_x(-half_w, -half_h), transformed_x(half_w, -half_h),
+                       transformed_x(-half_w, half_h), transformed_x(half_w, half_h)};
+  const double ys[] = {transformed_y(-half_w, -half_h), transformed_y(half_w, -half_h),
+                       transformed_y(-half_w, half_h), transformed_y(half_w, half_h)};
+  const auto [min_x, max_x] = std::minmax_element(std::begin(xs), std::end(xs));
+  const auto [min_y, max_y] = std::minmax_element(std::begin(ys), std::end(ys));
+  const int first_x = std::clamp(static_cast<int>(std::floor(*min_x)) - 1, 0, canvas.width);
+  const int last_x = std::clamp(static_cast<int>(std::ceil(*max_x)) + 1, 0, canvas.width);
+  const int first_y = std::clamp(static_cast<int>(std::floor(*min_y)) - 1, 0, canvas.height);
+  const int last_y = std::clamp(static_cast<int>(std::ceil(*max_y)) + 1, 0, canvas.height);
+  if (first_x >= last_x || first_y >= last_y) return;
+
+  for (int dy = first_y; dy < last_y; ++dy) {
     auto* dst_row = canvas.pixels.data() + static_cast<std::size_t>(dy) * canvas.stride_bytes;
     const double y_prime = (static_cast<double>(dy) + 0.5 - cy - oy);
-    for (int dx = 0; dx < canvas.width; ++dx) {
+    for (int dx = first_x; dx < last_x; ++dx) {
       const double x_prime = (static_cast<double>(dx) + 0.5 - cx - ox);
       // Inverse clockwise rotation, then inverse scale, back to fitted edge coords.
       const double x_local = (cos_a * x_prime - sin_a * y_prime) / scale;
