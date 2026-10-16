@@ -148,13 +148,13 @@ Panel {
                     anchors.centerIn: parent; text: tab.modelData
                     color: tab.current ? Theme.textPrimary : (tabMouse.containsMouse ? Theme.textPrimary : Theme.textMuted)
                     font.pixelSize: Theme.fontSizeXS; font.bold: tab.current; font.letterSpacing: 0.8
-                    Behavior on color { ColorAnimation { duration: 90 } }
+                    Behavior on color { ColorAnimation { duration: Theme.motionFast } }
                 }
                 Rectangle {
                     anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom
                     height: tab.current ? 2 : 1
                     color: tab.current ? Theme.accent : (tab.activeFocus ? Theme.focus : "transparent")
-                    Behavior on color { ColorAnimation { duration: 90 } }
+                    Behavior on color { ColorAnimation { duration: Theme.motionFast } }
                 }
                 MouseArea { id: tabMouse; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: { inspector.currentTab = index; tab.forceActiveFocus() } }
             }

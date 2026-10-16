@@ -54,8 +54,8 @@ Rectangle {
         spacing: 4
         PButton { flat: true; text: "Abrir"; onClicked: header.openProjectRequested() }
         PButton { flat: true; text: "Guardar"; enabled: controller.projectDirty; onClicked: header.saveProjectRequested() }
-        PButton { flat: true; text: "Guardar como…"; onClicked: header.saveProjectAsRequested() }
-        PButton { flat: true; text: "Importar"; onClicked: header.importMediaRequested() }
+        PButton { visible: header.width >= 1120; flat: true; text: "Guardar como…"; onClicked: header.saveProjectAsRequested() }
+        PButton { visible: header.width >= 1040; flat: true; text: "Importar"; onClicked: header.importMediaRequested() }
         Item { width: Theme.spaceM; height: 1 }
         PButton { text: "Cancelar"; visible: controller.exportRunning; onClicked: controller.cancelExport() }
         PButton {

@@ -5,6 +5,7 @@ import "../theme/Theme.js" as Theme
 // playhead overlay and a snap guide shown only while a drag is snapping.
 Panel {
     id: pane
+    readonly property bool compactToolbar: width < 1250
     property real gutterWidth: Math.max(88, Math.min(120, width * 0.095))
     readonly property real timelineWidth: Math.max(1, width - gutterWidth)
     // Lanes use the room they are given (more waveform to read) within sane bounds.
@@ -76,16 +77,16 @@ Panel {
             anchors.verticalCenter: parent.verticalCenter
             spacing: 4
             Text { anchors.verticalCenter: parent.verticalCenter; text: "Timeline"; color: Theme.textPrimary; font.pixelSize: Theme.fontSizeL; font.bold: true; rightPadding: Theme.spaceM }
-            ToolButton { glyph: "split"; text: "Cortar"; tip: "Cortar en el cabezal (S)"; enabled: controller.canSplit; onClicked: controller.splitSelectedClip() }
-            ToolButton { glyph: "audio"; text: "Separar audio"; tip: "Separar el audio del clip de video"; enabled: controller.canSeparateAudio; onClicked: controller.separateSelectedAudio() }
-            ToolButton { glyph: "trash"; text: "Borrar"; tip: "Borrar (Supr)"; enabled: controller.selectedClipKey.length > 0 || controller.selectedTitleKey.length > 0; onClicked: controller.deleteSelectedClip() }
-            ToolButton { glyph: "duplicate"; text: "Duplicar"; tip: "Duplicar el clip o título seleccionado, justo después (Ctrl+D)"; enabled: controller.canDuplicate; onClicked: controller.duplicateSelected() }
-            ToolButton { glyph: "title"; text: "Título"; tip: "Agregar un título en el cabezal (T)"; enabled: controller.hasMedia; onClicked: controller.addTitle() }
+            ToolButton { glyph: "split"; text: pane.compactToolbar ? "" : "Cortar"; tip: "Cortar en el cabezal (S)"; enabled: controller.canSplit; onClicked: controller.splitSelectedClip() }
+            ToolButton { glyph: "audio"; text: pane.compactToolbar ? "" : "Separar audio"; tip: "Separar el audio del clip de video"; enabled: controller.canSeparateAudio; onClicked: controller.separateSelectedAudio() }
+            ToolButton { glyph: "trash"; text: pane.compactToolbar ? "" : "Borrar"; tip: "Borrar (Supr)"; enabled: controller.selectedClipKey.length > 0 || controller.selectedTitleKey.length > 0; onClicked: controller.deleteSelectedClip() }
+            ToolButton { glyph: "duplicate"; text: pane.compactToolbar ? "" : "Duplicar"; tip: "Duplicar el clip o título seleccionado, justo después (Ctrl+D)"; enabled: controller.canDuplicate; onClicked: controller.duplicateSelected() }
+            ToolButton { glyph: "title"; text: pane.compactToolbar ? "" : "Título"; tip: "Agregar un título en el cabezal (T)"; enabled: controller.hasMedia; onClicked: controller.addTitle() }
             Rectangle { anchors.verticalCenter: parent.verticalCenter; width: 1; height: 16; color: Theme.borderStrong }
-            ToolButton { glyph: "magnet"; text: "Snap"; toggle: true; tip: controller.snapEnabled ? "Imán activado: se ajusta a bordes y cabezal (N)" : "Imán desactivado (N)"; checked: controller.snapEnabled; onClicked: controller.snapEnabled = !controller.snapEnabled }
+            ToolButton { glyph: "magnet"; text: pane.compactToolbar ? "" : "Snap"; toggle: true; tip: controller.snapEnabled ? "Imán activado: se ajusta a bordes y cabezal (N)" : "Imán desactivado (N)"; checked: controller.snapEnabled; onClicked: controller.snapEnabled = !controller.snapEnabled }
             Rectangle { anchors.verticalCenter: parent.verticalCenter; width: 1; height: 16; color: Theme.borderStrong }
-            ToolButton { glyph: "undo"; text: "Deshacer"; tip: "Deshacer (Ctrl+Z)"; enabled: controller.canUndo; onClicked: controller.undoEdit() }
-            ToolButton { glyph: "redo"; text: "Rehacer"; tip: "Rehacer (Ctrl+Shift+Z)"; enabled: controller.canRedo; onClicked: controller.redoEdit() }
+            ToolButton { glyph: "undo"; text: pane.compactToolbar ? "" : "Deshacer"; tip: "Deshacer (Ctrl+Z)"; enabled: controller.canUndo; onClicked: controller.undoEdit() }
+            ToolButton { glyph: "redo"; text: pane.compactToolbar ? "" : "Rehacer"; tip: "Rehacer (Ctrl+Shift+Z)"; enabled: controller.canRedo; onClicked: controller.redoEdit() }
         }
         Row {
             anchors.right: parent.right

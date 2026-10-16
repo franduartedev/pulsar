@@ -102,6 +102,7 @@ var spaceXL = 24
 
 var controlHeight = 30
 var controlHeightSmall = 26
+var motionFast = 90
 
 // ---- Type -----------------------------------------------------------------
 var fontSizeXS = 11   // captions, chips

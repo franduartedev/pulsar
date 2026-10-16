@@ -45,6 +45,7 @@ Item {
         anchors.bottomMargin: Theme.spaceS
         color: Theme.bgViewer
         radius: Theme.radiusS
+        border.width: 1; border.color: Theme.borderSubtle
         clip: true
 
         Image { id: frame; anchors.fill: parent; source: controller.previewSource; cache: false; fillMode: Image.PreserveAspectFit; visible: controller.previewSource.length > 0 }
@@ -67,7 +68,7 @@ Item {
                 y: clipPlacer.picY + (clipPlacer.geometry.centerY - clipPlacer.geometry.height / 2) * frame.paintedHeight
                 width: Math.max(8, clipPlacer.geometry.width * frame.paintedWidth)
                 height: Math.max(8, clipPlacer.geometry.height * frame.paintedHeight)
-                rotation: clipPlacer.geometry.rotation
+                rotation: clipPlacer.geometry.rotation === undefined ? 0 : clipPlacer.geometry.rotation
                 transformOrigin: Item.Center
 
                 Rectangle {
@@ -105,17 +106,21 @@ Item {
                 Repeater {
                     model: [{sx: -1, sy: -1}, {sx: 1, sy: -1}, {sx: -1, sy: 1}, {sx: 1, sy: 1}]
                     delegate: Rectangle {
+                        id: handle
                         required property var modelData
                         readonly property int sx: modelData.sx
                         readonly property int sy: modelData.sy
                         x: sx < 0 ? -width / 2 : clipBounds.width - width / 2
                         y: sy < 0 ? -height / 2 : clipBounds.height - height / 2
                         width: 11; height: 11; radius: 2
-                        color: Theme.focus
+                        color: handleMouse.containsMouse || handleMouse.pressed ? Theme.textOnAccent : Theme.focus
                         border.width: 1; border.color: Theme.bgViewer
+                        Behavior on color { ColorAnimation { duration: Theme.motionFast } }
                         MouseArea {
+                            id: handleMouse
                             anchors.fill: parent; anchors.margins: -6
-                            cursorShape: Qt.SizeFDiagCursor
+                            hoverEnabled: true
+                            cursorShape: parent.sx === parent.sy ? Qt.SizeFDiagCursor : Qt.SizeBDiagCursor
                             drag.target: scaleGhost
                             property real startScale: 1
                             onPressed: { startScale = controller.selectedClipScale; scaleGhost.x = 0; scaleGhost.y = 0; controller.beginSelectedClipTransform() }
@@ -215,7 +220,7 @@ Item {
             Text { anchors.horizontalCenter: parent.horizontalCenter; text: "PULSAR"; color: Theme.textMuted; font.pixelSize: mat.height < 180 ? 18 : Theme.fontSizeXXL; font.bold: true; font.letterSpacing: 6 }
             Text { anchors.horizontalCenter: parent.horizontalCenter; text: controller.busy ? "Preparando medio…" : "Importá un medio para comenzar"; color: Theme.textSecondary; font.pixelSize: Theme.fontSizeM }
             PButton { anchors.horizontalCenter: parent.horizontalCenter; visible: !controller.busy; primary: true; text: "Importar medio"; onClicked: pane.importRequested() }
-            Text { anchors.horizontalCenter: parent.horizontalCenter; visible: !controller.busy && mat.height >= 220; text: "También podés arrastrar videos, fotos, música o una carpeta a esta ventana."; color: Theme.textMuted; font.pixelSize: Theme.fontSizeXS }
+            Text { width: Math.max(120, mat.width - 48); horizontalAlignment: Text.AlignHCenter; wrapMode: Text.WordWrap; anchors.horizontalCenter: parent.horizontalCenter; visible: !controller.busy && mat.height >= 220; text: "También podés arrastrar videos, fotos, música o una carpeta a esta ventana."; color: Theme.textMuted; font.pixelSize: Theme.fontSizeXS }
         }
         Text {
             anchors.centerIn: parent
