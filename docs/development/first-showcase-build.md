@@ -20,16 +20,15 @@ The project remains format v6. `TRANSITION` records represent edit relationships
 
 Release build, same 1920×1080 / 60-frame FFmpeg benchmark used by E2.1. The supplied
 E2.1 reference was 98.4 fps identity, 15.7 fps transformed, and 13.8 fps for three
-transformed layers. The final local run (the current machine was variable and measured
-54–73 fps identity) was:
+transformed layers. The final run used the README's generated MPEG-4 fixture:
 
 | Workload | fps | frame time | peak decoders | retained source frames |
 |---|---:|---:|---:|---:|
-| 1× identity | 65.3 | 15.3 ms | 1 | 2 |
-| 1× transformed | 15.2 | 65.7 ms | 1 | 2 |
-| 3× transformed | 12.6 | 79.5 ms | 3 | 6 |
-| 2 clips + cross dissolve | 16.5 | 60.5 ms | 2 | 4 |
-| showcase visual composition | 10.1 | 98.7 ms | 4 | 8 |
+| 1× identity | 92.9 | 10.8 ms | 1 | 2 |
+| 1× transformed | 15.7 | 63.8 ms | 1 | 2 |
+| 3× transformed | 15.9 | 62.9 ms | 3 | 6 |
+| 2 clips + cross dissolve | 18.6 | 53.8 ms | 2 | 4 |
+| showcase visual composition | 12.6 | 79.5 ms | 4 | 8 |
 
 Safe optimizations clip transformed traversal to its visible ROI, skip zero-opacity
 layers before decode/composition, and fast-path opaque alpha quads. Synthetic transformed
