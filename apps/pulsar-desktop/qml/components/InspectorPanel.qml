@@ -1,15 +1,16 @@
 import QtQuick
 import "../theme/Theme.js" as Theme
 
-// Inspector: what you can edit (CLIP / AUDIO) leads; what is merely
-// informative (MEDIA) is summarised in one line, with the full technical
-// dump collapsed under "Detalles".
+// Contextual Inspector. VIDEO owns visual/title/transition controls, AUDIO
+// owns audible clip controls, and EFFECTS is an honest implemented-state
+// placeholder rather than a catalogue of non-functional controls.
 Panel {
     id: inspector
 
     property string selName: ""
     property string selRange: ""
     property bool detailsExpanded: false
+    property int currentTab: 0 // 0 video, 1 audio, 2 effects
 
     function metaValue(key) {
         var text = controller.metadata
@@ -106,6 +107,12 @@ Panel {
         : (!clipSelected ? (trackSelected ? "PISTA" : "") : (controller.selectedClipKind === "image" ? "FOTO"
         : (controller.selectedClipKind === "color" ? "PLACA"
         : (controller.selectedClipKind === "audio" ? "AUDIO" : "VIDEO"))))
+    onContextLabelChanged: {
+        // Follow a newly selected audio-only clip; preserve an explicit Effects
+        // choice until editing context genuinely changes.
+        if (contextLabel === "AUDIO") currentTab = 1
+        else if (contextLabel.length > 0 && currentTab !== 2) currentTab = 0
+    }
 
     Rectangle {
         id: contextChip
@@ -117,8 +124,45 @@ Panel {
         Text { id: chipText; anchors.centerIn: parent; text: inspector.contextLabel; color: Theme.focus; font.pixelSize: 10; font.bold: true; font.letterSpacing: 1 }
     }
 
+    Item {
+        id: inspectorTabs
+        anchors.left: parent.left; anchors.right: parent.right
+        anchors.top: titleText.bottom; anchors.topMargin: Theme.spaceM
+        anchors.leftMargin: Theme.spaceM; anchors.rightMargin: Theme.spaceM
+        height: 34
+        Rectangle { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; height: 1; color: Theme.borderSubtle }
+        Repeater {
+            model: ["VIDEO", "AUDIO", "EFECTOS"]
+            delegate: Item {
+                id: tab
+                required property string modelData
+                required property int index
+                readonly property bool current: inspector.currentTab === index
+                x: index * width; width: inspectorTabs.width / 3; height: inspectorTabs.height
+                activeFocusOnTab: true
+                Accessible.name: modelData
+                Accessible.role: Accessible.PageTab
+                Keys.onReturnPressed: inspector.currentTab = index
+                Keys.onSpacePressed: inspector.currentTab = index
+                Text {
+                    anchors.centerIn: parent; text: tab.modelData
+                    color: tab.current ? Theme.textPrimary : (tabMouse.containsMouse ? Theme.textPrimary : Theme.textMuted)
+                    font.pixelSize: Theme.fontSizeXS; font.bold: tab.current; font.letterSpacing: 0.8
+                    Behavior on color { ColorAnimation { duration: 90 } }
+                }
+                Rectangle {
+                    anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom
+                    height: tab.current ? 2 : 1
+                    color: tab.current ? Theme.accent : (tab.activeFocus ? Theme.focus : "transparent")
+                    Behavior on color { ColorAnimation { duration: 90 } }
+                }
+                MouseArea { id: tabMouse; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: { inspector.currentTab = index; tab.forceActiveFocus() } }
+            }
+        }
+    }
+
     Flickable {
-        anchors.left: parent.left; anchors.right: parent.right; anchors.top: titleText.bottom; anchors.bottom: parent.bottom
+        anchors.left: parent.left; anchors.right: parent.right; anchors.top: inspectorTabs.bottom; anchors.bottom: parent.bottom
         anchors.leftMargin: Theme.spaceL; anchors.rightMargin: Theme.spaceL; anchors.topMargin: Theme.spaceM; anchors.bottomMargin: Theme.spaceM
         contentWidth: width
         contentHeight: body.height
@@ -131,7 +175,7 @@ Panel {
 
             // ---- Nothing selected ------------------------------------------
             Column {
-                visible: !inspector.titleSelected && !inspector.clipSelected && !inspector.trackSelected && inspector.summary.length === 0
+                visible: inspector.currentTab === 0 && !inspector.titleSelected && !inspector.clipSelected && !inspector.trackSelected && inspector.summary.length === 0
                 width: parent.width
                 spacing: 6
                 Text { width: parent.width; text: "Nada seleccionado"; color: Theme.textSecondary; font.pixelSize: Theme.fontSizeM }
@@ -139,7 +183,7 @@ Panel {
             }
 
             InspectorSection {
-                visible: inspector.trackSelected && inspector.selectedTrack !== undefined
+                visible: inspector.currentTab === 0 && inspector.trackSelected && inspector.selectedTrack !== undefined
                 first: true; heading: "PISTA DE VIDEO"
                 Text { width: parent.width; text: inspector.selectedTrack ? inspector.selectedTrack.label.replace("VIDEO", "Video") + (inspector.selectedTrack.primary ? (inspector.selectedTrack.visualIndex === 0 ? " · Base" : " · Principal") : "") : "";
                        color: Theme.textPrimary; font.pixelSize: Theme.fontSizeM; font.bold: true }
@@ -154,7 +198,7 @@ Panel {
             // ---- TÍTULO ------------------------------------------------------
             Column {
                 id: titleSection
-                visible: inspector.titleSelected
+                visible: inspector.currentTab === 0 && inspector.titleSelected
                 width: parent.width
                 spacing: Theme.spaceM
                 readonly property var info: controller.selectedTitle
@@ -278,7 +322,7 @@ Panel {
 
             // ---- CLIP ----------------------------------------------------------
             InspectorSection {
-                visible: inspector.clipSelected
+                visible: inspector.currentTab === 0 && inspector.clipSelected
                 first: true; heading: "CLIP"
                 Text { width: parent.width; text: inspector.selName; color: Theme.textPrimary; font.pixelSize: Theme.fontSizeM; font.bold: true; elide: Text.ElideMiddle }
                 Text { width: parent.width; text: inspector.selRange; color: Theme.textSecondary; font.family: Theme.mono; font.pixelSize: Theme.fontSizeXS; elide: Text.ElideRight }
@@ -311,7 +355,7 @@ Panel {
 
             // ---- TRANSFORMACIÓN (E2.1 mínimo) ----------------------------------
             InspectorSection {
-                visible: inspector.clipSelected && controller.selectedClipKind !== "audio"
+                visible: inspector.currentTab === 0 && inspector.clipSelected && controller.selectedClipKind !== "audio"
                 heading: "TRANSFORMACIÓN"
                 FieldRow {
                     label: "Pos X"
@@ -358,7 +402,7 @@ Panel {
             }
 
             InspectorSection {
-                visible: inspector.clipSelected && controller.selectedClipKind !== "audio"
+                visible: inspector.currentTab === 0 && inspector.clipSelected && controller.selectedClipKind !== "audio"
                 heading: "TRANSICIÓN"
                 PButton {
                     width: parent.width; height: Theme.controlHeightSmall
@@ -370,8 +414,8 @@ Panel {
 
             // ---- AUDIO ---------------------------------------------------------
             InspectorSection {
-                visible: inspector.clipSelected
-                heading: "AUDIO"
+                visible: inspector.currentTab === 1 && inspector.clipSelected
+                first: true; heading: "CLIP DE AUDIO"
                 FieldRow {
                     visible: controller.selectedClipHasAudio
                     label: "Ganancia"
@@ -454,10 +498,24 @@ Panel {
                        color: Theme.textMuted; font.pixelSize: Theme.fontSizeS }
             }
 
+            Column {
+                visible: inspector.currentTab === 1 && !inspector.clipSelected
+                width: parent.width; spacing: Theme.spaceS
+                Text { width: parent.width; text: "Audio"; color: Theme.textSecondary; font.pixelSize: Theme.fontSizeM }
+                Text { width: parent.width; wrapMode: Text.WordWrap; text: "Seleccioná un clip con audio para ajustar su ganancia, silencio y fundidos. Los controles M y S de cada pista están en la timeline."; color: Theme.textMuted; font.pixelSize: Theme.fontSizeS }
+            }
+
+            Column {
+                visible: inspector.currentTab === 2
+                width: parent.width; spacing: Theme.spaceS
+                Text { width: parent.width; text: "Sin efectos aplicados"; color: Theme.textSecondary; font.pixelSize: Theme.fontSizeM }
+                Text { width: parent.width; wrapMode: Text.WordWrap; text: "Los controles de efectos compatibles aparecerán acá."; color: Theme.textMuted; font.pixelSize: Theme.fontSizeS }
+            }
+
             // ---- MEDIO (informative) -----------------------------------------
             InspectorSection {
                 // The controller only describes the active source; hide it when the selection is a title.
-                 visible: inspector.summary.length > 0 && !inspector.titleSelected && !inspector.trackSelected
+                 visible: inspector.currentTab === 0 && inspector.summary.length > 0 && !inspector.titleSelected && !inspector.trackSelected
                 first: !inspector.clipSelected; heading: "MEDIO"
                 // The clip above already names its media; avoid saying it twice.
                 Text { visible: !inspector.clipSelected || inspector.selName !== controller.mediaName; width: parent.width; text: controller.mediaName; color: Theme.textSecondary; font.pixelSize: Theme.fontSizeS; elide: Text.ElideMiddle }
@@ -466,7 +524,7 @@ Panel {
 
             // ---- Technical details (collapsed) ---------------------------------
             Column {
-                 visible: inspector.rows.length > 0 && !inspector.titleSelected && !inspector.trackSelected
+                  visible: inspector.currentTab === 0 && inspector.rows.length > 0 && !inspector.titleSelected && !inspector.trackSelected
                 width: parent.width
                 spacing: 8
                 Item {
