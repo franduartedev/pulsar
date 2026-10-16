@@ -2,7 +2,7 @@
 
 | Document | Status | What it is |
 |---|---|---|
-| [`release/0.1.0-beta.md`](release/0.1.0-beta.md) | current | User-facing release notes, known limitations, release gate, packaging and license notes. |
+| [`release/0.2.0-beta.1.md`](release/0.2.0-beta.1.md) | current | User-facing release notes, known limitations, release gate, packaging and license notes. |
 | [`release/roadmap.md`](release/roadmap.md) | current | Post-beta roadmap. |
 | [`architecture/README.md`](architecture/README.md) | current | Module map and dependency rules. |
 | [`adr/`](adr/README.md) | current / historical record | Architecture decisions. ADRs are never rewritten; a later ADR supersedes an earlier one. |

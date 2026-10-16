@@ -3,6 +3,29 @@
 Format: [Keep a Changelog](https://keepachangelog.com/). Versions follow `MAJOR.MINOR.PATCH[-label]`;
 the version is defined once, in the root `CMakeLists.txt`.
 
+## 0.2.0-beta.1
+
+First public beta release candidate (Linux x86_64).
+
+### Added
+- Multiple visual tracks, picture-in-picture and direct Viewer move/scale.
+- Shared transformed composition for preview and export, static titles and one cross-dissolve type.
+- Draggable Viewer/Timeline split with display-only Ajustar/100% Viewer modes.
+- Filled asynchronous waveform envelopes and reliable embedded-audio detach.
+
+### Fixed
+- A non-default transform on VIDEO 1 updated selection bounds and Inspector state
+  but left the displayed decoder pixels full-canvas. Single-track transforms now
+  route through the authoritative composition preview.
+- Async preview results carry deterministic project/generation/request identity;
+  obsolete edit results cannot replace a newer project revision.
+- Timeline pan momentum and drag autoscroll stop on pointer exit, release, cancel
+  and window deactivation, with one bounded timer and no orphaned work.
+- Viewer selection bounds and raster composition derive from shared visual geometry.
+
+### Known limitations
+- See [`docs/release/0.2.0-beta.1.md`](docs/release/0.2.0-beta.1.md#known-limitations).
+
 ## 0.1.0-beta
 
 First public beta (Linux x86_64). History before this release is not itemised.

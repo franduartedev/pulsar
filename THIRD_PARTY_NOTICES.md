@@ -1,12 +1,12 @@
 # Third-party notices and source availability
 
-PULSAR 0.1.0-beta is free software: you can redistribute it and/or modify it under the terms of the
+PULSAR 0.2.0-beta.1 is free software: you can redistribute it and/or modify it under the terms of the
 **GNU General Public License, version 3 or (at your option) any later version**
 (`SPDX-License-Identifier: GPL-3.0-or-later`). The full text is in [`LICENSE`](LICENSE). PULSAR comes with
 **no warranty**. Copyright © FD Labs and PULSAR contributors.
 
-This file says what else is inside the binary packages (`PULSAR-0.1.0-beta-linux-x86_64.tar.gz` and
-`PULSAR-0.1.0-beta-x86_64.AppImage`), under which licence, and where to get the corresponding source.
+This file says what else is inside the binary packages (`PULSAR-0.2.0-beta.1-linux-x86_64.tar.gz` and
+`PULSAR-0.2.0-beta.1-x86_64.AppImage`), under which licence, and where to get the corresponding source.
 It is an inventory made for compliance, not legal advice.
 
 ## 1. What is licensed how
@@ -53,7 +53,7 @@ Everything else is FFmpeg's own native code (all native demuxers and decoders, t
 
 The Qt and FFmpeg libraries are shared libraries in `usr/lib`. You may replace them with your own builds (same
 sonames) or run PULSAR against other versions: for the tar.gz, drop them into `usr/lib`; for the AppImage run
-`./PULSAR-0.1.0-beta-x86_64.AppImage --appimage-extract` and edit `squashfs-root/usr/lib`.
+`./PULSAR-0.2.0-beta.1-x86_64.AppImage --appimage-extract` and edit `squashfs-root/usr/lib`.
 To rebuild the whole thing from source see section 5.
 
 ## 4. Corresponding source
@@ -62,8 +62,8 @@ Published together with the binaries, on the same release page:
 
 | Archive | Contents |
 |---|---|
-| `PULSAR-0.1.0-beta-source.tar.gz` | The exact PULSAR source the binaries were built from (a `git archive` of the release commit), including `LICENSE`, this file and the packaging scripts. |
-| `PULSAR-0.1.0-beta-third-party-source.tar.gz` | `ffmpeg_6.1.1.orig.tar.xz`, `x264_0.164.3108+git31e19f9.orig.tar.gz`, `dav1d_1.4.1.orig.tar.xz`, `build-ffmpeg.sh`, `BUILDINFO.txt` and `SHA256SUMS`. |
+| `PULSAR-0.2.0-beta.1-source.tar.gz` | The exact PULSAR source the binaries were built from (a `git archive` of the release commit), including `LICENSE`, this file and the packaging scripts. |
+| `PULSAR-0.2.0-beta.1-third-party-source.tar.gz` | `ffmpeg_6.1.1.orig.tar.xz`, `x264_0.164.3108+git31e19f9.orig.tar.gz`, `dav1d_1.4.1.orig.tar.xz`, `build-ffmpeg.sh`, `BUILDINFO.txt` and `SHA256SUMS`. |
 
 For the Ubuntu 24.04 libraries listed in `PACKAGES.txt` (Qt and the rest), the corresponding source of each exact
 version is in the Ubuntu archive (`apt-get source <package>=<version>` with `deb-src` enabled, or

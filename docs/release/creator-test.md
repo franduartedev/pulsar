@@ -17,7 +17,7 @@ whatever sounds they like. Do not say that photos, colour cards, titles, fades o
 
 ## Setup
 
-1. Install the bundle (`tar xzf PULSAR-0.1.0-beta-linux-x86_64.tar.gz && ./PULSAR-0.1.0-beta/pulsar`, or the AppImage).
+1. Install the bundle (`tar xzf PULSAR-0.2.0-beta.1-linux-x86_64.tar.gz && ./PULSAR-0.2.0-beta.1/pulsar`, or the AppImage).
 2. Put the material in one folder. It can be imported with **Importar una carpeta entera…** or dragged in.
 3. Observe, do not help. Note the minute at which each question comes up.
 

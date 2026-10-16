@@ -1,4 +1,4 @@
-# PULSAR identity (0.1.0-beta)
+# PULSAR identity
 
 Official mark: **Pulse Arc** — a wave crossed by an editing line, electric blue to teal.
 Palette from the brand sheet: electric blue `#2563EB`, cyan/teal `#06D6A0`, graphite `#0A0E13`,

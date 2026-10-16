@@ -2,7 +2,7 @@
 
 Lightweight video editor built for fast, predictable editing.
 
-> **Beta — PULSAR 0.1.0-beta** · Linux (x86_64) only · interface in Spanish
+> **Public Beta RC — PULSAR 0.2.0-beta.1** · Linux (x86_64) only · interface in Spanish
 
 PULSAR is a desktop video editor written in C++ with Qt 6 and FFmpeg. It aims at a
 small, fast, predictable editing workflow: exact timing, no surprises on undo, and
@@ -10,7 +10,7 @@ an export you can trust.
 
 ## What it does today
 
-- Multi-video timeline on one video track: import, **Insert** at the playhead, **Add to end** (gapless)
+- Multi-track video timeline: import, **Insert** at the playhead, **Add to end** (gapless), arrange and overlay
 - Split, trim and move clips, with **magnetic snapping**
 - Undo / redo
 - Independent audio tracks, **detach audio** from a video clip, built-in sound effects (25 original SFX)
@@ -24,15 +24,16 @@ an export you can trust.
 - **Import** several files or a whole folder; **drag** media from the library onto the timeline
 - **Autosave and recovery** after a crash
 - Export presets **Original / 1080p / 720p** (real scaling, never enlarges)
+- Direct Viewer move/scale for video and still clips, picture-in-picture, one cross-dissolve transition
 
-Not in this beta: Windows/macOS, multiple video tracks, overlays/logos, transitions, effects, subtitles,
-color tools, proxies. See the
-[release notes](docs/release/0.1.0-beta.md) for the full list of known limitations.
+Not in this beta: Windows/macOS, GPU rendering, animated titles, additional transition/effect catalogues,
+subtitles, keyframes, masks, color tools or proxies. See the
+[release notes](docs/release/0.2.0-beta.1.md) for the full list of known limitations.
 
 ## Run it
 
-1. Download `PULSAR-0.1.0-beta-linux-x86_64.tar.gz` (or the AppImage) from the release page.
-2. `tar xzf PULSAR-0.1.0-beta-linux-x86_64.tar.gz && cd PULSAR-0.1.0-beta`
+1. Download `PULSAR-0.2.0-beta.1-linux-x86_64.tar.gz` (or the AppImage) from the release page.
+2. `tar xzf PULSAR-0.2.0-beta.1-linux-x86_64.tar.gz && cd PULSAR-0.2.0-beta.1`
 3. `./pulsar`
 
 No Qt or FFmpeg installation is needed. It was tested on Ubuntu 24.04; the bundle needs
