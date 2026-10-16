@@ -1019,8 +1019,10 @@ void DesktopController::refreshWaveformItem(WaveformQuickItem* item) {
   waveform_query_durations_.push(std::chrono::steady_clock::now() - query_start);
 
   const auto prepare_start = std::chrono::steady_clock::now();
-  const bool combine = audio.channel_count > 2 ||
-      (audio.channel_count == 2 && item->height() < 64.0);
+  // Timeline editing benefits from one immediately readable peak envelope.
+  // Combining channels retains their real min/max extrema while avoiding two
+  // cramped lanes competing with one visual centre line.
+  const bool combine = true;
   const pulsar::application::WaveformRenderPolicy policy{
       width < 20U ? std::min(0.5, item->density()) : item->density(),
       combine, width, item->height()};

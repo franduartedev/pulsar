@@ -125,15 +125,17 @@ Rectangle {
         // Dark inset: the waveform reads against a constant backdrop whatever the clip colour.
         x: waveform.x; y: waveform.y; width: waveform.width; height: waveform.height
         visible: waveform.visible; radius: 3; color: Theme.waveformWell
+        border.width: block.selected ? 1 : 0
+        border.color: block.audioClip ? Theme.waveformAudio : Theme.waveform
     }
     WaveformItem {
         id: waveform
         readonly property real zoneTop: block.nameStripHeight + 3
         readonly property real zoneHeight: Math.max(0, block.height - zoneTop - 4)
         x: 4 + block.contentX
-        y: block.audioClip ? zoneTop : zoneTop + zoneHeight * 0.26
+        y: zoneTop
         width: Math.max(0, block.width - 8 - block.contentX)
-        height: block.audioClip ? zoneHeight : zoneHeight * 0.74
+        height: zoneHeight
         clipKey: block.clipKey
         selected: block.selected
         muted: block.muted

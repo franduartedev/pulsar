@@ -176,6 +176,21 @@ WaveformGeometry prepare_waveform_geometry(
     result.unavailable_columns.push_back(x);
   }
 
+  // Normalize the clip envelope for editing readability while preserving all
+  // real peak relationships. Full-scale material is never amplified; quieter
+  // clips gain visual headroom so their waveform does not collapse into the
+  // centre line. The operation is bounded by raster width, not source length.
+  double normalization_peak = 0.0;
+  for (const auto& extrema : columns) {
+    if (!extrema.occupied) continue;
+    normalization_peak = std::max(normalization_peak,
+        std::max(std::abs(static_cast<double>(extrema.minimum)),
+                 std::abs(static_cast<double>(extrema.maximum))));
+  }
+  constexpr double target_peak = 32767.0 * 0.92;
+  const double normalization = normalization_peak > 0.0
+      ? std::max(1.0, target_peak / normalization_peak) : 1.0;
+
   for (std::uint32_t channel = 0; channel < display_channels; ++channel) {
     const double lane_top = static_cast<double>(channel) * lane_height;
     const double center = lane_top + lane_height / 2.0;
@@ -184,10 +199,10 @@ WaveformGeometry prepare_waveform_geometry(
       if (!extrema.occupied) continue;
       constexpr double negative_scale = 32768.0;
       constexpr double positive_scale = 32767.0;
-      const double top = center - static_cast<double>(extrema.maximum) / positive_scale *
-                                      (lane_height / 2.0);
-      const double bottom = center - static_cast<double>(extrema.minimum) / negative_scale *
-                                         (lane_height / 2.0);
+       const double top = center - static_cast<double>(extrema.maximum) * normalization / positive_scale *
+                                       (lane_height / 2.0);
+       const double bottom = center - static_cast<double>(extrema.minimum) * normalization / negative_scale *
+                                          (lane_height / 2.0);
       result.segments.push_back({x, std::clamp(top, lane_top, lane_top + lane_height),
                                    std::clamp(bottom, lane_top, lane_top + lane_height)});
     }

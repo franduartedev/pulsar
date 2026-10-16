@@ -47,6 +47,15 @@ void test_silence_and_impulses() {
   const auto negative_geometry = application::prepare_waveform_geometry(
       negative, 2, {1.0, false, 2, 32.0});
   check(negative_geometry.segments[1].bottom == 32.0);
+
+  // Quiet but meaningful material is normalized into a readable envelope;
+  // silence remains exactly on the centre line.
+  const auto quiet = slice(1, {{-3277, 3277}, {-1638, 1638}});
+  const auto quiet_geometry = application::prepare_waveform_geometry(
+      quiet, 2, {1.0, false, 2, 32.0});
+  check(quiet_geometry.segments[0].top < 3.0 && quiet_geometry.segments[0].bottom > 29.0);
+  check(quiet_geometry.segments[1].top > quiet_geometry.segments[0].top &&
+        quiet_geometry.segments[1].bottom < quiet_geometry.segments[0].bottom);
 }
 
 void test_extrema_merge_and_channels() {
