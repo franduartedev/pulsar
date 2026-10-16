@@ -194,7 +194,13 @@ void composite_transformed_layer(RgbaSurface& canvas, const RgbaSurface& fitted,
       double src_r = p00[0] * w00 + p10[0] * w10 + p01[0] * w01 + p11[0] * w11;
       double src_g = p00[1] * w00 + p10[1] * w10 + p01[1] * w01 + p11[1] * w11;
       double src_b = p00[2] * w00 + p10[2] * w10 + p01[2] * w01 + p11[2] * w11;
-      double src_a = p00[3] * w00 + p10[3] * w10 + p01[3] * w01 + p11[3] * w11;
+      // Decoded video is overwhelmingly opaque. Preserve the general alpha
+      // oracle for graphics, but avoid four weighted alpha operations for the
+      // common video quad (255 interpolates to exactly 255).
+      const bool opaque_quad = p00[3] == 255 && p10[3] == 255 && p01[3] == 255 && p11[3] == 255;
+      const double src_a = opaque_quad
+          ? 255.0
+          : p00[3] * w00 + p10[3] * w10 + p01[3] * w01 + p11[3] * w11;
       const int alpha255 = static_cast<int>(std::llround(src_a * transform.opacity));
       const int a = std::clamp(alpha255, 0, 255);
       if (a == 0) continue;
