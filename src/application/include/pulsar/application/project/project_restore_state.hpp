@@ -12,6 +12,7 @@ struct ProjectRestoreTrack {
   domain::TrackId id;
   domain::TrackKind kind;
   std::vector<domain::Clip> clips;
+  domain::AudioTrackState audio_state{};
 };
 
 // Neutral, fully decoded project data. It contains no codec, filesystem, or

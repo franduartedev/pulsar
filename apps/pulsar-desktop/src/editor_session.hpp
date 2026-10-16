@@ -262,6 +262,7 @@ public:
   void add_cross_dissolve_at_selected_edit();
   void remove_selected_clip_transition();
   [[nodiscard]] bool selected_clip_has_transition() const;
+  void set_track_audio_state(domain::TrackId track, domain::AudioTrackState state);
   // "Duplicar": a copy of the selected clip (or title) right after the original, on the same
   // track, with the same source range, gain, mute and fades. One undo step; the copy becomes the
   // selection. Throws DuplicateException{NoSpace} (nothing changes) when the room is taken.

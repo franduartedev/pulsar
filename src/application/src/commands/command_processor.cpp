@@ -46,6 +46,14 @@ void CommandProcessor::reorder_visual_track(domain::TrackId track_id, std::size_
   execute(ReorderVisualTrackCommand{track_id, visual_index});
 }
 
+void CommandProcessor::set_track_audio_state(domain::TrackId track_id,
+                                              domain::AudioTrackState state) {
+  domain::validate_audio_track_state(state);
+  const auto* track = document_.timeline().find_track(track_id);
+  if (track != nullptr && track->audio_state() == state) return;
+  execute(SetTrackAudioStateCommand{track_id, state});
+}
+
 void CommandProcessor::execute(Command command) {
   document_.ensure_new_edit_possible();
   const HistoryStateId before = document_.history_state_id();
@@ -374,7 +382,9 @@ void CommandProcessor::apply(ProjectDocument& document, const Command& command, 
           }
           ids.erase(found);
           ids.insert(ids.begin() + static_cast<std::ptrdiff_t>(concrete_command.visual_index),
-                     concrete_command.track_id);
+                      concrete_command.track_id);
+        } else if constexpr (std::is_same_v<CommandType, SetTrackAudioStateCommand>) {
+          timeline.set_track_audio_state(concrete_command.track_id, concrete_command.state);
         } else if constexpr (std::is_same_v<CommandType, AddClipCommand>) {
           bool promote_still_canvas = false;
           if (document.canvas_ && document.canvas_->provisional_still &&
@@ -510,7 +520,11 @@ Command CommandProcessor::build_inverse(const ProjectDocument& document, const C
           const auto found = std::find(ids.begin(), ids.end(), concrete_command.track_id);
           if (found == ids.end()) throw std::invalid_argument{"visual track is not in the stack"};
           return ReorderVisualTrackCommand{concrete_command.track_id,
-              static_cast<std::size_t>(found - ids.begin())};
+                                           static_cast<std::size_t>(found - ids.begin())};
+        } else if constexpr (std::is_same_v<CommandType, SetTrackAudioStateCommand>) {
+          const auto* track = document.timeline().find_track(concrete_command.track_id);
+          if (track == nullptr) throw std::invalid_argument{"track id does not exist in timeline"};
+          return SetTrackAudioStateCommand{concrete_command.track_id, track->audio_state()};
         } else if constexpr (std::is_same_v<CommandType, AddClipCommand>) {
           return RemoveClipCommand{concrete_command.clip.id()};
         } else if constexpr (std::is_same_v<CommandType, RemoveClipCommand>) {

@@ -623,7 +623,10 @@ AudioMixRenderResult AudioMixSession::render(domain::MediaTime timeline_position
       continue;
     }
     ++result.usable_contributors;
-    const auto gain = ClipGain::from_decibels(contributor.gain_db, contributor.muted);
+    const auto clip_gain = ClipGain::from_decibels(contributor.gain_db, contributor.muted);
+    const auto track_gain = ClipGain::from_decibels(contributor.track_gain_db, contributor.track_muted);
+    const ClipGain gain{clip_gain.linear * track_gain.linear,
+                        clip_gain.muted || track_gain.muted};
     auto& mixed = result.block.samples_mutable();
     const auto channels = static_cast<std::size_t>(format_.channel_count);
     if (!gain.muted) {

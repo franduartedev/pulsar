@@ -262,6 +262,9 @@ public:
   Q_INVOKABLE void cancelSelectedClipTransform();
   Q_INVOKABLE void addCrossDissolve();
   Q_INVOKABLE void removeSelectedTransition();
+  Q_INVOKABLE void adjustTrackGain(const QString& track_key, double delta_db);
+  Q_INVOKABLE void toggleTrackMute(const QString& track_key);
+  Q_INVOKABLE void toggleTrackSolo(const QString& track_key);
   Q_INVOKABLE void duplicateSelected();
   // ---- Drag & drop from the library. `lane` is the index of the timeline track under the
   // cursor, `pixel` the x inside the timeline area. The preview and the drop share one resolver,

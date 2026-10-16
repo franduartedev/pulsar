@@ -1,5 +1,6 @@
 #include <pulsar/application/commands/command_processor.hpp>
 #include <pulsar/application/audio/clip_gain.hpp>
+#include <pulsar/application/audio/audio_contributor_resolver.hpp>
 #include <pulsar/application/media/media_probe.hpp>
 #include <pulsar/application/playback/timeline_playback_coordinator.hpp>
 #include <pulsar/application/project/project_codec.hpp>
@@ -509,6 +510,38 @@ void invalid_clip_gain_is_rejected() {
   }
 }
 
+void track_audio_state_is_undoable_persistent_and_soloed_deterministically() {
+  ProjectDocument document;
+  CommandProcessor processor{document};
+  const auto video = processor.import_asset("media/av.mp4", FakeProbe{{audio_stream(4)}});
+  (void)processor.add_clip(video, TimeRange{time(0), time(2)}, time(0));
+  const auto audio_track = processor.add_track(TrackKind::Audio);
+  const auto audio = processor.import_asset("audio.wav", AudioOnlyProbe{});
+  (void)processor.add_clip(audio_track, audio, TimeRange{time(0), time(2)}, time(0));
+
+  const auto history = processor.undo_size();
+  processor.set_track_audio_state(document.video_track_id(), {-3.0, false, true});
+  processor.set_track_audio_state(audio_track, {-6.0, false, false});
+  const auto resolved = application::resolve_audio_contributors(
+      document.snapshot(), TimeRange{time(0), time(1)});
+  assert(resolved.contributors.size() == 2);
+  assert(resolved.contributors[0].track_gain_db == -3.0 && !resolved.contributors[0].track_muted);
+  assert(resolved.contributors[1].track_gain_db == -6.0 && resolved.contributors[1].track_muted);
+  assert(processor.undo_size() == history + 2);
+  assert(processor.undo());
+  assert(document.timeline().find_track(audio_track)->audio_state() == domain::AudioTrackState{});
+  assert(processor.redo());
+
+  const auto encoded = ProjectCodec::encode(document.snapshot());
+  assert(encoded.rfind("PULSAR_PROJECT 6\n", 0) == 0);
+  assert(encoded.find("TRACK_AUDIO") != std::string::npos);
+  const auto restored = ProjectDocument::restore(ProjectCodec::decode(encoded));
+  assert((restored.timeline().find_track(document.video_track_id())->audio_state() ==
+          domain::AudioTrackState{-3.0, false, true}));
+  assert((restored.timeline().find_track(audio_track)->audio_state() ==
+          domain::AudioTrackState{-6.0, false, false}));
+}
+
 void video_reimport_uses_video_track_occupancy_not_global_duration() {
   ProjectDocument document;
   CommandProcessor processor{document};
@@ -560,5 +593,6 @@ int main() {
   clip_gain_dsp_preserves_shape_and_timing();
   clip_properties_follow_edits_history_and_persistence();
   invalid_clip_gain_is_rejected();
+  track_audio_state_is_undoable_persistent_and_soloed_deterministically();
   video_reimport_uses_video_track_occupancy_not_global_duration();
 }

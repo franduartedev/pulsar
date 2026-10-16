@@ -221,9 +221,9 @@ Panel {
                                      color: lane.activeVisual ? Theme.accentDim : Theme.bgElevated
                                      border.width: lane.activeVisual ? 1 : 0; border.color: Theme.accent }
                          Rectangle { width: 3; anchors.left: parent.left; anchors.top: parent.top; anchors.bottom: parent.bottom; color: modelData.kind === "audio" ? Theme.waveformAudio : Theme.waveform; opacity: 0.85 }
-                         Text { x: 14; y: modelData.kind === "video" ? 7 : (parent.height - height) / 2
-                                text: pane.trackTitle(modelData.label); color: Theme.textPrimary; font.pixelSize: Theme.fontSizeS
-                                elide: Text.ElideRight; width: pane.gutterWidth - 20 }
+                          Text { x: 14; y: 7
+                                 text: pane.trackTitle(modelData.label) + ((modelData.kind === "audio" || modelData.primary) && Math.abs(modelData.gainDb) > 0.05 ? "  " + Number(modelData.gainDb).toFixed(0) + " dB" : ""); color: Theme.textPrimary; font.pixelSize: Theme.fontSizeS
+                                 elide: Text.ElideRight; width: pane.gutterWidth - 20 }
                          Text { visible: modelData.primary; x: 14; y: 27; text: modelData.visualIndex === 0 ? "Base" : "Principal"; color: Theme.textSecondary; font.pixelSize: Theme.fontSizeXS }
                          MouseArea {
                              id: headerMouse
@@ -231,7 +231,7 @@ Panel {
                              hoverEnabled: true; cursorShape: modelData.kind === "video" ? Qt.PointingHandCursor : Qt.ArrowCursor
                              onClicked: if (modelData.kind === "video") controller.selectVisualTrack(String(modelData.id))
                          }
-                         Row {
+                          Row {
                              visible: modelData.kind === "video" && !modelData.primary && (headerMouse.containsMouse || lane.activeVisual)
                              x: 12; y: parent.height - 22; z: 2; spacing: 3
                              Repeater {
@@ -252,7 +252,32 @@ Panel {
                                          z: 5; y: -24; width: hint.implicitWidth + 12; height: 20; radius: Theme.radiusS
                                          color: Theme.bgElevated; border.color: Theme.borderStrong
                                          Text { id: hint; anchors.centerIn: parent; text: actionButton.actionTip; color: Theme.textPrimary; font.pixelSize: Theme.fontSizeXS }
-                                     }
+                          }
+                          Row {
+                              visible: modelData.kind === "audio" || modelData.primary
+                              x: 12; y: parent.height - 24; z: 3; spacing: 3
+                              Repeater {
+                                  model: [
+                                      {label: "−", active: false, action: "down"},
+                                      {label: "M", active: modelData.muted, action: "mute"},
+                                      {label: "S", active: modelData.solo, action: "solo"},
+                                      {label: "+", active: false, action: "up"}
+                                  ]
+                                  delegate: Rectangle {
+                                      width: 20; height: 18; radius: Theme.radiusS
+                                      color: modelData.active ? Theme.accentDim : (audioMouse.containsMouse ? Theme.bgHover : Theme.bgInput)
+                                      border.width: 1; border.color: modelData.active ? Theme.accent : Theme.borderStrong
+                                      Text { anchors.centerIn: parent; text: modelData.label; color: modelData.active ? Theme.focus : Theme.textPrimary; font.pixelSize: Theme.fontSizeXS; font.bold: true }
+                                      MouseArea { id: audioMouse; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                                          onClicked: {
+                                              if (modelData.action === "mute") controller.toggleTrackMute(lane.trackKey)
+                                              else if (modelData.action === "solo") controller.toggleTrackSolo(lane.trackKey)
+                                              else controller.adjustTrackGain(lane.trackKey, modelData.action === "up" ? 1 : -1)
+                                          }
+                                      }
+                                  }
+                              }
+                          }
                                      MouseArea {
                                          id: actionMouse; anchors.fill: parent; hoverEnabled: true
                                          enabled: modelData.allowed; cursorShape: Qt.PointingHandCursor

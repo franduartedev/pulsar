@@ -17,7 +17,7 @@ namespace {
 
 void resolve_track(const ProjectSnapshot& snapshot, const domain::Track& track,
                    std::size_t track_order, domain::TimeRange requested,
-                   AudioContributorResolution& result) {
+                   bool any_solo, AudioContributorResolution& result) {
   for (const auto& clip : track.clips()) {
     if (!clip.timeline_range().overlaps(requested)) {
       continue;
@@ -41,8 +41,10 @@ void resolve_track(const ProjectSnapshot& snapshot, const domain::Track& track,
     result.contributors.push_back(
         {track.id(), track.kind(), track_order, clip.id(), clip.media_id(),
          asset->source_locator(), audio.stream_index, clip.timeline_range(), clip.source_range(),
-         std::nullopt, clip.audio_gain_db(), clip.muted(), audio.sample_rate,
-         audio.channel_count, audio.time_base, clip.fade_in(), clip.fade_out()});
+          std::nullopt, clip.audio_gain_db(), clip.muted(), audio.sample_rate,
+          audio.channel_count, audio.time_base, clip.fade_in(), clip.fade_out(),
+          track.audio_state().gain_db,
+          track.audio_state().muted || (any_solo && !track.audio_state().solo)});
   }
 }
 
@@ -55,17 +57,21 @@ AudioContributorResolution resolve_audio_contributors(const ProjectSnapshot& sna
   }
   AudioContributorResolution result;
   const auto& tracks = snapshot.timeline.tracks();
+  const bool any_solo = std::any_of(tracks.begin(), tracks.end(), [&](const auto& track) {
+    return (track.kind() == domain::TrackKind::Audio || track.id() == snapshot.video_track_id) &&
+           track.audio_state().solo;
+  });
 
   // Embedded program audio always precedes independent tracks in mix order.
   for (std::size_t index = 0; index < tracks.size(); ++index) {
     if (tracks[index].id() == snapshot.video_track_id &&
         tracks[index].kind() == domain::TrackKind::Video) {
-      resolve_track(snapshot, tracks[index], index, timeline_range, result);
+      resolve_track(snapshot, tracks[index], index, timeline_range, any_solo, result);
     }
   }
   for (std::size_t index = 0; index < tracks.size(); ++index) {
     if (tracks[index].kind() == domain::TrackKind::Audio) {
-      resolve_track(snapshot, tracks[index], index, timeline_range, result);
+      resolve_track(snapshot, tracks[index], index, timeline_range, any_solo, result);
     }
   }
   return result;

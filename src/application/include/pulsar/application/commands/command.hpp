@@ -7,6 +7,7 @@
 #include <pulsar/domain/timeline/title.hpp>
 #include <pulsar/domain/timeline/transition.hpp>
 #include <pulsar/domain/timeline/track_kind.hpp>
+#include <pulsar/domain/timeline/track.hpp>
 
 #include <variant>
 
@@ -29,6 +30,11 @@ struct RestoreEmptyVisualTrackCommand {
 struct ReorderVisualTrackCommand {
   domain::TrackId track_id;
   std::size_t visual_index; // bottom-to-top position
+};
+
+struct SetTrackAudioStateCommand {
+  domain::TrackId track_id;
+  domain::AudioTrackState state;
 };
 
 struct AddClipCommand {
@@ -120,7 +126,8 @@ struct AddTransitionCommand { domain::Transition transition; };
 struct RemoveTransitionCommand { domain::Transition transition; };
 
 using Command = std::variant<AddTrackCommand, RemoveTrackCommand, RestoreEmptyVisualTrackCommand,
-                             ReorderVisualTrackCommand, AddClipCommand, RemoveClipCommand, MoveClipCommand,
+                             ReorderVisualTrackCommand, SetTrackAudioStateCommand,
+                             AddClipCommand, RemoveClipCommand, MoveClipCommand,
                              TrimClipStartCommand, TrimClipEndCommand, SplitClipCommand,
                              SetClipAudioGainCommand, SetClipMutedCommand, SetClipFadesCommand,
                              SetClipVisualTransformCommand, RestoreClipCommand,

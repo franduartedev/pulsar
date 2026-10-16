@@ -202,12 +202,15 @@ std::string ProjectCodec::encode(const ProjectSnapshot& snapshot) {
     throw ProjectCodecError{error.what()};
   }
   bool has_visual_transforms = false;
+  bool has_audio_track_state = false;
   for (const auto& track : snapshot.timeline.tracks()) {
+    if (track.audio_state() != domain::AudioTrackState{}) has_audio_track_state = true;
     for (const auto& clip : track.clips()) {
       if (!clip.visual_transform().is_default()) has_visual_transforms = true;
     }
   }
   const bool needs_v6 = snapshot.visual_track_ids.size() > 1 || has_visual_transforms ||
+      has_audio_track_state ||
       !snapshot.transitions.empty() ||
       (snapshot.canvas && snapshot.canvas != legacy_project_canvas(snapshot));
   const std::size_t record_count = 1 + 1 + snapshot.timeline.tracks().size() + 1 +
@@ -238,7 +241,12 @@ std::string ProjectCodec::encode(const ProjectSnapshot& snapshot) {
   const auto tracks = sorted_tracks(snapshot.timeline);
   for (const auto* track : tracks) {
     output << "TRACK " << track->id().value() << ' '
-           << (track->kind() == domain::TrackKind::Video ? "VIDEO" : "AUDIO") << "\n";
+           << (track->kind() == domain::TrackKind::Video ? "VIDEO" : "AUDIO");
+    if (track->audio_state() != domain::AudioTrackState{}) {
+      output << " TRACK_AUDIO " << std::setprecision(17) << track->audio_state().gain_db << ' '
+             << (track->audio_state().muted ? 1 : 0) << ' ' << (track->audio_state().solo ? 1 : 0);
+    }
+    output << "\n";
   }
   output << "VIDEO_TRACK " << snapshot.video_track_id.value() << "\n";
   if (needs_v6) {
@@ -437,13 +445,26 @@ ProjectRestoreState ProjectCodec::decode(std::string_view bytes) {
         timeline = true;
         section = Section::Tracks;
       } else if (tokens[0].text == "TRACK") {
-        if (!timeline || (section != Section::Tracks && section != Section::VideoTrack) || tokens.size() != 3) parse_fail(line_number, "invalid TRACK");
+        if (!timeline || (section != Section::Tracks && section != Section::VideoTrack) ||
+            (tokens.size() != 3 && (!version6 || tokens.size() != 7 || tokens[3].text != "TRACK_AUDIO"))) {
+          parse_fail(line_number, "invalid TRACK");
+        }
         const auto id = domain::TrackId{unsigned_number(tokens[1], line_number, "track id")};
         domain::TrackKind kind;
         if (tokens[2].text == "VIDEO") kind = domain::TrackKind::Video;
         else if (tokens[2].text == "AUDIO") kind = domain::TrackKind::Audio;
         else parse_fail(line_number, "invalid track kind");
-        state.tracks.push_back(ProjectRestoreTrack{id, kind, {}});
+        domain::AudioTrackState audio_state;
+        if (tokens.size() == 7) {
+          audio_state.gain_db = double_number(tokens[4], line_number, "track audio gain");
+          const auto muted = unsigned_number(tokens[5], line_number, "track mute");
+          const auto solo = unsigned_number(tokens[6], line_number, "track solo");
+          if (muted > 1 || solo > 1) parse_fail(line_number, "invalid track audio flags");
+          audio_state.muted = muted != 0;
+          audio_state.solo = solo != 0;
+          domain::validate_audio_track_state(audio_state);
+        }
+        state.tracks.push_back(ProjectRestoreTrack{id, kind, {}, audio_state});
         section = Section::Tracks;
       } else if (tokens[0].text == "VIDEO_TRACK") {
         if (video_track || state.tracks.empty() || (section != Section::Tracks && section != Section::VideoTrack) || tokens.size() != 2) parse_fail(line_number, "invalid VIDEO_TRACK");

@@ -1,12 +1,27 @@
 #include <pulsar/domain/timeline/track.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <stdexcept>
 #include <utility>
 
 namespace pulsar::domain {
 
-Track::Track(TrackId id, TrackKind kind) : id_{id}, kind_{kind} {}
+void validate_audio_track_state(const AudioTrackState& state) {
+  if (!std::isfinite(state.gain_db) || state.gain_db < -60.0 || state.gain_db > 12.0) {
+    throw std::invalid_argument{"audio track gain must be within -60..12 dB"};
+  }
+}
+
+Track::Track(TrackId id, TrackKind kind, AudioTrackState audio_state)
+    : id_{id}, kind_{kind}, audio_state_{audio_state} {
+  validate_audio_track_state(audio_state_);
+}
+
+void Track::set_audio_state(AudioTrackState state) {
+  validate_audio_track_state(state);
+  audio_state_ = state;
+}
 
 void Track::insert_clip(Clip clip) {
   if (find_clip(clip.id()) != nullptr) {

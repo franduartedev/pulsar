@@ -121,7 +121,7 @@ ProjectDocument ProjectDocument::restore(const ProjectRestoreState& state) {
       designated_video_found = true;
     }
     max_track_id = std::max(max_track_id, restore_track.id.value());
-    domain::Track track{restore_track.id, restore_track.kind};
+    domain::Track track{restore_track.id, restore_track.kind, restore_track.audio_state};
     for (const auto& clip : restore_track.clips) {
       if (!clip_ids.insert(clip.id().value()).second) {
         throw std::invalid_argument{"duplicate clip id in project restore state"};

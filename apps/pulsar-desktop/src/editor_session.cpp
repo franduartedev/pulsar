@@ -700,6 +700,11 @@ void EditorSession::remove_selected_clip_transition() {
   synchronize_document_state();
 }
 
+void EditorSession::set_track_audio_state(domain::TrackId track, domain::AudioTrackState state) {
+  processor_.set_track_audio_state(track, state);
+  synchronize_document_state();
+}
+
 void EditorSession::duplicate_selected() {
   if (selected_title_.has_value()) {
     const auto* title = document_.find_title(*selected_title_);

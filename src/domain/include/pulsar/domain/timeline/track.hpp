@@ -10,9 +10,18 @@
 
 namespace pulsar::domain {
 
+struct AudioTrackState {
+  double gain_db{0.0};
+  bool muted{false};
+  bool solo{false};
+  friend bool operator==(const AudioTrackState&, const AudioTrackState&) = default;
+};
+
+void validate_audio_track_state(const AudioTrackState& state);
+
 class Track {
 public:
-  Track(TrackId id, TrackKind kind);
+  Track(TrackId id, TrackKind kind, AudioTrackState audio_state = {});
 
   [[nodiscard]] constexpr TrackId id() const noexcept {
     return id_;
@@ -25,6 +34,7 @@ public:
   [[nodiscard]] const std::vector<Clip>& clips() const noexcept {
     return clips_;
   }
+  [[nodiscard]] const AudioTrackState& audio_state() const noexcept { return audio_state_; }
 
   void insert_clip(Clip clip);
 
@@ -49,10 +59,12 @@ private:
   void set_clip_muted(ClipId id, bool muted);
   void set_clip_fades(ClipId id, MediaTime fade_in, MediaTime fade_out);
   void set_clip_visual_transform(ClipId id, VisualTransform transform);
+  void set_audio_state(AudioTrackState state);
 
   TrackId id_;
   TrackKind kind_;
   std::vector<Clip> clips_;
+  AudioTrackState audio_state_;
 };
 
 } // namespace pulsar::domain

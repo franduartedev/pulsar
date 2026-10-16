@@ -32,6 +32,8 @@ struct AudioContributor {
   domain::Rational time_base;
   domain::MediaTime fade_in{domain::MediaTime::zero()};
   domain::MediaTime fade_out{domain::MediaTime::zero()};
+  double track_gain_db{0.0};
+  bool track_muted{false};
 };
 
 struct UnavailableAudioContributor {

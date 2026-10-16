@@ -595,6 +595,11 @@ void DesktopController::publishTimeline() {
     value.insert("visualIndex", visual_index);
     value.insert("canRaise", !primary && visual_index < static_cast<int>(visual_ids.size()) - 1);
     value.insert("canLower", !primary && visual_index > 1);
+    if (source_track) {
+      value.insert("gainDb", source_track->audio_state().gain_db);
+      value.insert("muted", source_track->audio_state().muted);
+      value.insert("solo", source_track->audio_state().solo);
+    }
     value.insert("label", track.kind == pulsar::domain::TrackKind::Audio
                                ? QStringLiteral("AUDIO %1").arg(++audio_number)
                                : QStringLiteral("VIDEO %1").arg(video_numbers.at(track.id.value())));
@@ -1623,6 +1628,41 @@ void DesktopController::removeSelectedTransition() {
     logCause("cross dissolve remove failed", error);
     setError(QStringLiteral("No se pudo eliminar el fundido."));
   }
+}
+namespace {
+std::optional<pulsar::domain::TrackId> track_id_from_key(const QString& key) {
+  bool ok = false;
+  const auto value = key.toULongLong(&ok);
+  return ok ? std::optional{pulsar::domain::TrackId{value}} : std::nullopt;
+}
+}
+void DesktopController::adjustTrackGain(const QString& track_key, double delta_db) {
+  if (!active_session_ || !std::isfinite(delta_db)) return;
+  const auto id = track_id_from_key(track_key);
+  const auto* track = id ? active_session_->document().timeline().find_track(*id) : nullptr;
+  if (!track) return;
+  auto state = track->audio_state();
+  state.gain_db = std::clamp(state.gain_db + delta_db, -60.0, 12.0);
+  try { active_session_->set_track_audio_state(*id, state); clearError(); publishTimeline(); }
+  catch (const std::exception& error) { logCause("track gain failed", error); setError(QStringLiteral("No se pudo ajustar la pista.")); }
+}
+void DesktopController::toggleTrackMute(const QString& track_key) {
+  if (!active_session_) return;
+  const auto id = track_id_from_key(track_key);
+  const auto* track = id ? active_session_->document().timeline().find_track(*id) : nullptr;
+  if (!track) return;
+  auto state = track->audio_state(); state.muted = !state.muted;
+  try { active_session_->set_track_audio_state(*id, state); clearError(); publishTimeline(); }
+  catch (const std::exception& error) { logCause("track mute failed", error); setError(QStringLiteral("No se pudo silenciar la pista.")); }
+}
+void DesktopController::toggleTrackSolo(const QString& track_key) {
+  if (!active_session_) return;
+  const auto id = track_id_from_key(track_key);
+  const auto* track = id ? active_session_->document().timeline().find_track(*id) : nullptr;
+  if (!track) return;
+  auto state = track->audio_state(); state.solo = !state.solo;
+  try { active_session_->set_track_audio_state(*id, state); clearError(); publishTimeline(); }
+  catch (const std::exception& error) { logCause("track solo failed", error); setError(QStringLiteral("No se pudo aislar la pista.")); }
 }
 void DesktopController::duplicateSelected() {
   if (!active_session_) return;

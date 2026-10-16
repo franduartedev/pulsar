@@ -117,9 +117,12 @@ OfflineAudioRenderer::ContributorState& OfflineAudioRenderer::state_for(
   }
 
   const auto origin = source->stream_origin().value_or(domain::MediaTime::zero());
+  const auto clip_gain = ClipGain::from_decibels(contributor.gain_db, contributor.muted);
+  const auto track_gain = ClipGain::from_decibels(contributor.track_gain_db, contributor.track_muted);
   auto state = std::make_unique<ContributorState>(ContributorState{
       contributor, std::move(source), origin, {}, false, std::nullopt,
-      ClipGain::from_decibels(contributor.gain_db, contributor.muted), ClipFade{}, 0, 0, -1});
+      ClipGain{clip_gain.linear * track_gain.linear, clip_gain.muted || track_gain.muted},
+      ClipFade{}, 0, 0, -1});
   {
     const domain::FrameRate source_grid{state->source->sample_rate(), 1};
     state->fade = ClipFade::from_times(contributor.fade_in, contributor.fade_out,

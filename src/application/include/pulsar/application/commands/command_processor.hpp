@@ -28,6 +28,7 @@ public:
   [[nodiscard]] domain::TrackId add_track(domain::TrackKind kind);
   void remove_empty_visual_track(domain::TrackId track_id);
   void reorder_visual_track(domain::TrackId track_id, std::size_t visual_index);
+  void set_track_audio_state(domain::TrackId track_id, domain::AudioTrackState state);
 
   [[nodiscard]] domain::ClipId add_clip(domain::MediaId media_id,
                                          domain::TimeRange source_range,
