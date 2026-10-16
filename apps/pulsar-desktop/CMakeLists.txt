@@ -121,6 +121,7 @@ add_custom_command(TARGET pulsar_desktop POST_BUILD
 qt_import_qml_plugins(pulsar_desktop)
 
 if(PULSAR_BUILD_TESTS)
+find_package(Qt6 REQUIRED COMPONENTS Test)
 add_test(NAME pulsar.desktop.smoke
          COMMAND pulsar_desktop --smoke-exit-ms 250)
 set_tests_properties(pulsar.desktop.smoke
@@ -283,6 +284,7 @@ foreach(pair "safety|pulsar.desktop.safety" "shutdown|pulsar.desktop.shutdown" "
   add_test(NAME ${test_name} COMMAND ${target})
   set_tests_properties(${test_name} PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;PULSAR_RECOVERY_DIR=${CMAKE_CURRENT_BINARY_DIR}/recovery-${short}" TIMEOUT 300)
 endforeach()
+target_link_libraries(pulsar_desktop_polish_tests PRIVATE Qt6::Test)
 # The audition test needs the sound pack of the source tree (installed builds find it next to the binary).
 set_property(TEST pulsar.desktop.audition APPEND PROPERTY ENVIRONMENT "PULSAR_ASSETS_DIR=${CMAKE_SOURCE_DIR}/assets")
 endif()

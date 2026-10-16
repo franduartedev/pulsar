@@ -1571,7 +1571,9 @@ void DesktopController::updateSelectedClipTransform(double pos_x, double pos_y, 
     active_session_->update_clip_visual_transform(
         pulsar::domain::VisualTransform{pos_x, pos_y, scale, rotation_degrees, opacity});
     clearError();
-    clearProgram(has_video_media_ ? "loading" : "empty");
+    // Keep the currently presented frame alive while the composition worker
+    // catches up. Clearing previewSource here hides ViewerPane's pointer owner
+    // during the first move event, which cancels the real desktop gesture.
     publishTimeline();
   } catch (const std::exception& error) {
     logCause("transform interaction update failed", error);

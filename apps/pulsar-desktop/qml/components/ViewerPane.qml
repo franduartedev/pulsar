@@ -80,34 +80,41 @@ Item {
                 }
                 MouseArea {
                     id: moveArea
+                    objectName: "viewerMoveArea"
                     anchors.fill: parent
                     anchors.margins: 7
                     hoverEnabled: true
                     cursorShape: pressed ? Qt.ClosedHandCursor : Qt.SizeAllCursor
-                    drag.target: moveGhost
                     property real startX: 0
                     property real startY: 0
-                    onPressed: {
+                    property real pressViewerX: 0
+                    property real pressViewerY: 0
+                    onPressed: function(mouse) {
                         startX = controller.selectedClipPosX; startY = controller.selectedClipPosY
-                        moveGhost.x = 0; moveGhost.y = 0
+                        var point = mapToItem(pane, mouse.x, mouse.y)
+                        pressViewerX = point.x; pressViewerY = point.y
                         controller.beginSelectedClipTransform()
                     }
-                    onPositionChanged: if (drag.active) {
+                    onPositionChanged: function(mouse) {
+                        if (!pressed) return
+                        var point = mapToItem(pane, mouse.x, mouse.y)
+                        var dx = point.x - pressViewerX
+                        var dy = point.y - pressViewerY
                         var angle = clipBounds.rotation * Math.PI / 180
-                        var screenDx = Math.cos(angle) * moveGhost.x - Math.sin(angle) * moveGhost.y
-                        var screenDy = Math.sin(angle) * moveGhost.x + Math.cos(angle) * moveGhost.y
+                        var screenDx = Math.cos(angle) * dx - Math.sin(angle) * dy
+                        var screenDy = Math.sin(angle) * dx + Math.cos(angle) * dy
                         controller.updateSelectedClipTranslationFromViewer(startX, startY, screenDx, screenDy,
                             frame.paintedWidth, frame.paintedHeight,
                             controller.selectedClipScale, controller.selectedClipRotation, controller.selectedClipOpacity)
                     }
-                    onReleased: { moveGhost.x = 0; moveGhost.y = 0; controller.endSelectedClipTransform() }
-                    onCanceled: { moveGhost.x = 0; moveGhost.y = 0; controller.cancelSelectedClipTransform() }
-                    Item { id: moveGhost }
+                    onReleased: controller.endSelectedClipTransform()
+                    onCanceled: controller.cancelSelectedClipTransform()
                 }
                 Repeater {
                     model: [{sx: -1, sy: -1}, {sx: 1, sy: -1}, {sx: -1, sy: 1}, {sx: 1, sy: 1}]
                     delegate: Rectangle {
                         id: handle
+                        objectName: "viewerScaleHandle_" + sx + "_" + sy
                         required property var modelData
                         readonly property int sx: modelData.sx
                         readonly property int sy: modelData.sy
@@ -123,23 +130,35 @@ Item {
                         Behavior on scale { NumberAnimation { duration: Theme.motionFast } }
                         MouseArea {
                             id: handleMouse
+                            objectName: "viewerScaleMouse_" + parent.sx + "_" + parent.sy
                             anchors.fill: parent; anchors.margins: -6
                             hoverEnabled: true
                             cursorShape: parent.sx === parent.sy ? Qt.SizeFDiagCursor : Qt.SizeBDiagCursor
-                            drag.target: scaleGhost
                             property real startScale: 1
-                            onPressed: { startScale = controller.selectedClipScale; scaleGhost.x = 0; scaleGhost.y = 0; controller.beginSelectedClipTransform() }
-                            onPositionChanged: {
-                                if (!drag.active) return
-                                var fx = 1 + parent.sx * scaleGhost.x / Math.max(4, clipBounds.width / 2)
-                                var fy = 1 + parent.sy * scaleGhost.y / Math.max(4, clipBounds.height / 2)
+                            property real startWidth: 1
+                            property real startHeight: 1
+                            property real pressViewerX: 0
+                            property real pressViewerY: 0
+                            onPressed: function(mouse) {
+                                startScale = controller.selectedClipScale
+                                startWidth = clipBounds.width; startHeight = clipBounds.height
+                                var point = mapToItem(pane, mouse.x, mouse.y)
+                                pressViewerX = point.x; pressViewerY = point.y
+                                controller.beginSelectedClipTransform()
+                            }
+                            onPositionChanged: function(mouse) {
+                                if (!pressed) return
+                                var point = mapToItem(pane, mouse.x, mouse.y)
+                                var dx = point.x - pressViewerX
+                                var dy = point.y - pressViewerY
+                                var fx = 1 + parent.sx * dx / Math.max(4, startWidth / 2)
+                                var fy = 1 + parent.sy * dy / Math.max(4, startHeight / 2)
                                 var factor = Math.max(0.01, (fx + fy) / 2)
                                 controller.updateSelectedClipTransform(controller.selectedClipPosX, controller.selectedClipPosY,
                                     Math.max(0.01, Math.min(100, startScale * factor)), controller.selectedClipRotation, controller.selectedClipOpacity)
                             }
-                            onReleased: { scaleGhost.x = 0; scaleGhost.y = 0; controller.endSelectedClipTransform() }
-                            onCanceled: { scaleGhost.x = 0; scaleGhost.y = 0; controller.cancelSelectedClipTransform() }
-                            Item { id: scaleGhost }
+                            onReleased: controller.endSelectedClipTransform()
+                            onCanceled: controller.cancelSelectedClipTransform()
                         }
                     }
                 }
