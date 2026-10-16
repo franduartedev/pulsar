@@ -1322,6 +1322,27 @@ void DesktopController::separateSelectedAudio() {
   publishTimeline();
 }
 
+QString DesktopController::separateAudioHint() const {
+  if (!active_session_ || !active_session_->selected_clip())
+    return QStringLiteral("Seleccioná un clip de video con audio.");
+  const auto reason = active_session_->separate_audio_error(*active_session_->selected_clip());
+  if (!reason.has_value()) return QStringLiteral("Separar el audio del clip de video");
+  switch (*reason) {
+    case pulsar::desktop::SeparateAudioError::AlreadySilenced:
+      return QStringLiteral("El audio de este clip ya está silenciado o separado.");
+    case pulsar::desktop::SeparateAudioError::NoEmbeddedAudio:
+      return QStringLiteral("Este clip no tiene audio integrado.");
+    case pulsar::desktop::SeparateAudioError::AudioShorterThanClip:
+      return QStringLiteral("El audio del medio no cubre todo el recorte.");
+    case pulsar::desktop::SeparateAudioError::UnavailableAsset:
+      return QStringLiteral("El medio no está disponible.");
+    case pulsar::desktop::SeparateAudioError::NotAVideoTrackClip:
+    case pulsar::desktop::SeparateAudioError::UnknownClip:
+      return QStringLiteral("Seleccioná un clip de video con audio.");
+  }
+  return QStringLiteral("No se puede separar el audio de este clip.");
+}
+
 void DesktopController::selectTimelineClip(const QString& key) { if (!active_session_) return; if (key.isEmpty()) { active_session_->select_title(std::nullopt); active_session_->select_clip(std::nullopt); selected_visual_track_key_.clear(); } else { bool ok=false; auto value=key.toULongLong(&ok); if (ok && value) {
       active_session_->select_clip(pulsar::domain::ClipId{value});
       for (const auto& view : active_session_->timeline_views()) {

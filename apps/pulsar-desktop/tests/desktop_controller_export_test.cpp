@@ -51,6 +51,12 @@ int main(int argc, char** argv) {
 
   controller.openPath(QString::fromStdString(fixture.string()));
   if (!wait_until([&] { return controller.hasVideoMedia(); })) return 1;
+  const auto video_key = controller.timelineClips()->index(0, 0)
+      .data(TimelineClipListModel::ClipKeyRole).toString();
+  controller.selectTimelineClip(video_key);
+  if (!controller.canSeparateAudio()) return 1;
+  controller.separateSelectedAudio();
+  if (!controller.errorMessage().isEmpty() || controller.timelineClips()->rowCount() != 2) return 1;
   const bool dirty_before_export = controller.projectDirty();
   controller.exportProject(QString::fromStdString(cancelled_destination.string()));
   controller.cancelExport();

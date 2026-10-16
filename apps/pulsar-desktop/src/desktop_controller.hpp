@@ -110,6 +110,7 @@ class DesktopController final : public QObject {
   Q_PROPERTY(bool snapEnabled READ snapEnabled WRITE setSnapEnabled NOTIFY snapEnabledChanged)
   Q_PROPERTY(bool canSplit READ canSplit NOTIFY editActionStateChanged)
   Q_PROPERTY(bool canSeparateAudio READ canSeparateAudio NOTIFY editActionStateChanged)
+  Q_PROPERTY(QString separateAudioHint READ separateAudioHint NOTIFY editActionStateChanged)
   Q_PROPERTY(bool canUndo READ canUndo NOTIFY timelineChanged)
   Q_PROPERTY(bool canRedo READ canRedo NOTIFY timelineChanged)
   Q_PROPERTY(QVariantList soundLibrary READ soundLibrary NOTIFY soundLibraryChanged)
@@ -196,6 +197,7 @@ public:
     return active_session_ && active_session_->selected_clip().has_value() &&
            active_session_->can_separate_audio(*active_session_->selected_clip());
   }
+  [[nodiscard]] QString separateAudioHint() const;
   [[nodiscard]] bool canUndo() const { return active_session_ && active_session_->can_undo(); }
   [[nodiscard]] bool canRedo() const { return active_session_ && active_session_->can_redo(); }
   [[nodiscard]] QVariantList soundLibrary() const { return sound_library_; }

@@ -297,10 +297,11 @@ public:
   bool select_adjacent_clip(bool next);
   // Start of a clip on the timeline (for revealing it in a zoomed view).
   [[nodiscard]] std::optional<domain::MediaTime> clip_timeline_start(domain::ClipId clip) const;
-  // "Separar audio": the embedded audio of a VIDEO 1 clip becomes an ordinary
+  // "Separar audio": the embedded audio of a clip on any visual track becomes an ordinary
   // audio clip with exactly the same timeline start and source range (same
   // media, so sample-for-sample the same sound), and the video clip's embedded
   // audio is muted. Gain and mute state move with the audio. One undo/redo step.
+  [[nodiscard]] std::optional<SeparateAudioError> separate_audio_error(domain::ClipId video_clip) const;
   [[nodiscard]] bool can_separate_audio(domain::ClipId video_clip) const;
   [[nodiscard]] bool clip_has_audio(domain::ClipId clip) const;
   [[nodiscard]] domain::ClipId separate_audio(domain::ClipId video_clip);

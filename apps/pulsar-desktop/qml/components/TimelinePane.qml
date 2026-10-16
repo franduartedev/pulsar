@@ -78,7 +78,7 @@ Panel {
             spacing: 4
             Text { anchors.verticalCenter: parent.verticalCenter; text: "Timeline"; color: Theme.textPrimary; font.pixelSize: Theme.fontSizeL; font.bold: true; rightPadding: Theme.spaceM }
             ToolButton { glyph: "split"; text: pane.compactToolbar ? "" : "Cortar"; tip: "Cortar en el cabezal (S)"; enabled: controller.canSplit; onClicked: controller.splitSelectedClip() }
-            ToolButton { glyph: "audio"; text: pane.compactToolbar ? "" : "Separar audio"; tip: "Separar el audio del clip de video"; enabled: controller.canSeparateAudio; onClicked: controller.separateSelectedAudio() }
+            ToolButton { glyph: "audio"; text: pane.compactToolbar ? "" : "Separar audio"; tip: controller.separateAudioHint; enabled: controller.canSeparateAudio; onClicked: controller.separateSelectedAudio() }
             ToolButton { glyph: "trash"; text: pane.compactToolbar ? "" : "Borrar"; tip: "Borrar (Supr)"; enabled: controller.selectedClipKey.length > 0 || controller.selectedTitleKey.length > 0; onClicked: controller.deleteSelectedClip() }
             ToolButton { glyph: "duplicate"; text: pane.compactToolbar ? "" : "Duplicar"; tip: "Duplicar el clip o título seleccionado, justo después (Ctrl+D)"; enabled: controller.canDuplicate; onClicked: controller.duplicateSelected() }
             ToolButton { glyph: "title"; text: pane.compactToolbar ? "" : "Título"; tip: "Agregar un título en el cabezal (T)"; enabled: controller.hasMedia; onClicked: controller.addTitle() }

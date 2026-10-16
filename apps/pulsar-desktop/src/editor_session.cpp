@@ -915,7 +915,7 @@ static SeparablePlan plan_separation(const application::ProjectDocument& documen
   for (const auto& track : document.timeline().tracks()) {
     if (const auto* found = track.find_clip(clip_id)) {
       clip = found;
-       on_video_track = track.id() == document.video_track_id();
+      on_video_track = track.kind() == domain::TrackKind::Video;
       break;
     }
   }
@@ -941,13 +941,17 @@ bool EditorSession::clip_has_audio(domain::ClipId clip) const {
       (found->track_kind == domain::TrackKind::Audio || found->track_id == document_.video_track_id());
 }
 
-bool EditorSession::can_separate_audio(domain::ClipId video_clip) const {
+std::optional<SeparateAudioError> EditorSession::separate_audio_error(domain::ClipId video_clip) const {
   try {
     (void)plan_separation(document_, video_clip);
-    return true;
-  } catch (const SeparateAudioException&) {
-    return false;
+    return std::nullopt;
+  } catch (const SeparateAudioException& error) {
+    return error.code();
   }
+}
+
+bool EditorSession::can_separate_audio(domain::ClipId video_clip) const {
+  return !separate_audio_error(video_clip).has_value();
 }
 
 domain::ClipId EditorSession::separate_audio(domain::ClipId video_clip) {
@@ -958,6 +962,8 @@ domain::ClipId EditorSession::separate_audio(domain::ClipId video_clip) {
   const auto timeline_range = plan.clip->timeline_range();
   const auto start = plan.clip->timeline_start();
   const double gain_db = plan.clip->audio_gain_db();
+  const auto fade_in = plan.clip->fade_in();
+  const auto fade_out = plan.clip->fade_out();
 
   std::optional<domain::TrackId> audio_track;
   for (const auto& track : document_.timeline().tracks()) {
@@ -973,6 +979,9 @@ domain::ClipId EditorSession::separate_audio(domain::ClipId video_clip) {
     if (!audio_track.has_value()) audio_track = processor_.add_track(domain::TrackKind::Audio);
     audio_clip = processor_.add_clip(*audio_track, media, source_range, start);
     if (gain_db != 0.0) processor_.set_clip_audio_gain(audio_clip, gain_db);
+    if (fade_in > domain::MediaTime::zero() || fade_out > domain::MediaTime::zero()) {
+      processor_.set_clip_fades(audio_clip, fade_in, fade_out);
+    }
     processor_.set_clip_muted(video_clip, true);  // the embedded audio now lives on its own clip
   });
   selected_clip_ = audio_clip;

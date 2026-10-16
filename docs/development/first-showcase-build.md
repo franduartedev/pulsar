@@ -76,3 +76,27 @@ admits one active cache job, and timeline thumbnails still use one worker with a
 Final automated gate (2026-10-16): desktop 55/55, ASAN/UBSAN 41/41, including the
 FFmpeg integration, export, waveform, still-image, transition, title-parity, safety,
 shutdown, and 100-clip stress coverage.
+
+## Human polish fix 02
+
+The real Viewer interaction failure had two event-lifecycle causes. Move and scale
+were gated on `drag.active` from zero-size invisible drag targets, and the first
+interactive transform update cleared `previewSource`. That hid the QML item owning
+the pointer grab before subsequent move/release events. Viewer gestures now measure
+the pointer directly in stable Viewer coordinates and retain the presented frame
+until the asynchronously recomposed frame replaces it. A QML event-level test sends
+real press/move/release events through the body and all four handles, verifies a live
+frame replacement without losing the grab, and covers undo, redo, resize mapping,
+and inactive selection behavior.
+
+Waveform columns now render as a symmetric filled peak envelope around a distinct
+zero axis, using the larger absolute real extremum per column. Clip-wide
+normalization preserves relative peak shape while making quiet recordings legible;
+the existing asynchronous cache, one-active-job bound, and 16,384-column geometry
+cap are unchanged.
+
+`Separar audio` now accepts clips on every visual track, including VIDEO 2. It places
+the same media/source range on the first non-overlapping audio track (or creates one),
+copies gain and fades, and mutes the source clip in one grouped command. The v6
+representation remains ordinary clips plus the existing mute state, so undo/redo,
+save/reopen, preview, waveform generation, and export require no format change.

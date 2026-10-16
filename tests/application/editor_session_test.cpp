@@ -5,6 +5,7 @@
 #include "timeline_zoom.hpp"
 
 #include <pulsar/application/media/media_probe.hpp>
+#include <pulsar/application/audio/audio_contributor_resolver.hpp>
 #include <pulsar/application/playback/playback_worker.hpp>
 #include <pulsar/application/project/project_codec.hpp>
 #include <pulsar/domain/timeline/clip.hpp>
@@ -1233,6 +1234,57 @@ void separate_audio_reuses_or_adds_audio_tracks() {
   assert(audio_track_count(session) == 2);
 }
 
+// Auxiliary visual tracks are silent by design, but their source audio can be
+// detached into an ordinary audible track without changing timing or format.
+void separate_audio_from_video_2_is_synced_undoable_and_persistent() {
+  EditorSession session;
+  const auto media = session.processor().import_asset("overlay.mp4", SecondsProbe{20});
+  const auto video_2 = session.add_visual_track();
+  const auto source = TimeRange{secs(3), secs(11)};
+  const auto start = secs(5);
+  const auto video = session.processor().add_clip(video_2, media, source, start);
+  session.processor().set_clip_audio_gain(video, -4.0);
+  session.processor().set_clip_fades(video, secs(1), secs(2));
+  session.synchronize_document_state();
+  assert(session.can_separate_audio(video));
+
+  const auto audio = session.separate_audio(video);
+  const auto* video_clip = session.document().timeline().find_clip(video);
+  const auto* audio_clip = session.document().timeline().find_clip(audio);
+  assert(video_clip != nullptr && audio_clip != nullptr && video_clip->muted());
+  assert(audio_clip->timeline_start() == start && same_range(audio_clip->source_range(), source));
+  assert(same_range(audio_clip->timeline_range(), video_clip->timeline_range()));
+  assert(audio_clip->audio_gain_db() == -4.0);
+  assert(audio_clip->fade_in() == secs(1) && audio_clip->fade_out() == secs(2));
+  const auto audio_view = std::find_if(session.timeline_views().begin(), session.timeline_views().end(),
+      [&](const auto& view) { return view.id == audio; });
+  assert(audio_view != session.timeline_views().end() && audio_view->has_audio);
+
+  const auto contributors = application::resolve_audio_contributors(
+      session.document().snapshot(), video_clip->timeline_range());
+  assert(contributors.contributors.size() == 1);
+  assert(contributors.contributors.front().clip_id == audio);
+  assert(contributors.contributors.front().stream_index == 1);
+
+  assert(session.undo());
+  assert(session.document().timeline().find_clip(audio) == nullptr);
+  assert(!session.document().timeline().find_clip(video)->muted());
+  assert(session.redo());
+  assert(session.document().timeline().find_clip(audio) != nullptr);
+  assert(session.document().timeline().find_clip(video)->muted());
+
+  const auto bytes = application::ProjectCodec::encode(session.document().snapshot());
+  assert(bytes.rfind("PULSAR_PROJECT 6\n", 0) == 0);
+  EditorSession loaded(application::ProjectCodec::decode(bytes),
+      [](const std::filesystem::path&, int) {
+        return std::unique_ptr<application::PlaybackMediaWorker>{};
+      });
+  const auto* loaded_video = loaded.document().timeline().find_clip(video);
+  const auto* loaded_audio = loaded.document().timeline().find_clip(audio);
+  assert(loaded_video != nullptr && loaded_audio != nullptr && loaded_video->muted());
+  assert(loaded_audio->timeline_start() == start && same_range(loaded_audio->source_range(), source));
+}
+
 void separate_audio_refusals_leave_no_trace() {
   EditorSession session;
   const auto with_audio = session.processor().import_asset("a.mp4", SecondsProbe{10});
@@ -1796,6 +1848,7 @@ int main() {
   separate_audio_creates_synced_clip_as_one_undo_step();
   separate_audio_persists();
   separate_audio_reuses_or_adds_audio_tracks();
+  separate_audio_from_video_2_is_synced_undoable_and_persistent();
   separate_audio_refusals_leave_no_trace();
   grouped_edit_rolls_back_and_trims_whole_groups();
   wheel_zoom_keeps_the_anchor_time_under_the_cursor();

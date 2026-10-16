@@ -189,10 +189,29 @@ int main(int argc, char** argv) {
   {
     const auto key = controller.timelineClips()->index(0, 0).data(TimelineClipListModel::ClipKeyRole).toString();
     controller.selectTimelineClip(key);
-    REQUIRE(36, controller.canSeparateAudio());
+    controller.addVisualTrack();
+    QString video_2;
+    for (const auto& item : controller.timelineTracks()) {
+      const auto track = item.toMap();
+      if (track.value("label").toString() == QStringLiteral("VIDEO 2"))
+        video_2 = track.value("id").toString();
+    }
+    REQUIRE(36, !video_2.isEmpty());
+    controller.selectTimelineClip(key);
+    controller.moveSelectedClipToVisualTrack(video_2);
+    REQUIRE(47, controller.errorMessage().isEmpty() && controller.canSeparateAudio());
     const int before = clips(controller);
     controller.separateSelectedAudio();
     REQUIRE(37, clips(controller) == before + 1 && controller.errorMessage().isEmpty());
+    bool detached_waveform_ready = false;
+    for (int row = 0; row < controller.timelineClips()->rowCount(); ++row) {
+      const auto index = controller.timelineClips()->index(row, 0);
+      if (index.data(TimelineClipListModel::ClipKeyRole).toString() == controller.selectedClipKey()) {
+        detached_waveform_ready = index.data(TimelineClipListModel::AudioTrackRole).toBool() &&
+                                  index.data(TimelineClipListModel::HasAudioRole).toBool();
+      }
+    }
+    REQUIRE(48, detached_waveform_ready);               // ClipBlock will request/render its waveform
     REQUIRE(38, !controller.canSeparateAudio());          // selection moved to the new audio clip
     controller.selectTimelineClip(key);
     REQUIRE(39, !controller.canSeparateAudio());          // the video clip is now silenced
