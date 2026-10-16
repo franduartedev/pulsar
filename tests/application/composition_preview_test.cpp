@@ -74,13 +74,15 @@ int main() {
   auto gate = std::make_shared<Gate>();
   auto started = gate->started.get_future();
   application::AsyncCompositionPreview preview{std::make_unique<Factory>(gate)};
-  preview.configure(snapshot());
+  auto initial = snapshot();
+  initial.document_generation = 41;
+  preview.configure(initial);
   preview.request(t(0));
   assert(started.wait_for(std::chrono::seconds{10}) == std::future_status::ready);
   // Real decode is blocked, but editorial changes and request replacement remain responsive.
   preview.invalidate();
   preview.request(t(4));
-  preview.configure(snapshot());
+  preview.configure(initial);
   preview.request(t(2));
   preview.request(t(3));
   preview.request(t(1));
@@ -88,6 +90,7 @@ int main() {
   gate->release.set_value();
   auto result = await(preview);
   assert(!result.error && result.timeline_time == t(1));
+  assert(result.project_revision == 41 && result.preview_generation > 0 && result.request_id > 0);
   // Upper clip uses source T+2. No frame from the obsolete T=0/2/3/4 can escape.
   assert(result.surface && result.surface->pixels[0] == 30);
   assert(result.render_metrics.peak_active_decoders == 2);
@@ -118,11 +121,13 @@ int main() {
   // Preview and export share exact pixels, but only export validates all
   // participating media across the entire timeline.
   auto available = snapshot();
+  available.document_generation = 77;
   available.canvas = application::effective_project_canvas(available);
   preview.configure(available);
   preview.request(t(3));
   result = await(preview);
   assert(!result.error && result.surface && result.surface->pixels[0] == 50);
+  assert(result.project_revision == 77);
   Factory export_factory{gate};
   auto plan = ex::ExportPlan::build(available);
   ex::OfflineVideoRenderer export_renderer{plan, export_factory};

@@ -12,8 +12,9 @@ public:
                                     const QSize& requestedSize) override;
   void setImage(QImage image);
   void clear();
+  [[nodiscard]] QImage image() const;
 
 private:
-  QMutex mutex_;
+  mutable QMutex mutex_;
   QImage image_;
 };

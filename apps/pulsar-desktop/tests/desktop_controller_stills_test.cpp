@@ -120,6 +120,27 @@ int main(int argc, char** argv) {
   REQUIRE(9, wait_until([&] { return controller.viewerState() == QStringLiteral("frame"); }));
   shown = provider.requestImage(QStringLiteral("current"), &size, {});
   REQUIRE(10, shown.width() == 640 && shown.height() == 360);            // still the same picture, 3.5 s later
+
+  // A transformed still must route through the authoritative compositor even
+  // in a one-track project. The resulting project-canvas pixels expose black
+  // background outside the moved/scaled picture; reset returns to the direct
+  // identity path without changing the canvas contract.
+  controller.selectTimelineClip(controller.timelineClips()->index(1, 0).data(TimelineClipListModel::ClipKeyRole).toString());
+  controller.setSelectedClipTransform(0.20, 0.10, 0.45, 0.0, 1.0);
+  REQUIRE(90, wait_until([&] {
+    return controller.displayedPreviewProjectRevision() == controller.projectRevision() &&
+           !provider.image().isNull() && provider.image().width() == 320;
+  }));
+  const auto transformed_still = provider.image();
+  REQUIRE(91, transformed_still.width() == 320 && transformed_still.height() == 180 &&
+                  transformed_still.pixelColor(0, 0).red() < 16 &&
+                  transformed_still.pixelColor(0, 0).green() < 16 &&
+                  transformed_still.pixelColor(0, 0).blue() < 16);
+  controller.resetSelectedClipTransform();
+  REQUIRE(92, wait_until([&] {
+    return controller.displayedPreviewProjectRevision() == controller.projectRevision() &&
+           !provider.image().isNull();
+  }));
   controller.seekNormalized(11.0 / 14.0);
   REQUIRE(11, wait_until([&] { return controller.viewerState() == QStringLiteral("frame"); }));
   shown = provider.requestImage(QStringLiteral("current"), &size, {});

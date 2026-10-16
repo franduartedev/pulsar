@@ -308,7 +308,11 @@ int main(int argc, char** argv) {
   auto* splitter = find_quick_item(main_window->contentItem(), QStringLiteral("workspaceSplitter"));
   auto* split_mouse = find_quick_item(main_window->contentItem(), QStringLiteral("workspaceSplitMouse"));
   auto* viewer_pane = find_quick_item(main_window->contentItem(), QStringLiteral("viewerPane"));
-  REQUIRE(72, splitter != nullptr && split_mouse != nullptr && viewer_pane != nullptr);
+  auto* media_panel = find_quick_item(main_window->contentItem(), QStringLiteral("mediaPanel"));
+  auto* inspector_panel = find_quick_item(main_window->contentItem(), QStringLiteral("inspectorPanel"));
+  auto* monitor = find_quick_item(main_window->contentItem(), QStringLiteral("monitorModule"));
+  REQUIRE(72, splitter != nullptr && split_mouse != nullptr && viewer_pane != nullptr &&
+                  media_panel != nullptr && inspector_panel != nullptr && monitor != nullptr);
 
   const double split_before = prop_real(main_window, "timelineHeight");
   const double viewer_before = viewer_pane->height();
@@ -351,7 +355,7 @@ int main(int argc, char** argv) {
   auto* main_overlay = find_quick_item(main_window->contentItem(),
                                        QStringLiteral("viewerInteractionOverlay"));
   REQUIRE(84, main_overlay != nullptr);
-  std::fprintf(stdout, "\nscreen, timeline_h, viewer_w, viewer_h, canvas_w, canvas_h, lateral_bar\n");
+  std::fprintf(stdout, "\nscreen, content_w, content_h, left_w, right_w, central_w, timeline_h, viewer_w, viewer_h, canvas_w, canvas_h, lateral_bar\n");
   const QSize screens[] = {QSize{1280, 720}, QSize{1280, 800}, QSize{1366, 768},
                            QSize{1680, 1050}, QSize{1920, 1080}};
   for (const auto& size : screens) {
@@ -361,8 +365,10 @@ int main(int argc, char** argv) {
     const double ch = prop_real(main_overlay, "canvasHeight");
     const double vw = main_overlay->width();
     const double vh = main_overlay->height();
-    std::fprintf(stdout, "%dx%d, %.0f, %.0f, %.0f, %.0f, %.0f, %.0f\n",
-                 size.width(), size.height(), prop_real(main_window, "timelineHeight"),
+    std::fprintf(stdout, "%dx%d, %.0f, %.0f, %.0f, %.0f, %.0f, %.0f, %.0f, %.0f, %.0f, %.0f, %.0f\n",
+                 size.width(), size.height(), main_window->contentItem()->width(),
+                 main_window->contentItem()->height(), media_panel->width(), inspector_panel->width(),
+                 monitor->width(), prop_real(main_window, "timelineHeight"),
                  vw, vh, cw, ch, std::max(0.0, (vw - cw) / 2.0));
     REQUIRE(85, std::abs(cw / std::max(1.0, ch) - 16.0 / 9.0) < 0.02);
     REQUIRE(86, cw <= vw + 2.0 && ch <= vh + 2.0);

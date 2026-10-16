@@ -45,6 +45,25 @@ RgbaSurface black_surface(int width, int height) {
   return output;
 }
 
+VisualLayerGeometry visual_layer_geometry(int source_width, int source_height,
+                                          int canvas_width, int canvas_height,
+                                          const domain::VisualTransform& transform) {
+  if (canvas_width <= 0 || canvas_height <= 0) {
+    throw std::invalid_argument{"invalid visual canvas geometry"};
+  }
+  domain::validate_visual_transform(transform);
+  const auto fitted = fit_geometry(source_width, source_height, canvas_width, canvas_height);
+  if (fitted.scaled_width <= 0 || fitted.scaled_height <= 0) {
+    throw std::invalid_argument{"invalid visual source geometry"};
+  }
+  return VisualLayerGeometry{
+      static_cast<double>(canvas_width) * (0.5 + transform.position_x),
+      static_cast<double>(canvas_height) * (0.5 + transform.position_y),
+      static_cast<double>(fitted.scaled_width) * transform.scale,
+      static_cast<double>(fitted.scaled_height) * transform.scale,
+      transform.rotation_degrees};
+}
+
 void composite_opaque_layer(RgbaSurface& canvas, const RgbaSurface& source, FitGeometry geometry) {
   validate_surface(canvas);
   validate_surface(source);
@@ -115,13 +134,13 @@ void composite_transformed_layer(RgbaSurface& canvas, const RgbaSurface& fitted,
     throw std::invalid_argument{"invalid transformed layer opacity"};
   }
   const double scale = transform.scale <= 0.0 ? 1.0 : transform.scale;
+  const auto layer_geometry = visual_layer_geometry(
+      fitted.width, fitted.height, canvas.width, canvas.height, transform);
   const double radians = transform.rotation_degrees * 3.14159265358979323846 / 180.0;
   const double cos_a = std::cos(radians);
   const double sin_a = std::sin(radians);
-  const double cx = static_cast<double>(canvas.width) * 0.5;
-  const double cy = static_cast<double>(canvas.height) * 0.5;
-  const double ox = transform.position_x * static_cast<double>(canvas.width);
-  const double oy = transform.position_y * static_cast<double>(canvas.height);
+  const double cx = layer_geometry.center_x;
+  const double cy = layer_geometry.center_y;
   const double fw = static_cast<double>(fitted.width);
   const double fh = static_cast<double>(fitted.height);
 
@@ -130,10 +149,10 @@ void composite_transformed_layer(RgbaSurface& canvas, const RgbaSurface& fitted,
   // and bilinear edge tests below remain the pixel authority; this changes no
   // sampling math, but avoids scanning an entire canvas for a small overlay.
   const auto transformed_x = [&](double x, double y) {
-    return cx + ox + scale * (cos_a * x + sin_a * y);
+    return cx + scale * (cos_a * x + sin_a * y);
   };
   const auto transformed_y = [&](double x, double y) {
-    return cy + oy + scale * (-sin_a * x + cos_a * y);
+    return cy + scale * (-sin_a * x + cos_a * y);
   };
   const double half_w = fw * 0.5;
   const double half_h = fh * 0.5;
@@ -151,9 +170,9 @@ void composite_transformed_layer(RgbaSurface& canvas, const RgbaSurface& fitted,
 
   for (int dy = first_y; dy < last_y; ++dy) {
     auto* dst_row = canvas.pixels.data() + static_cast<std::size_t>(dy) * canvas.stride_bytes;
-    const double y_prime = (static_cast<double>(dy) + 0.5 - cy - oy);
+    const double y_prime = (static_cast<double>(dy) + 0.5 - cy);
     for (int dx = first_x; dx < last_x; ++dx) {
-      const double x_prime = (static_cast<double>(dx) + 0.5 - cx - ox);
+      const double x_prime = (static_cast<double>(dx) + 0.5 - cx);
       // Inverse clockwise rotation, then inverse scale, back to fitted edge coords.
       const double x_local = (cos_a * x_prime - sin_a * y_prime) / scale;
       const double y_local = (sin_a * x_prime + cos_a * y_prime) / scale;

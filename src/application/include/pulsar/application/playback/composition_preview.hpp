@@ -13,6 +13,12 @@ struct CompositionPreviewResult {
   std::shared_ptr<const composition::RgbaSurface> surface;
   std::optional<std::string> error;
   exporting::OfflineVideoRenderMetrics render_metrics;
+  // Deterministic correlation identity. project_revision is the immutable
+  // ProjectSnapshot generation; preview_generation invalidates all prior work;
+  // request_id identifies the concrete render request within that generation.
+  std::uint64_t project_revision{0};
+  std::uint64_t preview_generation{0};
+  std::uint64_t request_id{0};
 };
 
 struct CompositionPreviewMetrics {

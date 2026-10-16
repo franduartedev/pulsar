@@ -158,6 +158,7 @@ private:
   std::function<bool()> is_cancelled_;
   std::int64_t next_frame_index_{0};
   OfflineVideoRenderMetrics metrics_;
+  bool debug_plan_logged_{false};
 };
 
 } // namespace pulsar::application::exporting

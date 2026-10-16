@@ -56,6 +56,8 @@ class DesktopController final : public QObject {
   Q_PROPERTY(QString metadata READ metadata NOTIFY mediaChanged)
   Q_PROPERTY(QString errorMessage READ errorMessage NOTIFY errorChanged)
   Q_PROPERTY(QString previewSource READ previewSource NOTIFY previewChanged)
+  Q_PROPERTY(qulonglong projectRevision READ projectRevision NOTIFY timelineChanged)
+  Q_PROPERTY(qulonglong displayedPreviewProjectRevision READ displayedPreviewProjectRevision NOTIFY previewChanged)
   Q_PROPERTY(QString viewerState READ viewerState NOTIFY previewChanged)
   Q_PROPERTY(QString positionText READ positionText NOTIFY positionChanged)
   Q_PROPERTY(QString durationText READ durationText NOTIFY mediaChanged)
@@ -130,6 +132,12 @@ public:
   [[nodiscard]] QString metadata() const { return metadata_; }
   [[nodiscard]] QString errorMessage() const { return error_message_; }
   [[nodiscard]] QString previewSource() const { return preview_source_; }
+  [[nodiscard]] qulonglong projectRevision() const noexcept {
+    return active_session_ ? active_session_->document().document_generation() : 0;
+  }
+  [[nodiscard]] qulonglong displayedPreviewProjectRevision() const noexcept {
+    return displayed_preview_project_revision_;
+  }
   [[nodiscard]] QString viewerState() const { return viewer_state_; }
   [[nodiscard]] QString positionText() const { return position_text_; }
   [[nodiscard]] QString durationText() const { return duration_text_; }
@@ -490,7 +498,7 @@ private:
   double timeline_zoom_{1.0};
   double timeline_scroll_{0.0};
   double waveform_density_{1.0};
-  std::optional<VisualIdentity> displayed_identity_; std::uint64_t preview_revision_{0}; std::uint64_t stale_visual_frames_{0}; std::uint64_t displayed_frames_{0}; std::uint64_t visual_misses_{0}; std::uint64_t seek_count_{0}; std::uint64_t read_count_{0}; std::chrono::nanoseconds last_conversion_time_{0};
+  std::optional<VisualIdentity> displayed_identity_; std::uint64_t preview_revision_{0}; std::uint64_t displayed_preview_project_revision_{0}; std::uint64_t stale_visual_frames_{0}; std::uint64_t displayed_frames_{0}; std::uint64_t visual_misses_{0}; std::uint64_t seek_count_{0}; std::uint64_t read_count_{0}; std::chrono::nanoseconds last_conversion_time_{0};
   // Bounded D3 diagnostics. Single-writer (GUI/control thread); no locks.
   std::uint64_t worker_construction_count_{0};
   std::uint64_t conversion_count_{0};

@@ -8,6 +8,7 @@
 #include <QQmlContext>
 #include <QQmlEngine>
 #include <QQuickItem>
+#include <QQuickItemGrabResult>
 #include <QQuickWindow>
 #include <QTest>
 #include <QTimer>
@@ -50,6 +51,18 @@ QQuickItem* find_quick_item(QQuickItem* root, const QString& name) {
     if (auto* found = find_quick_item(child, name)) return found;
   }
   return nullptr;
+}
+QRect visible_pixel_bounds(const QImage& image) {
+  int left = image.width(), top = image.height(), right = -1, bottom = -1;
+  for (int y = 0; y < image.height(); ++y) {
+    for (int x = 0; x < image.width(); ++x) {
+      const auto pixel = image.pixelColor(x, y);
+      if (pixel.red() + pixel.green() + pixel.blue() < 48) continue;
+      left = std::min(left, x); top = std::min(top, y);
+      right = std::max(right, x); bottom = std::max(bottom, y);
+    }
+  }
+  return right >= left && bottom >= top ? QRect{QPoint{left, top}, QPoint{right, bottom}} : QRect{};
 }
 } // namespace
 
@@ -117,8 +130,9 @@ int main(int argc, char** argv) {
   auto* overlay = find_quick_item(viewer, QStringLiteral("viewerInteractionOverlay"));
   auto* canvas = find_quick_item(viewer, QStringLiteral("viewerCanvasRect"));
   auto* bounds = find_quick_item(viewer, QStringLiteral("viewerSelectionBounds"));
+  auto* frame = find_quick_item(viewer, QStringLiteral("viewerFrame"));
   REQUIRE(192, interaction != nullptr && overlay != nullptr && canvas != nullptr && bounds != nullptr &&
-                   interaction->isVisible() && bounds->isVisible());
+                   frame != nullptr && interaction->isVisible() && bounds->isVisible());
   const auto bounds_center = [&] {
     return bounds->mapToScene(QPointF{bounds->width() / 2.0, bounds->height() / 2.0});
   };
@@ -150,8 +164,30 @@ int main(int argc, char** argv) {
   }));
   REQUIRE(196, std::abs(bounds_origin().x() - origin_before_move.x() - 100.0) < 0.1 &&
                    std::abs(bounds_origin().y() - origin_before_move.y() - 50.0) < 0.1);
-  REQUIRE(199, wait_until([&] { return controller.previewSource() != source_before_move; }) &&
-                   interaction->property("pressed").toBool() && interaction->isVisible());
+  REQUIRE(199, wait_until([&] {
+    return !controller.previewSource().isEmpty() && controller.previewSource() != source_before_move &&
+           controller.displayedPreviewProjectRevision() == controller.projectRevision();
+  }) && interaction->property("pressed").toBool() && interaction->isVisible());
+
+  // Pixel truth, not only model/bounds truth: the production composition frame
+  // is black where the translated source no longer covers the canvas, and its
+  // coloured bounds agree with the shared selection geometry.
+  const auto moved_image = provider->image();
+  REQUIRE(237, !moved_image.isNull() && moved_image.pixelColor(0, 0).red() < 16 &&
+                   moved_image.pixelColor(moved_image.width() / 2, moved_image.height() / 2).red() > 128);
+  const auto moved_pixels = visible_pixel_bounds(moved_image);
+  const auto moved_geometry = controller.selectedClipVisualGeometry();
+  const int expected_left = std::clamp(static_cast<int>(std::floor(
+      (moved_geometry.value("centerX").toDouble() - moved_geometry.value("width").toDouble() / 2.0) * moved_image.width())), 0, moved_image.width() - 1);
+  const int expected_top = std::clamp(static_cast<int>(std::floor(
+      (moved_geometry.value("centerY").toDouble() - moved_geometry.value("height").toDouble() / 2.0) * moved_image.height())), 0, moved_image.height() - 1);
+  REQUIRE(238, std::abs(moved_pixels.left() - expected_left) <= 2 &&
+                   std::abs(moved_pixels.top() - expected_top) <= 2);
+
+  // The actual QML Image item has loaded those authoritative pixels too.
+  auto moved_grab = frame->grabToImage();
+  REQUIRE(239, moved_grab && wait_until([&] { return !moved_grab->image().isNull(); }) &&
+                   moved_grab->image().pixelColor(1, 1).red() < 24);
   QTest::mouseRelease(&viewer_window, Qt::LeftButton, Qt::NoModifier,
                       move_start + QPoint{100, 50});
   controller.undoEdit();
@@ -181,6 +217,7 @@ int main(int argc, char** argv) {
       {-1, -1, {-40, -30}, true}, {1, -1, {-40, 30}, false},
       {-1, 1, {-40, 30}, true}, {1, 1, {-40, -30}, false}}};
   int scale_step = 210;
+  bool scale_pixels_checked = false;
   for (const auto& scale_case : scale_cases) {
     controller.setSelectedClipTransform(0.0, 0.0, 0.60, 0.0, 1.0);
     REQUIRE(scale_step++, wait_until([&] { return std::abs(controller.selectedClipScale() - 0.60) < 1e-9; }));
@@ -204,6 +241,27 @@ int main(int argc, char** argv) {
                               (scale_case.grows ? bounds->width() > old_width : bounds->width() < old_width));
     QTest::mouseRelease(&viewer_window, Qt::LeftButton, Qt::NoModifier,
                         start + scale_case.delta);
+    if (!scale_pixels_checked) {
+      REQUIRE(232, wait_until([&] {
+        return !controller.previewSource().isEmpty() &&
+               controller.displayedPreviewProjectRevision() == controller.projectRevision();
+      }));
+      const auto scaled_image = provider->image();
+      const auto scaled_pixels = visible_pixel_bounds(scaled_image);
+      const auto scaled_geometry = controller.selectedClipVisualGeometry();
+      const int expected_width = static_cast<int>(std::llround(
+          scaled_geometry.value("width").toDouble() * scaled_image.width()));
+      const int expected_height = static_cast<int>(std::llround(
+          scaled_geometry.value("height").toDouble() * scaled_image.height()));
+      REQUIRE(233, !scaled_pixels.isEmpty() &&
+                       std::abs(scaled_pixels.width() - expected_width) <= 3 &&
+                       std::abs(scaled_pixels.height() - expected_height) <= 3 &&
+                       scaled_image.pixelColor(0, 0).red() < 16);
+      auto scaled_grab = frame->grabToImage();
+      REQUIRE(234, scaled_grab && wait_until([&] { return !scaled_grab->image().isNull(); }) &&
+                       scaled_grab->image().pixelColor(1, 1).red() < 24);
+      scale_pixels_checked = true;
+    }
     controller.undoEdit();
     REQUIRE(scale_step++, std::abs(controller.selectedClipScale() - 0.60) < 1e-9);
   }

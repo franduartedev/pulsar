@@ -27,3 +27,8 @@ void PreviewImageProvider::clear() {
   QMutexLocker lock{&mutex_};
   image_ = QImage{};
 }
+
+QImage PreviewImageProvider::image() const {
+  QMutexLocker lock{&mutex_};
+  return image_;
+}

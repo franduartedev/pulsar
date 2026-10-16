@@ -22,6 +22,7 @@
 #include <pulsar/media/ffmpeg/ffmpeg_offline_audio_source.hpp>
 #include <pulsar/media/ffmpeg/ffmpeg_export_media_writer.hpp>
 #include <pulsar/application/export/export_job.hpp>
+#include <pulsar/application/composition/visual_compositor.hpp>
 #if defined(PULSAR_HAS_QT_AUDIO)
 #include <pulsar/media/qt_audio/qt_audio_output.hpp>
 #endif
@@ -1529,18 +1530,14 @@ QVariantMap DesktopController::selectedClipVisualGeometry() const {
   const auto asset = active_session_->document().find_asset(clip->media_id());
   if (!asset || !asset->has_video()) return result;
   const auto& canvas = *active_session_->document().canvas();
-  const double source_aspect = static_cast<double>(asset->metadata().width) / asset->metadata().height;
-  const double canvas_aspect = static_cast<double>(canvas.width) / canvas.height;
-  double fitted_width = 1.0;
-  double fitted_height = 1.0;
-  if (source_aspect > canvas_aspect) fitted_height = canvas_aspect / source_aspect;
-  else fitted_width = source_aspect / canvas_aspect;
   const auto& transform = clip->visual_transform();
-  result.insert(QStringLiteral("centerX"), 0.5 + transform.position_x);
-  result.insert(QStringLiteral("centerY"), 0.5 + transform.position_y);
-  result.insert(QStringLiteral("width"), fitted_width * transform.scale);
-  result.insert(QStringLiteral("height"), fitted_height * transform.scale);
-  result.insert(QStringLiteral("rotation"), transform.rotation_degrees);
+  const auto geometry = pulsar::application::composition::visual_layer_geometry(
+      asset->metadata().width, asset->metadata().height, canvas.width, canvas.height, transform);
+  result.insert(QStringLiteral("centerX"), geometry.center_x / canvas.width);
+  result.insert(QStringLiteral("centerY"), geometry.center_y / canvas.height);
+  result.insert(QStringLiteral("width"), geometry.width / canvas.width);
+  result.insert(QStringLiteral("height"), geometry.height / canvas.height);
+  result.insert(QStringLiteral("rotation"), geometry.rotation_degrees);
   return result;
 }
 double DesktopController::viewerCanvasAspectRatio() const {
@@ -1571,6 +1568,10 @@ void DesktopController::setSelectedClipTransform(double pos_x, double pos_y, dou
     active_session_->set_clip_visual_transform(
         *active_session_->selected_clip(),
         pulsar::domain::VisualTransform{pos_x, pos_y, scale, rotation_degrees, opacity});
+#ifndef NDEBUG
+    qInfo().noquote() << "preview_pipeline transform_commit projectRevision="
+                      << active_session_->document().document_generation();
+#endif
     clearError();
     clearProgram(has_video_media_ ? "loading" : "empty");
     publishTimeline();
@@ -1606,6 +1607,10 @@ void DesktopController::updateSelectedClipTransform(double pos_x, double pos_y, 
   try {
     active_session_->update_clip_visual_transform(
         pulsar::domain::VisualTransform{pos_x, pos_y, scale, rotation_degrees, opacity});
+#ifndef NDEBUG
+    qInfo().noquote() << "preview_pipeline transform_update projectRevision="
+                      << active_session_->document().document_generation();
+#endif
     clearError();
     // Keep the currently presented frame alive while the composition worker
     // catches up. Clearing previewSource here hides ViewerPane's pointer owner
@@ -1649,6 +1654,7 @@ void DesktopController::debugViewerGesture(const QString& phase, const QVariantM
   const auto details = QJsonDocument{QJsonObject::fromVariantMap(data)}.toJson(QJsonDocument::Compact);
   qInfo().noquote() << "viewer_gesture" << phase
                     << "clip=" << (clip ? QString::number(clip->value()) : QStringLiteral("none"))
+                    << "projectRevision=" << projectRevision()
                     << details;
 #else
   Q_UNUSED(phase)
@@ -2650,6 +2656,7 @@ bool DesktopController::showTitleOverGap() {
     return false;
   }
   displayed_identity_.reset();
+  displayed_preview_project_revision_ = active_session_->document().document_generation();
   viewer_state_ = "frame";
   title_gap_key_ = key;
   ++preview_revision_;
@@ -2905,9 +2912,19 @@ void DesktopController::presentTimeline(const pulsar::application::TimelinePrese
   // real editorial gaps use TimelineGapPresentation and still clear to black.
   if (!same && viewer_state_ != "frame") clearProgram("loading");
 }else if constexpr(std::is_same_v<T,pulsar::application::TimelineSourceEndedEarlyPresentation>||std::is_same_v<T,pulsar::application::TimelineSourceErrorPresentation>){clearProgram("error");}else if constexpr(std::is_same_v<T,pulsar::application::TimelineEndedPresentation>){clearProgram("ended");}},presentation);}
-void DesktopController::displayLease(const pulsar::application::TimelinePresentSample& present){const auto source_epoch=visual_mailbox_->active_epoch();const auto generation=active_session_->document().document_generation();VisualIdentity identity{editor_session_epoch_,generation,present.clip_id,present.media_id,source_epoch,present.sample.ordinal};if(displayed_identity_&&displayed_identity_.value().session_epoch==identity.session_epoch&&displayed_identity_->document_generation==identity.document_generation&&displayed_identity_->clip_id==identity.clip_id&&displayed_identity_->media_id==identity.media_id&&displayed_identity_->source_epoch==identity.source_epoch&&displayed_identity_->ordinal==identity.ordinal&&viewer_state_=="frame")return;auto lease=visual_mailbox_->take(source_epoch,present.sample.ordinal);if(!lease){++visual_misses_;clearProgram("loading");return;}try{FFmpegPreviewConverter converter;auto preview=converter.convert(*lease);composeTitlesOnPreview(preview,present.timeline_position);image_provider_.setImage(imageFromPreview(preview));last_conversion_time_=preview.conversion_time;conversion_durations_.push(preview.conversion_time);++conversion_count_;displayed_identity_=identity;viewer_state_="frame";++displayed_frames_;++preview_revision_;preview_source_=QString("image://pulsar-preview/current?rev=%1").arg(preview_revision_);emit previewChanged();}catch(const std::exception& error){setError(QString::fromUtf8(error.what()));clearProgram("error");}}
+void DesktopController::displayLease(const pulsar::application::TimelinePresentSample& present){const auto source_epoch=visual_mailbox_->active_epoch();const auto generation=active_session_->document().document_generation();VisualIdentity identity{editor_session_epoch_,generation,present.clip_id,present.media_id,source_epoch,present.sample.ordinal};if(displayed_identity_&&displayed_identity_.value().session_epoch==identity.session_epoch&&displayed_identity_->document_generation==identity.document_generation&&displayed_identity_->clip_id==identity.clip_id&&displayed_identity_->media_id==identity.media_id&&displayed_identity_->source_epoch==identity.source_epoch&&displayed_identity_->ordinal==identity.ordinal&&viewer_state_=="frame")return;auto lease=visual_mailbox_->take(source_epoch,present.sample.ordinal);if(!lease){++visual_misses_;clearProgram("loading");return;}try{FFmpegPreviewConverter converter;auto preview=converter.convert(*lease);composeTitlesOnPreview(preview,present.timeline_position);image_provider_.setImage(imageFromPreview(preview));last_conversion_time_=preview.conversion_time;conversion_durations_.push(preview.conversion_time);++conversion_count_;displayed_identity_=identity;displayed_preview_project_revision_=generation;viewer_state_="frame";++displayed_frames_;++preview_revision_;preview_source_=QString("image://pulsar-preview/current?rev=%1").arg(preview_revision_);emit previewChanged();}catch(const std::exception& error){setError(QString::fromUtf8(error.what()));clearProgram("error");}}
 void DesktopController::displayComposition(const pulsar::application::TimelineCompositionPresentation& presentation) {
   const auto& result = presentation.composite;
+  const auto current_revision = active_session_->document().document_generation();
+  if (result.project_revision != current_revision) {
+    ++stale_visual_frames_;
+#ifndef NDEBUG
+    qInfo().noquote() << "preview_pipeline reject_stale projectRevision=" << current_revision
+                      << "previewRequest=" << result.request_id
+                      << "previewResultRevision=" << result.project_revision;
+#endif
+    return;
+  }
   if (!result.surface || displayed_composite_.lock() == result.surface) return;
   auto canvas = *result.surface;
   title_compositor_.composite({canvas.width, canvas.height, canvas.stride_bytes, canvas.pixels.data()},
@@ -2915,14 +2932,21 @@ void DesktopController::displayComposition(const pulsar::application::TimelineCo
   image_provider_.setImage(QImage(canvas.pixels.data(), canvas.width, canvas.height,
       canvas.stride_bytes, QImage::Format_RGBA8888).copy());
   displayed_composite_ = result.surface;
+  displayed_preview_project_revision_ = result.project_revision;
   composition_render_metrics_ = result.render_metrics;
   viewer_state_ = "frame";
   ++displayed_frames_;
   ++preview_revision_;
   preview_source_ = QString("image://pulsar-preview/current?rev=%1").arg(preview_revision_);
+#ifndef NDEBUG
+  qInfo().noquote() << "preview_pipeline accept projectRevision=" << current_revision
+                    << "previewGeneration=" << result.preview_generation
+                    << "previewResult=" << result.request_id
+                    << "displayedRevision=" << displayed_preview_project_revision_;
+#endif
   emit previewChanged();
 }
-void DesktopController::clearProgram(QString state){displayed_composite_.reset();title_gap_key_.clear();const bool changed=viewer_state_!=state||!preview_source_.isEmpty();image_provider_.clear();preview_source_.clear();displayed_identity_.reset();viewer_state_=std::move(state);if(changed)emit previewChanged();}
+void DesktopController::clearProgram(QString state){displayed_composite_.reset();title_gap_key_.clear();const bool changed=viewer_state_!=state||!preview_source_.isEmpty();image_provider_.clear();preview_source_.clear();displayed_identity_.reset();displayed_preview_project_revision_=0;viewer_state_=std::move(state);if(changed)emit previewChanged();}
 void DesktopController::updateTick(){if(!active_session_||!has_media_){return;}try{const auto presentation=active_session_->update_playback();presentTimeline(presentation);const bool now_playing=active_session_->playback_intent()==pulsar::application::PlaybackIntent::Playing;if(now_playing!=playing_){playing_=now_playing;emit playbackChanged();}updatePositionProperties();updateDiagnostics();}catch(const std::exception& error){active_session_->pause();playing_=false;emit playbackChanged();clearProgram("error");setError(QString::fromUtf8(error.what()));setStatus("Error");}}
 void DesktopController::updatePositionProperties(){if(!active_session_)return;const auto position=active_session_->playback_position();const auto duration=active_session_->timeline_duration();position_text_=formatTime(position);duration_text_=formatTime(duration);progress_=duration>MediaTime::zero()?std::clamp(secondsAsDouble(position)/secondsAsDouble(duration),0.0,1.0):0.0;timeline_playhead_progress_=timeline_view_start_&&timeline_view_duration_&&position>=*timeline_view_start_&&position<=*timeline_view_start_+*timeline_view_duration_?timelinePixelAt(position,1.0):-1.0;emit positionChanged();emit selectedTitleOnScreenChanged();emit selectedClipOnScreenChanged();emit timelinePlayheadChanged();emit editActionStateChanged();}
 void DesktopController::publishProjectDirty() {

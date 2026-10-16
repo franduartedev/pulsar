@@ -5,6 +5,18 @@
 
 namespace pulsar::application {
 
+bool requires_visual_composition(const ProjectSnapshot& snapshot) noexcept {
+  if (snapshot.visual_track_ids.size() > 1 || !snapshot.transitions.empty()) return true;
+  for (const auto track_id : snapshot.visual_track_ids) {
+    const auto* track = snapshot.timeline.find_track(track_id);
+    if (track == nullptr) continue;
+    for (const auto& clip : track->clips()) {
+      if (!clip.visual_transform().is_default()) return true;
+    }
+  }
+  return false;
+}
+
 ResolvedVisualComposition resolve_visual_composition(
     const ProjectSnapshot& snapshot, domain::MediaTime timeline_position) {
   if (timeline_position < domain::MediaTime::zero()) {

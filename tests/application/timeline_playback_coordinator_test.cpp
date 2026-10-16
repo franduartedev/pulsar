@@ -347,6 +347,27 @@ void composition_handoff_seek_and_audio_authority() {
   assert(std::holds_alternative<application::TimelineCompositionPending>(coordinator.update()));
 }
 
+void transformed_single_track_uses_authoritative_composition() {
+  Fixture fixture;
+  const auto clip = fixture.processor.add_clip(
+      fixture.media_one, TimeRange{time(0), time(10)}, time(0));
+  fixture.processor.set_clip_visual_transform(clip, {0.2, 0.1, 0.45, 0.0, 1.0});
+  auto snapshot = fixture.document.snapshot();
+  assert(snapshot.visual_track_ids.size() == 1);
+  assert(application::requires_visual_composition(snapshot));
+
+  FakeClock clock;
+  auto preview = std::make_unique<ControlledComposition>();
+  auto* control = preview.get();
+  TimelinePlaybackCoordinator coordinator{clock, fixture.factory(), {}, nullptr,
+                                          std::move(preview)};
+  coordinator.set_snapshot(snapshot);
+  const auto presentation = coordinator.update();
+  assert(std::holds_alternative<application::TimelineCompositionPending>(presentation));
+  assert(control->requested == time(0));
+  assert(fixture.factory_calls == 0); // never bypasses the compositor via direct playback
+}
+
 void one_clock_play_pause_resume_and_origin_mapping() {
   Fixture fixture;
   const auto snapshot = snapshot_with_clip(fixture, fixture.media_one, TimeRange{time(0), time(10)}, time(0));
@@ -1181,6 +1202,7 @@ void audio_clock_crosses_boundary_before_video_mapping() {
 
 int main() {
   composition_handoff_seek_and_audio_authority();
+  transformed_single_track_uses_authoritative_composition();
   one_clock_play_pause_resume_and_origin_mapping();
   gaps_and_missing_continue_clock();
   contiguous_same_and_different_media_switches();

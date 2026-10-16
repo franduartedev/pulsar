@@ -18,6 +18,12 @@ struct ResolvedVisualComposition {
   std::vector<ResolvedVisualLayer> layers; // bottom-to-top, including gaps
 };
 
+// True when the direct single-source playback path cannot faithfully represent
+// the project. Multi-track stacks, transitions, and any non-default visual
+// transform must use the shared composition renderer even when there is only
+// one visual track.
+[[nodiscard]] bool requires_visual_composition(const ProjectSnapshot& snapshot) noexcept;
+
 // Pure editorial resolution. No decoder/frame ownership or display timestamps.
 [[nodiscard]] ResolvedVisualComposition resolve_visual_composition(
     const ProjectSnapshot& snapshot, domain::MediaTime timeline_position);

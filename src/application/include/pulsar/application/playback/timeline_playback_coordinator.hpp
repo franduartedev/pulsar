@@ -3,6 +3,7 @@
 #include <pulsar/application/playback/audio_mix_playback_session.hpp>
 #include <pulsar/application/playback/playback_session.hpp>
 #include <pulsar/application/playback/composition_preview.hpp>
+#include <pulsar/application/composition/visual_composition_resolver.hpp>
 #include <pulsar/application/timeline/timeline_clip_resolver.hpp>
 
 #include <filesystem>
@@ -174,7 +175,7 @@ private:
   void apply_audio_condition(AudioPlaybackCondition condition);
   [[nodiscard]] TimelinePresentation update_composition();
   [[nodiscard]] bool uses_composition() const noexcept {
-    return snapshot_ && snapshot_->visual_track_ids.size() > 1;
+    return snapshot_ && requires_visual_composition(*snapshot_);
   }
 
   const MonotonicClock& clock_;

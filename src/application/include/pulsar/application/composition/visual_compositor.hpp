@@ -17,6 +17,21 @@ struct RgbaSurface {
   std::vector<std::uint8_t> pixels;
 };
 
+// Unrotated transformed picture rectangle in project-canvas pixels. This is
+// the shared geometry truth used by both raster composition and Viewer
+// selection bounds; rotation is applied around center_x/center_y.
+struct VisualLayerGeometry {
+  double center_x{0.0};
+  double center_y{0.0};
+  double width{0.0};
+  double height{0.0};
+  double rotation_degrees{0.0};
+};
+
+[[nodiscard]] VisualLayerGeometry visual_layer_geometry(
+    int source_width, int source_height, int canvas_width, int canvas_height,
+    const domain::VisualTransform& transform);
+
 void validate_surface(const RgbaSurface& surface);
 [[nodiscard]] RgbaSurface black_surface(int width, int height);
 

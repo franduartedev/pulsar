@@ -7,6 +7,9 @@
 #include <chrono>
 #include <limits>
 #include <sstream>
+#ifndef NDEBUG
+#include <iostream>
+#endif
 #include <type_traits>
 #include <utility>
 
@@ -324,6 +327,21 @@ OfflineVideoFrame OfflineVideoRenderer::render_time(domain::FrameNumber frame_in
     throw OfflineVideoRenderError{OfflineVideoRenderErrorCode::InternalInvariant,
                                   "timeline ended before the export plan"};
   }
+#ifndef NDEBUG
+  if (!debug_plan_logged_) {
+    std::clog << "preview_pipeline composition_plan projectRevision="
+              << snapshot_.document_generation << " layers=" << plan.layers.size();
+    for (const auto& layer : plan.layers) {
+      std::clog << " clip=" << layer.clip_id.value()
+                << " x=" << layer.transform.position_x
+                << " y=" << layer.transform.position_y
+                << " scale=" << layer.transform.scale
+                << " rotation=" << layer.transform.rotation_degrees
+                << " opacity=" << layer.transform.opacity;
+    }
+    std::clog << '\n';
+  }
+#endif
   std::ostringstream diagnostic;
   diagnostic << "frame_index=" << frame_index.value()
              << " timeline_time=" << static_cast<double>(timeline_time);
@@ -350,6 +368,13 @@ OfflineVideoFrame OfflineVideoRenderer::render_time(domain::FrameNumber frame_in
         compose_frame(canvas, *active_sources_.at(layer.clip_id.value()), *frame, layer.transform);
       }
     }
+#ifndef NDEBUG
+    if (!debug_plan_logged_) {
+      std::clog << "preview_pipeline compositor_applied projectRevision="
+                << snapshot_.document_generation << " frame=" << frame_index.value() << '\n';
+      debug_plan_logged_ = true;
+    }
+#endif
     check_cancelled();
     OfflineVideoFrame output{frame_index, timeline_time, canvas.width, canvas.height,
         canvas.stride_bytes, OfflinePixelFormat::Rgba8888, std::move(canvas.pixels)};

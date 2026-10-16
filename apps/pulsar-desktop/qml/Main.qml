@@ -177,6 +177,7 @@ Window {
 
     MediaPanel {
         id: mediaPanel
+        objectName: "mediaPanel"
         anchors.left: parent.left
         anchors.top: header.bottom
         anchors.bottom: splitHandle.top
@@ -210,6 +211,7 @@ Window {
 
     InspectorPanel {
         id: inspector
+        objectName: "inspectorPanel"
         anchors.right: parent.right
         anchors.top: header.bottom
         anchors.bottom: splitHandle.top
@@ -222,6 +224,7 @@ Window {
     // Monitor module: viewer + attached transport on one surface.
     Rectangle {
         id: monitor
+        objectName: "monitorModule"
         anchors.left: mediaPanel.right
         anchors.right: inspector.left
         anchors.top: header.bottom
@@ -291,6 +294,7 @@ Window {
 
     TimelinePane {
         id: timelinePane
+        objectName: "timelinePane"
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.bottom: statusBar.top
