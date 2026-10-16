@@ -74,15 +74,16 @@ Item {
                 Rectangle {
                     anchors.fill: parent
                     color: "transparent"
-                    border.width: moveArea.containsMouse || moveArea.pressed ? 2 : 1
-                    border.color: Theme.focus
+                    border.width: 2
+                    border.color: moveArea.containsMouse || moveArea.pressed ? Theme.textOnAccent : Theme.focus
+                    Behavior on border.color { ColorAnimation { duration: Theme.motionFast } }
                 }
                 MouseArea {
                     id: moveArea
                     anchors.fill: parent
                     anchors.margins: 7
                     hoverEnabled: true
-                    cursorShape: pressed ? Qt.ClosedHandCursor : Qt.OpenHandCursor
+                    cursorShape: pressed ? Qt.ClosedHandCursor : Qt.SizeAllCursor
                     drag.target: moveGhost
                     property real startX: 0
                     property real startY: 0
@@ -110,12 +111,16 @@ Item {
                         required property var modelData
                         readonly property int sx: modelData.sx
                         readonly property int sy: modelData.sy
-                        x: sx < 0 ? -width / 2 : clipBounds.width - width / 2
-                        y: sy < 0 ? -height / 2 : clipBounds.height - height / 2
-                        width: 11; height: 11; radius: 2
+                        // Keep the complete handle inside the canvas for a
+                        // full-frame VIDEO 1 clip instead of clipping half of it.
+                        x: sx < 0 ? 0 : clipBounds.width - width
+                        y: sy < 0 ? 0 : clipBounds.height - height
+                        width: 12; height: 12; radius: 3
+                        scale: handleMouse.containsMouse || handleMouse.pressed ? 1.18 : 1.0
                         color: handleMouse.containsMouse || handleMouse.pressed ? Theme.textOnAccent : Theme.focus
                         border.width: 1; border.color: Theme.bgViewer
                         Behavior on color { ColorAnimation { duration: Theme.motionFast } }
+                        Behavior on scale { NumberAnimation { duration: Theme.motionFast } }
                         MouseArea {
                             id: handleMouse
                             anchors.fill: parent; anchors.margins: -6
@@ -138,6 +143,24 @@ Item {
                         }
                     }
                 }
+            }
+        }
+
+        Rectangle {
+            // Discoverability cue, shown only when direct manipulation is
+            // actually available for the selected visual at the playhead.
+            visible: clipPlacer.ready && !moveArea.pressed
+            anchors.left: parent.left; anchors.top: parent.top
+            anchors.leftMargin: Theme.spaceM; anchors.topMargin: Theme.spaceM
+            height: 26; width: directHint.implicitWidth + 2 * Theme.spaceM
+            radius: Theme.radiusM
+            color: Theme.chipOverlay
+            border.width: 1; border.color: Theme.accent
+            opacity: moveArea.containsMouse ? 1.0 : 0.88
+            Text {
+                id: directHint; anchors.centerIn: parent
+                text: "Arrastrá para mover  ·  Esquinas para escalar"
+                color: Theme.textPrimary; font.pixelSize: Theme.fontSizeXS; font.bold: true
             }
         }
 

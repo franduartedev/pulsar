@@ -356,7 +356,23 @@ Panel {
             // ---- TRANSFORMACIÓN (E2.1 mínimo) ----------------------------------
             InspectorSection {
                 visible: inspector.currentTab === 0 && inspector.clipSelected && controller.selectedClipKind !== "audio"
-                heading: "TRANSFORMACIÓN"
+                heading: "TRANSFORMACIÓN · PRECISIÓN"
+                Rectangle {
+                    width: parent.width; height: precisionHelp.implicitHeight + 2 * Theme.spaceS
+                    radius: Theme.radiusM; color: Theme.accentDim
+                    border.width: 1; border.color: Theme.accent
+                    Text {
+                        id: precisionHelp
+                        anchors.left: parent.left; anchors.right: parent.right
+                        anchors.leftMargin: Theme.spaceS; anchors.rightMargin: Theme.spaceS
+                        anchors.verticalCenter: parent.verticalCenter
+                        wrapMode: Text.WordWrap
+                        text: controller.selectedClipOnScreen
+                            ? "Arrastrá la imagen en el visor para moverla. Usá las esquinas para escalar."
+                            : "Llevá el cabezal sobre este clip para editarlo directamente en el visor."
+                        color: Theme.textPrimary; font.pixelSize: Theme.fontSizeS
+                    }
+                }
                 FieldRow {
                     label: "Pos X"
                     Stepper {
@@ -398,7 +414,7 @@ Panel {
                     }
                 }
                 PButton { width: parent.width; height: Theme.controlHeightSmall; text: "Restablecer"; onClicked: controller.resetSelectedClipTransform() }
-                Text { width: parent.width; wrapMode: Text.WordWrap; text: "Posición en anchos/alto del lienzo. Escala uniforme y giro en grados."; color: Theme.textMuted; font.pixelSize: Theme.fontSizeXS }
+                Text { width: parent.width; wrapMode: Text.WordWrap; text: "Estos valores son controles de precisión. La posición usa el ancho y alto del lienzo; el giro está en grados."; color: Theme.textMuted; font.pixelSize: Theme.fontSizeXS }
             }
 
             InspectorSection {

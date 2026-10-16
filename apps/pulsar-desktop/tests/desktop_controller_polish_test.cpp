@@ -48,6 +48,44 @@ int main(int argc, char** argv) {
   controller.openPath(QString::fromStdString((fixtures / "e6_video_a.mp4").string()));
   REQUIRE(1, wait_until([&] { return controller.hasVideoMedia() && !controller.busy(); }));
 
+  // ---- Viewer direct manipulation: pixels are transient, live updates coalesce ---------
+  controller.selectTimelineClip(clip_key(controller, 0));
+  const auto geometry = controller.selectedClipVisualGeometry();
+  REQUIRE(200, controller.selectedClipOnScreen() && geometry.value("width").toDouble() > 0.0 &&
+                   geometry.value("height").toDouble() > 0.0);
+  controller.beginSelectedClipTransform();
+  controller.updateSelectedClipTranslationFromViewer(0.0, 0.0, 40.0, 20.0,
+                                                       1000.0, 500.0, 1.0, 0.0, 1.0);
+  controller.updateSelectedClipTranslationFromViewer(0.0, 0.0, 100.0, 50.0,
+                                                       1000.0, 500.0, 1.0, 0.0, 1.0);
+  controller.endSelectedClipTransform();
+  REQUIRE(201, std::abs(controller.selectedClipPosX() - 0.1) < 1e-9 &&
+                   std::abs(controller.selectedClipPosY() - 0.1) < 1e-9);
+  controller.undoEdit();
+  REQUIRE(202, controller.selectedClipPosX() == 0.0 && controller.selectedClipPosY() == 0.0);
+  controller.redoEdit();
+  REQUIRE(203, std::abs(controller.selectedClipPosX() - 0.1) < 1e-9 &&
+                   std::abs(controller.selectedClipPosY() - 0.1) < 1e-9);
+  controller.undoEdit();
+
+  // The same canvas-relative movement survives a doubled Viewer size.
+  controller.beginSelectedClipTransform();
+  controller.updateSelectedClipTranslationFromViewer(0.0, 0.0, 200.0, 100.0,
+                                                       2000.0, 1000.0, 1.0, 0.0, 1.0);
+  controller.endSelectedClipTransform();
+  REQUIRE(204, std::abs(controller.selectedClipPosX() - 0.1) < 1e-9 &&
+                   std::abs(controller.selectedClipPosY() - 0.1) < 1e-9);
+  controller.undoEdit();
+
+  // Corner-scale live updates are likewise one logical history entry.
+  controller.beginSelectedClipTransform();
+  controller.updateSelectedClipTransform(0.0, 0.0, 1.2, 0.0, 1.0);
+  controller.updateSelectedClipTransform(0.0, 0.0, 1.5, 0.0, 1.0);
+  controller.endSelectedClipTransform();
+  REQUIRE(205, std::abs(controller.selectedClipScale() - 1.5) < 1e-9);
+  controller.undoEdit();
+  REQUIRE(206, controller.selectedClipScale() == 1.0);
+
   // ---- Sound library: Spanish names, categories, durations, auditionable (when the pack is installed) ----
   if (controller.soundPackAvailable()) {
     const auto library = controller.soundLibrary();
