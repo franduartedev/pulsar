@@ -126,3 +126,53 @@ Viewer hierarchy at 960×540 and checks both transform values and screen bounds 
 identity/scaled movement, every corner direction, anchor crossing, resize,
 letterbox, pillarbox, live Inspector properties, history coalescing, and frame
 replacement during an active pointer grab.
+
+## Human polish fix 04 — Timeline drag lifecycle and workspace split
+
+Two workspace defects remained after Fix 03. First, the Timeline could keep
+moving or scrolling after the pointer left it: the track `Flickable` still
+accepted mouse drags and coasted on momentum, and a clip/title drag kept
+following the pointer (and could autoscroll) far outside the Timeline. Second,
+the 16:9 Program Viewer was height-starved — the Timeline took a third of the
+window, so the canvas was much narrower than the monitor and sat between large
+lateral bars.
+
+**Timeline drag lifecycle.** `TimelinePane` now owns a single pointer gesture.
+Clip and title blocks call `beginTimelineDrag(block, x, y)`,
+`updateTimelineDrag(x, y)` and `endTimelineDrag()` on their host; the host tracks
+whether the pointer is inside the Timeline region and whether an edge is
+engaged. Movement and edge-autoscroll are only allowed while the gesture is
+live, the left button is held, and the pointer stays inside the region. Leaving
+the region freezes the preview and stops autoscroll immediately; release,
+cancel, and window deactivation terminate the gesture and clear the single
+autoscroll `Timer`, so nothing is left running. Release outside the Timeline
+commits the last in-region position rather than jumping. The track `Flickable`
+is `interactive: false` (vertical scrolling stays on an explicit wheel handler),
+so a pointer that leaves the Timeline can never leave a pan or flick coasting.
+Edge-autoscroll re-derives the live preview against the new viewport on each
+tick, so a dragged block stays under the pointer while the view scrolls beneath
+it. Debug builds log `timeline_gesture` BEGIN / POINTER_EXIT / AUTOSCROLL_START
+/ AUTOSCROLL_STOP / END records.
+
+**Workspace split.** `Main.qml` places a draggable divider between the Viewer
+module and the Timeline. The split is session UI state only: it is never written
+to the project, never touches `VisualTransform`, `CanvasSpec`, a clip transform,
+preview, or export. The default split is proportional (`h × 0.28`, clamped to
+176–240 px) and re-derives on window resize until the user drags the divider, at
+which point their split survives resizing; double-clicking restores the default.
+The Viewer canvas is computed from the persistent canvas aspect at whatever
+height it is given, so a taller Viewer yields a larger, still exactly 16:9
+canvas with no stretch and no crop. A small `Ajustar` / `100%` control switches
+between fit and one project pixel per screen pixel; both are display-only and
+cannot affect export, `CanvasSpec`, clip transforms, or the saved project.
+
+Measured on the real QML hierarchy (canvas width × height, and per-side lateral
+bar), default split:
+
+| Screen | Before | After |
+|---|---:|---:|
+| 1280×720 | 418×235, bar 139 | 519×292, bar 88 |
+| 1280×800 | 508×286, bar 94 | 622×350, bar 37 |
+| 1366×768 | 473×266, bar 137 | 581×327, bar 83 |
+| 1680×1050 | 825×464, bar 92 | 1008×567, bar 0 |
+| 1920×1080 | 878×494, bar 185 | 1092×614, bar 78 |
