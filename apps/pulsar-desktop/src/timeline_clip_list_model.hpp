@@ -35,6 +35,8 @@ public:
     KindRole,       // "video" | "image" | "color" | "audio"
     FadeInRole,     // fraction of the clip width
     FadeOutRole,
+    TransitionInRole,
+    TransitionStartProgressRole,
   };
 
   explicit TimelineClipListModel(QObject* parent = nullptr);
@@ -70,6 +72,8 @@ private:
     QString kind;
     double fade_in{0.0};
     double fade_out{0.0};
+    bool transition_in{false};
+    double transition_start_progress{0.0};
   };
   std::vector<Row> rows_;
 };

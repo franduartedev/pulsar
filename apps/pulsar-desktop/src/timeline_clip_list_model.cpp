@@ -34,6 +34,8 @@ QVariant TimelineClipListModel::data(const QModelIndex& index, int role) const {
   case KindRole: return row.kind;
   case FadeInRole: return row.fade_in;
   case FadeOutRole: return row.fade_out;
+  case TransitionInRole: return row.transition_in;
+  case TransitionStartProgressRole: return row.transition_start_progress;
   default: return {};
   }
 }
@@ -45,7 +47,9 @@ QHash<int, QByteArray> TimelineClipListModel::roleNames() const {
           {StartProgressRole, "startProgress"}, {EndProgressRole, "endProgress"},
           {InViewportRole, "inViewport"}, {TrackIndexRole, "trackIndex"},
           {AudioTrackRole, "audioTrack"}, {HasAudioRole, "hasAudio"}, {ThumbSourceRole, "thumbSource"},
-          {KindRole, "kind"}, {FadeInRole, "fadeIn"}, {FadeOutRole, "fadeOut"}};
+           {KindRole, "kind"}, {FadeInRole, "fadeIn"}, {FadeOutRole, "fadeOut"},
+           {TransitionInRole, "transitionIn"},
+           {TransitionStartProgressRole, "transitionStartProgress"}};
 }
 
 void TimelineClipListModel::refresh(const pulsar::desktop::EditorSession& session,
@@ -77,6 +81,14 @@ void TimelineClipListModel::refresh(const pulsar::desktop::EditorSession& sessio
     row.track_index = static_cast<int>(view.track_index);
     row.audio_track = view.track_kind == pulsar::domain::TrackKind::Audio;
     row.has_audio = view.has_audio;
+    const auto transition = std::find_if(
+        session.document().transitions().begin(), session.document().transitions().end(),
+        [&](const auto& item) { return item.incoming_clip_id == clip->id(); });
+    if (transition != session.document().transitions().end()) {
+      row.transition_in = true;
+      row.transition_start_progress = viewport.pixel_at_unclamped(
+          clip->timeline_range().start() - transition->duration, 1.0);
+    }
     {
       const auto asset = session.document().find_asset(clip->media_id());
       row.kind = view.track_kind == pulsar::domain::TrackKind::Audio ? QStringLiteral("audio")
@@ -136,7 +148,9 @@ void TimelineClipListModel::refresh(const pulsar::desktop::EditorSession& sessio
                                                      : row.thumb_source != next.thumb_source;
       changed = changed || role_changed;
     }
-    changed = changed || row.kind != next.kind || row.fade_in != next.fade_in || row.fade_out != next.fade_out;
+    changed = changed || row.kind != next.kind || row.fade_in != next.fade_in ||
+              row.fade_out != next.fade_out || row.transition_in != next.transition_in ||
+              row.transition_start_progress != next.transition_start_progress;
     if (changed) {
       row = next;
       const auto model_index = index(static_cast<int>(row_index), 0);

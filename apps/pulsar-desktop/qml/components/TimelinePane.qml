@@ -57,9 +57,9 @@ Panel {
         if (controller.timelineZoom > 1.0) controller.setTimelineScroll(controller.timelineScroll - delta / 120 * 0.05 / Math.max(1, Math.sqrt(controller.timelineZoom)))
     }
 
-    function trackTitle(label) {
-        // "VIDEO 1" -> "Video 1"
-        return label.length > 0 ? label.charAt(0) + label.slice(1).toLowerCase() : label
+    function trackCode(label, kind) {
+        var match = label.match(/[0-9]+/)
+        return (kind === "audio" ? "A" : "V") + (match ? match[0] : "")
     }
 
     // ---- Toolbar: title, edit actions, view controls ------------------
@@ -221,10 +221,12 @@ Panel {
                                      color: lane.activeVisual ? Theme.accentDim : Theme.bgElevated
                                      border.width: lane.activeVisual ? 1 : 0; border.color: Theme.accent }
                          Rectangle { width: 3; anchors.left: parent.left; anchors.top: parent.top; anchors.bottom: parent.bottom; color: modelData.kind === "audio" ? Theme.waveformAudio : Theme.waveform; opacity: 0.85 }
-                          Text { x: 14; y: 7
-                                 text: pane.trackTitle(modelData.label) + ((modelData.kind === "audio" || modelData.primary) && Math.abs(modelData.gainDb) > 0.05 ? "  " + Number(modelData.gainDb).toFixed(0) + " dB" : ""); color: Theme.textPrimary; font.pixelSize: Theme.fontSizeS
-                                 elide: Text.ElideRight; width: pane.gutterWidth - 20 }
-                         Text { visible: modelData.primary; x: 14; y: 27; text: modelData.visualIndex === 0 ? "Base" : "Principal"; color: Theme.textSecondary; font.pixelSize: Theme.fontSizeXS }
+                           Text { x: 14; y: 7
+                                  text: pane.trackCode(modelData.label, modelData.kind); color: Theme.textPrimary; font.pixelSize: Theme.fontSizeM; font.bold: true
+                                  elide: Text.ElideRight; width: 28 }
+                           Text { x: 43; y: 8
+                                  text: ((modelData.kind === "audio" || modelData.primary) && Math.abs(modelData.gainDb) > 0.05) ? Number(modelData.gainDb).toFixed(0) + " dB" : (modelData.kind === "audio" ? "Audio" : "Video")
+                                  color: Theme.textSecondary; font.pixelSize: Theme.fontSizeXS; elide: Text.ElideRight; width: pane.gutterWidth - 49 }
                          MouseArea {
                              id: headerMouse
                              x: 4; width: pane.gutterWidth - 4; height: parent.height
@@ -232,61 +234,66 @@ Panel {
                              onClicked: if (modelData.kind === "video") controller.selectVisualTrack(String(modelData.id))
                          }
                           Row {
-                             visible: modelData.kind === "video" && !modelData.primary && (headerMouse.containsMouse || lane.activeVisual)
-                             x: 12; y: parent.height - 22; z: 2; spacing: 3
-                             Repeater {
-                                 model: [ {label: "↑", allowed: modelData.canRaise, direction: 1, tip: "Subir pista"},
-                                          {label: "↓", allowed: modelData.canLower, direction: -1, tip: "Bajar pista"},
-                                          {label: "×", allowed: modelData.empty, direction: 0, tip: "Quitar pista vacía"} ]
-                                 delegate: Rectangle {
-                                     id: actionButton
-                                     readonly property string actionTip: modelData.tip
-                                     readonly property bool actionAllowed: modelData.allowed
-                                     Accessible.name: modelData.tip
-                                     width: 22; height: 20; radius: Theme.radiusS
-                                     opacity: modelData.allowed ? 1 : 0.35
-                                     color: actionMouse.containsMouse && modelData.allowed ? Theme.bgHover : Theme.bgElevated
-                                     Text { anchors.centerIn: parent; text: modelData.label; color: Theme.textPrimary; font.pixelSize: Theme.fontSizeS }
-                                     Rectangle {
-                                         visible: actionMouse.containsMouse && actionButton.actionAllowed
-                                         z: 5; y: -24; width: hint.implicitWidth + 12; height: 20; radius: Theme.radiusS
-                                         color: Theme.bgElevated; border.color: Theme.borderStrong
-                                         Text { id: hint; anchors.centerIn: parent; text: actionButton.actionTip; color: Theme.textPrimary; font.pixelSize: Theme.fontSizeXS }
+                              visible: modelData.kind === "video" && !modelData.primary && (headerMouse.containsMouse || lane.activeVisual)
+                              x: 12; y: parent.height - 22; z: 3; spacing: 3
+                              Repeater {
+                                  model: [
+                                      {label: "↑", allowed: modelData.canRaise, direction: 1, tip: "Subir pista"},
+                                      {label: "↓", allowed: modelData.canLower, direction: -1, tip: "Bajar pista"},
+                                      {label: "×", allowed: modelData.empty, direction: 0, tip: "Quitar pista vacía"}
+                                  ]
+                                  delegate: Rectangle {
+                                      id: actionButton
+                                      required property var modelData
+                                      readonly property string actionTip: modelData.tip
+                                      readonly property bool actionAllowed: !!modelData.allowed
+                                      Accessible.name: actionTip
+                                      width: 22; height: 20; radius: Theme.radiusS
+                                      opacity: actionAllowed ? 1 : 0.35
+                                      color: actionMouse.containsMouse && actionAllowed ? Theme.bgHover : Theme.bgInput
+                                      Text { anchors.centerIn: parent; text: actionButton.modelData.label; color: Theme.textPrimary; font.pixelSize: Theme.fontSizeS }
+                                      Rectangle {
+                                          visible: actionMouse.containsMouse && actionButton.actionAllowed
+                                          z: 5; y: -24; width: actionHint.implicitWidth + 12; height: 20; radius: Theme.radiusS
+                                          color: Theme.bgElevated; border.color: Theme.borderStrong
+                                          Text { id: actionHint; anchors.centerIn: parent; text: actionButton.actionTip; color: Theme.textPrimary; font.pixelSize: Theme.fontSizeXS }
+                                      }
+                                      MouseArea {
+                                          id: actionMouse; anchors.fill: parent; hoverEnabled: true
+                                          enabled: actionButton.actionAllowed; cursorShape: Qt.PointingHandCursor
+                                          onClicked: if (actionButton.modelData.direction === 0) controller.removeVisualTrack(lane.trackKey)
+                                                     else controller.shiftVisualTrack(lane.trackKey, actionButton.modelData.direction)
+                                      }
+                                  }
+                              }
                           }
                           Row {
-                              visible: modelData.kind === "audio" || modelData.primary
+                              visible: modelData.kind === "audio" || !!modelData.primary
                               x: 12; y: parent.height - 24; z: 3; spacing: 3
                               Repeater {
                                   model: [
                                       {label: "−", active: false, action: "down"},
-                                      {label: "M", active: modelData.muted, action: "mute"},
-                                      {label: "S", active: modelData.solo, action: "solo"},
+                                      {label: "M", active: !!modelData.muted, action: "mute"},
+                                      {label: "S", active: !!modelData.solo, action: "solo"},
                                       {label: "+", active: false, action: "up"}
                                   ]
                                   delegate: Rectangle {
+                                      id: audioButton
+                                      required property var modelData
                                       width: 20; height: 18; radius: Theme.radiusS
                                       color: modelData.active ? Theme.accentDim : (audioMouse.containsMouse ? Theme.bgHover : Theme.bgInput)
                                       border.width: 1; border.color: modelData.active ? Theme.accent : Theme.borderStrong
-                                      Text { anchors.centerIn: parent; text: modelData.label; color: modelData.active ? Theme.focus : Theme.textPrimary; font.pixelSize: Theme.fontSizeXS; font.bold: true }
+                                      Text { anchors.centerIn: parent; text: audioButton.modelData.label; color: audioButton.modelData.active ? Theme.focus : Theme.textPrimary; font.pixelSize: Theme.fontSizeXS; font.bold: true }
                                       MouseArea { id: audioMouse; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
                                           onClicked: {
-                                              if (modelData.action === "mute") controller.toggleTrackMute(lane.trackKey)
-                                              else if (modelData.action === "solo") controller.toggleTrackSolo(lane.trackKey)
-                                              else controller.adjustTrackGain(lane.trackKey, modelData.action === "up" ? 1 : -1)
+                                              if (audioButton.modelData.action === "mute") controller.toggleTrackMute(lane.trackKey)
+                                              else if (audioButton.modelData.action === "solo") controller.toggleTrackSolo(lane.trackKey)
+                                              else controller.adjustTrackGain(lane.trackKey, audioButton.modelData.action === "up" ? 1 : -1)
                                           }
                                       }
                                   }
                               }
                           }
-                                     MouseArea {
-                                         id: actionMouse; anchors.fill: parent; hoverEnabled: true
-                                         enabled: modelData.allowed; cursorShape: Qt.PointingHandCursor
-                                         onClicked: if (modelData.direction === 0) controller.removeVisualTrack(lane.trackKey)
-                                                    else controller.shiftVisualTrack(lane.trackKey, modelData.direction)
-                                     }
-                                 }
-                             }
-                         }
                         Rectangle { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; height: 1; color: Theme.bgRoot }
                     }
                 }
@@ -328,6 +335,40 @@ Panel {
                             onMuteToggled: { controller.selectTimelineClip(clipKey); controller.toggleSelectedClipMute() }
                             onContextRequested: function(sx, sy) { controller.selectTimelineClip(clipKey); pane.clipContextRequested(sx, sy) }
                             onSnapGuide: function(x) { pane.snapGuideX = x }
+                        }
+                    }
+                }
+                // A dissolve is an edit relationship, not a media clip. Draw its
+                // real pre-edit interval over the outgoing side and end it at
+                // the incoming clip boundary.
+                Item {
+                    id: transitionLayer
+                    z: 5
+                    x: pane.gutterWidth; width: pane.timelineWidth; height: contentArea.height
+                    clip: true
+                    Repeater {
+                        model: controller.timelineClips
+                        delegate: Rectangle {
+                            visible: model.transitionIn && model.startProgress > 0 && model.transitionStartProgress < 1
+                            x: model.transitionStartProgress * pane.timelineWidth
+                            y: pane.titleLaneH + model.trackIndex * pane.trackLaneHeight + 6
+                            width: Math.max(8, (model.startProgress - model.transitionStartProgress) * pane.timelineWidth)
+                            height: pane.trackLaneHeight - 12
+                            radius: Theme.radiusS
+                            color: Theme.overlayStrong
+                            border.width: 1; border.color: Theme.focus
+                            Canvas {
+                                anchors.fill: parent
+                                onWidthChanged: requestPaint(); onHeightChanged: requestPaint()
+                                onPaint: {
+                                    var ctx = getContext("2d"); ctx.reset()
+                                    ctx.strokeStyle = Theme.focus; ctx.globalAlpha = 0.8; ctx.lineWidth = 1
+                                    ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(width, height)
+                                    ctx.moveTo(0, height); ctx.lineTo(width, 0); ctx.stroke()
+                                }
+                            }
+                            Text { visible: parent.width >= 56; anchors.centerIn: parent; text: "FUNDIDO"; color: Theme.textPrimary; font.pixelSize: 9; font.bold: true; font.letterSpacing: 0.5 }
+                            MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: { pane.forceActiveFocus(); controller.selectTimelineClip(model.clipKey) } }
                         }
                     }
                 }
