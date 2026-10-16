@@ -200,11 +200,11 @@ QSGNode* WaveformQuickItem::updatePaintNode(QSGNode* old_node, UpdatePaintNodeDa
   QColor edge_color = selected_ ? selected_color_ : normal_color_;
   QColor fill_color = edge_color;
   edge_color.setAlphaF(selected_ ? 1.0 : 0.82);
-  fill_color.setAlphaF(selected_ ? 0.9 : 0.62);
+  fill_color.setAlphaF(selected_ ? 0.52 : 0.32);
   QColor core_color = blend(edge_color, QColor{255, 255, 255}, selected_ ? 0.45 : 0.3);
-  core_color.setAlphaF(selected_ ? 0.88 : 0.58);
-  QColor axis_color = baseline_color_;
-  axis_color.setAlphaF(selected_ ? 0.95 : 0.78);
+  core_color.setAlphaF(selected_ ? 0.22 : 0.12);
+  QColor axis_color = blend(baseline_color_, QColor{255, 255, 255}, selected_ ? 0.62 : 0.32);
+  axis_color.setAlphaF(selected_ ? 0.96 : 0.8);
   if (muted_) {
     edge_color = blend(edge_color, QColor{0x8a, 0x93, 0xa0}, 0.8);
     edge_color.setAlphaF(edge_color.alphaF() * 0.6);

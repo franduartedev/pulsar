@@ -125,8 +125,6 @@ Rectangle {
         // Dark inset: the waveform reads against a constant backdrop whatever the clip colour.
         x: waveform.x; y: waveform.y; width: waveform.width; height: waveform.height
         visible: waveform.visible; radius: 3; color: Theme.waveformWell
-        border.width: block.selected ? 1 : 0
-        border.color: block.audioClip ? Theme.waveformAudio : Theme.waveform
     }
     WaveformItem {
         id: waveform
