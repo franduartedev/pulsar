@@ -47,3 +47,32 @@ frames per FFmpeg decoder); no unbounded render state was introduced.
 - Static titles only; no animation, subtitle semantics, or templates.
 - Track gain/mute/solo only; no buses, automation, plug-ins, or meter in this build.
 - CPU composition remains authoritative; no GPU renderer.
+
+## Visual polish checkpoint
+
+The public-facing workspace uses one graphite token palette and a restrained blue
+accent for focus, selection, the playhead, and primary actions. The Viewer remains
+the dominant region, the Timeline is the second-largest editing surface, and the
+Inspector is divided into contextual **VIDEO / AUDIO / EFECTOS** tabs. Unsupported
+effects are represented by an explicit empty state rather than inactive controls.
+
+Timeline presentation includes a zoom-aware ruler, full-height playhead, compact
+`Vn` / `An` track identities, clear mixer states, bounded asynchronous waveforms,
+bounded clip thumbnails, and a dissolve overlay drawn over its real pre-edit
+interval. The dissolve remains an edit relationship; no synthetic media clip was
+introduced.
+
+Qt offscreen captures were inspected at 1366×768 and 1920×1080 for the empty
+workspace, and at 1920×1080 with imported media. The compact timeline toolbar
+switches to glyph-first controls below 1250 px; secondary top-bar actions yield
+below 1120 px so the project identity and Export action remain readable. The
+default 1280×760 workspace also launches without QML warnings.
+
+No media presentation bounds changed during this pass: waveform generation still
+admits one active cache job, and timeline thumbnails still use one worker with a
+192-entry LRU cache. UI paint paths consume prepared waveform geometry and cached
+160×90 thumbnails; they do not synchronously decode media.
+
+Final automated gate (2026-10-16): desktop 55/55, ASAN/UBSAN 41/41, including the
+FFmpeg integration, export, waveform, still-image, transition, title-parity, safety,
+shutdown, and 100-clip stress coverage.
