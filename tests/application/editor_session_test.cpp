@@ -1,5 +1,6 @@
 #include "duration_sample_ring.hpp"
 #include "editor_session.hpp"
+#include "viewer_transform_mapping.hpp"
 #include "project_path_resolution.hpp"
 #include "timeline_zoom.hpp"
 
@@ -1725,6 +1726,18 @@ void duplicate_and_fades_in_the_session() {
   assert(stills.timeline_duration() == secs(10));
 }
 
+void viewer_mapping_ignores_letterbox_offsets_and_resize() {
+  const auto small = desktop::viewer_delta_to_canvas(120.0, -45.0, 600.0, 300.0);
+  const auto large = desktop::viewer_delta_to_canvas(240.0, -90.0, 1200.0, 600.0);
+  assert(std::abs(small.first - 0.2) < 1e-12);
+  assert(std::abs(small.second + 0.15) < 1e-12);
+  assert(small == large);
+  bool refused = false;
+  try { (void)desktop::viewer_delta_to_canvas(1.0, 1.0, 0.0, 100.0); }
+  catch (const std::invalid_argument&) { refused = true; }
+  assert(refused);
+}
+
 int main() {
   {
     EditorSession session;
@@ -1795,5 +1808,6 @@ int main() {
   select_adjacent_clip_follows_editorial_order();
   titles_in_the_session_and_ripple();
   duplicate_and_fades_in_the_session();
+  viewer_mapping_ignores_letterbox_offsets_and_resize();
   return 0;
 }

@@ -281,6 +281,29 @@ void undo_redo_restores_transform_exactly() {
   assert(restored.timeline().find_clip(clip)->visual_transform() == moved);
 }
 
+void interactive_transform_coalesces_to_one_history_entry() {
+  application::ProjectDocument document;
+  application::CommandProcessor processor{document};
+  Probe probe;
+  const auto media = processor.import_asset("video.mp4", probe);
+  const auto clip = processor.add_clip(media, domain::TimeRange{{0, {1, 1}}, {10, {1, 1}}},
+                                       {0, {1, 1}});
+  const auto before = processor.undo_size();
+  processor.begin_clip_visual_transform(clip);
+  processor.update_clip_visual_transform({0.1, 0.0, 1.0, 0.0, 1.0});
+  processor.update_clip_visual_transform({0.2, 0.1, 0.8, 0.0, 1.0});
+  processor.update_clip_visual_transform({0.3, 0.2, 0.6, 0.0, 1.0});
+  processor.end_clip_visual_transform();
+  assert(processor.undo_size() == before + 1);
+  assert(document.timeline().find_clip(clip)->visual_transform() ==
+         (domain::VisualTransform{0.3, 0.2, 0.6, 0.0, 1.0}));
+  assert(processor.undo());
+  assert(document.timeline().find_clip(clip)->visual_transform().is_default());
+  assert(processor.redo());
+  assert(document.timeline().find_clip(clip)->visual_transform() ==
+         (domain::VisualTransform{0.3, 0.2, 0.6, 0.0, 1.0}));
+}
+
 void empty_primary_with_transformed_upper_renders() {
   application::ProjectDocument document;
   application::CommandProcessor processor{document};
@@ -380,6 +403,7 @@ int main() {
   renderer_default_is_e1_exact_and_parity_holds();
   scaled_and_translated_layers_composite_in_order();
   undo_redo_restores_transform_exactly();
+  interactive_transform_coalesces_to_one_history_entry();
   empty_primary_with_transformed_upper_renders();
   missing_active_visual_fails_deterministically();
 }

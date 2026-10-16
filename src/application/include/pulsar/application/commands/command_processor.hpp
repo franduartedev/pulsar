@@ -50,6 +50,15 @@ public:
   void set_clip_fades(domain::ClipId clip_id, domain::MediaTime fade_in, domain::MediaTime fade_out);
   // Visual transform (position/scale/rotation/opacity); one undo step. No-op when unchanged.
   void set_clip_visual_transform(domain::ClipId clip_id, domain::VisualTransform transform);
+  // Direct-manipulation transaction. Preview updates mutate through the command
+  // processor but replace one history entry; end commits one logical undo step.
+  void begin_clip_visual_transform(domain::ClipId clip_id);
+  void update_clip_visual_transform(domain::VisualTransform transform);
+  void end_clip_visual_transform() noexcept;
+  void cancel_clip_visual_transform();
+  [[nodiscard]] bool clip_visual_transform_active() const noexcept {
+    return interactive_transform_.has_value();
+  }
   [[nodiscard]] domain::ClipId split_clip(domain::ClipId clip_id,
                                            domain::MediaTime split_timeline_position);
   [[nodiscard]] domain::MediaId import_asset(const std::filesystem::path& source_locator,
@@ -105,12 +114,18 @@ private:
   bool redo_one();
   void rollback_group(std::uint64_t group);
 
+  struct InteractiveTransform {
+    domain::ClipId clip_id;
+    bool has_history_entry{false};
+  };
+
   ProjectDocument& document_;
   std::size_t history_capacity_;
   std::deque<ExecutedCommand> undo_stack_;
   std::deque<ExecutedCommand> redo_stack_;
   std::uint64_t next_group_{1};
   std::uint64_t open_group_{0};
+  std::optional<InteractiveTransform> interactive_transform_;
 };
 
 } // namespace pulsar::application

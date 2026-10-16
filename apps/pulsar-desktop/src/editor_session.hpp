@@ -255,6 +255,10 @@ public:
   // Visual transform of a clip (position/scale/rotation/opacity). One undo step.
   void set_clip_visual_transform(domain::ClipId clip, domain::VisualTransform transform);
   void reset_clip_visual_transform(domain::ClipId clip);
+  void begin_clip_visual_transform(domain::ClipId clip);
+  void update_clip_visual_transform(domain::VisualTransform transform);
+  void end_clip_visual_transform();
+  void cancel_clip_visual_transform();
   // "Duplicar": a copy of the selected clip (or title) right after the original, on the same
   // track, with the same source range, gain, mute and fades. One undo step; the copy becomes the
   // selection. Throws DuplicateException{NoSpace} (nothing changes) when the room is taken.

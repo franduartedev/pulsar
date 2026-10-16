@@ -1,6 +1,7 @@
 #include "desktop_controller.hpp"
 #include "sound_auditioner.hpp"
 #include "timeline_zoom.hpp"
+#include "viewer_transform_mapping.hpp"
 #include <pulsar/media/ffmpeg/ffmpeg_offline_frame_scaler.hpp>
 #include "builtin_sound_catalog.hpp"
 #include <QColor>
@@ -545,6 +546,7 @@ void DesktopController::onThumbnailFinished(const QString& key, bool ok) {
 
 void DesktopController::publishTimeline() {
   emit selectedTitleOnScreenChanged();   // selection / range edits change whether the title is drawn
+  emit selectedClipOnScreenChanged();
   const bool old_has_media = has_media_;
   const QString old_duration = duration_text_;
   if (!active_session_) { selected_clip_key_.clear(); emit timelineChanged(); publishProjectDirty(); return; }
@@ -1488,6 +1490,37 @@ double DesktopController::selectedClipOpacity() const {
   const auto* clip = active_session_->document().timeline().find_clip(*active_session_->selected_clip());
   return clip ? clip->visual_transform().opacity : 1.0;
 }
+QVariantMap DesktopController::selectedClipVisualGeometry() const {
+  QVariantMap result;
+  if (!active_session_ || !active_session_->selected_clip() || !active_session_->document().canvas()) {
+    return result;
+  }
+  const auto* clip = active_session_->document().timeline().find_clip(*active_session_->selected_clip());
+  if (clip == nullptr) return result;
+  const auto asset = active_session_->document().find_asset(clip->media_id());
+  if (!asset || !asset->has_video()) return result;
+  const auto& canvas = *active_session_->document().canvas();
+  const double source_aspect = static_cast<double>(asset->metadata().width) / asset->metadata().height;
+  const double canvas_aspect = static_cast<double>(canvas.width) / canvas.height;
+  double fitted_width = 1.0;
+  double fitted_height = 1.0;
+  if (source_aspect > canvas_aspect) fitted_height = canvas_aspect / source_aspect;
+  else fitted_width = source_aspect / canvas_aspect;
+  const auto& transform = clip->visual_transform();
+  result.insert(QStringLiteral("centerX"), 0.5 + transform.position_x);
+  result.insert(QStringLiteral("centerY"), 0.5 + transform.position_y);
+  result.insert(QStringLiteral("width"), fitted_width * transform.scale);
+  result.insert(QStringLiteral("height"), fitted_height * transform.scale);
+  result.insert(QStringLiteral("rotation"), transform.rotation_degrees);
+  return result;
+}
+bool DesktopController::selectedClipOnScreen() const {
+  if (!active_session_ || !active_session_->selected_clip()) return false;
+  const auto* clip = active_session_->document().timeline().find_clip(*active_session_->selected_clip());
+  if (clip == nullptr || !clip->timeline_range().contains(active_session_->playback_position())) return false;
+  const auto asset = active_session_->document().find_asset(clip->media_id());
+  return asset && asset->has_video();
+}
 void DesktopController::setSelectedClipTransform(double pos_x, double pos_y, double scale,
                                                   double rotation_degrees, double opacity) {
   if (!active_session_ || !active_session_->selected_clip()) return;
@@ -1513,6 +1546,56 @@ void DesktopController::resetSelectedClipTransform() {
   } catch (const std::exception& error) {
     logCause("transform reset failed", error);
     setError(QStringLiteral("No se pudo restablecer la transformación."));
+  }
+}
+void DesktopController::beginSelectedClipTransform() {
+  if (!active_session_ || !active_session_->selected_clip()) return;
+  try {
+    active_session_->begin_clip_visual_transform(*active_session_->selected_clip());
+  } catch (const std::exception& error) {
+    logCause("transform interaction begin failed", error);
+    setError(QStringLiteral("No se pudo iniciar la transformación."));
+  }
+}
+void DesktopController::updateSelectedClipTransform(double pos_x, double pos_y, double scale,
+                                                     double rotation_degrees, double opacity) {
+  if (!active_session_ || !active_session_->selected_clip()) return;
+  try {
+    active_session_->update_clip_visual_transform(
+        pulsar::domain::VisualTransform{pos_x, pos_y, scale, rotation_degrees, opacity});
+    clearError();
+    clearProgram(has_video_media_ ? "loading" : "empty");
+    publishTimeline();
+  } catch (const std::exception& error) {
+    logCause("transform interaction update failed", error);
+    setError(QStringLiteral("Esa transformación no es válida."));
+  }
+}
+void DesktopController::updateSelectedClipTranslationFromViewer(
+    double start_x, double start_y, double delta_x, double delta_y, double painted_width,
+    double painted_height, double scale, double rotation_degrees, double opacity) {
+  try {
+    const auto [canvas_x, canvas_y] = pulsar::desktop::viewer_delta_to_canvas(
+        delta_x, delta_y, painted_width, painted_height);
+    updateSelectedClipTransform(start_x + canvas_x, start_y + canvas_y, scale,
+                                rotation_degrees, opacity);
+  } catch (const std::exception& error) {
+    logCause("Viewer transform mapping failed", error);
+    setError(QStringLiteral("El visor no tiene un área válida para transformar el clip."));
+  }
+}
+void DesktopController::endSelectedClipTransform() {
+  if (active_session_) active_session_->end_clip_visual_transform();
+}
+void DesktopController::cancelSelectedClipTransform() {
+  if (!active_session_) return;
+  try {
+    active_session_->cancel_clip_visual_transform();
+    clearProgram(has_video_media_ ? "loading" : "empty");
+    publishTimeline();
+  } catch (const std::exception& error) {
+    logCause("transform interaction cancel failed", error);
+    setError(QStringLiteral("No se pudo cancelar la transformación."));
   }
 }
 void DesktopController::duplicateSelected() {
@@ -2713,7 +2796,7 @@ void DesktopController::displayComposition(const pulsar::application::TimelineCo
 }
 void DesktopController::clearProgram(QString state){displayed_composite_.reset();title_gap_key_.clear();const bool changed=viewer_state_!=state||!preview_source_.isEmpty();image_provider_.clear();preview_source_.clear();displayed_identity_.reset();viewer_state_=std::move(state);if(changed)emit previewChanged();}
 void DesktopController::updateTick(){if(!active_session_||!has_media_){return;}try{const auto presentation=active_session_->update_playback();presentTimeline(presentation);const bool now_playing=active_session_->playback_intent()==pulsar::application::PlaybackIntent::Playing;if(now_playing!=playing_){playing_=now_playing;emit playbackChanged();}updatePositionProperties();updateDiagnostics();}catch(const std::exception& error){active_session_->pause();playing_=false;emit playbackChanged();clearProgram("error");setError(QString::fromUtf8(error.what()));setStatus("Error");}}
-void DesktopController::updatePositionProperties(){if(!active_session_)return;const auto position=active_session_->playback_position();const auto duration=active_session_->timeline_duration();position_text_=formatTime(position);duration_text_=formatTime(duration);progress_=duration>MediaTime::zero()?std::clamp(secondsAsDouble(position)/secondsAsDouble(duration),0.0,1.0):0.0;timeline_playhead_progress_=timeline_view_start_&&timeline_view_duration_&&position>=*timeline_view_start_&&position<=*timeline_view_start_+*timeline_view_duration_?timelinePixelAt(position,1.0):-1.0;emit positionChanged();emit selectedTitleOnScreenChanged();emit timelinePlayheadChanged();emit editActionStateChanged();}
+void DesktopController::updatePositionProperties(){if(!active_session_)return;const auto position=active_session_->playback_position();const auto duration=active_session_->timeline_duration();position_text_=formatTime(position);duration_text_=formatTime(duration);progress_=duration>MediaTime::zero()?std::clamp(secondsAsDouble(position)/secondsAsDouble(duration),0.0,1.0):0.0;timeline_playhead_progress_=timeline_view_start_&&timeline_view_duration_&&position>=*timeline_view_start_&&position<=*timeline_view_start_+*timeline_view_duration_?timelinePixelAt(position,1.0):-1.0;emit positionChanged();emit selectedTitleOnScreenChanged();emit selectedClipOnScreenChanged();emit timelinePlayheadChanged();emit editActionStateChanged();}
 void DesktopController::publishProjectDirty() {
   const bool now = projectDirty();
   if (now == published_project_dirty_) {

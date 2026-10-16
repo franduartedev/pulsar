@@ -636,6 +636,22 @@ void EditorSession::reset_clip_visual_transform(domain::ClipId clip) {
   set_clip_visual_transform(clip, domain::VisualTransform{});
 }
 
+void EditorSession::begin_clip_visual_transform(domain::ClipId clip) {
+  processor_.begin_clip_visual_transform(clip);
+}
+
+void EditorSession::update_clip_visual_transform(domain::VisualTransform transform) {
+  processor_.update_clip_visual_transform(transform);
+  synchronize_document_state();
+}
+
+void EditorSession::end_clip_visual_transform() { processor_.end_clip_visual_transform(); }
+
+void EditorSession::cancel_clip_visual_transform() {
+  processor_.cancel_clip_visual_transform();
+  synchronize_document_state();
+}
+
 void EditorSession::duplicate_selected() {
   if (selected_title_.has_value()) {
     const auto* title = document_.find_title(*selected_title_);

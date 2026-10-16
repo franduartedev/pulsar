@@ -101,6 +101,8 @@ class DesktopController final : public QObject {
   Q_PROPERTY(double selectedClipScale READ selectedClipScale NOTIFY timelineChanged)
   Q_PROPERTY(double selectedClipRotation READ selectedClipRotation NOTIFY timelineChanged)
   Q_PROPERTY(double selectedClipOpacity READ selectedClipOpacity NOTIFY timelineChanged)
+  Q_PROPERTY(QVariantMap selectedClipVisualGeometry READ selectedClipVisualGeometry NOTIFY timelineChanged)
+  Q_PROPERTY(bool selectedClipOnScreen READ selectedClipOnScreen NOTIFY selectedClipOnScreenChanged)
   Q_PROPERTY(bool canDuplicate READ canDuplicate NOTIFY timelineChanged)
   Q_PROPERTY(QString selectedClipKind READ selectedClipKind NOTIFY timelineChanged)   // video | image | color | audio | ""
   Q_PROPERTY(bool selectedClipHasAudio READ selectedClipHasAudio NOTIFY timelineChanged)
@@ -178,6 +180,8 @@ public:
   [[nodiscard]] double selectedClipScale() const;
   [[nodiscard]] double selectedClipRotation() const;
   [[nodiscard]] double selectedClipOpacity() const;
+  [[nodiscard]] QVariantMap selectedClipVisualGeometry() const;
+  [[nodiscard]] bool selectedClipOnScreen() const;
   [[nodiscard]] bool canDuplicate() const { return active_session_ && active_session_->can_duplicate_selected(); }
   [[nodiscard]] bool selectedClipHasAudio() const {
     return active_session_ && active_session_->selected_clip().has_value() &&
@@ -246,6 +250,14 @@ public:
   Q_INVOKABLE void setSelectedClipTransform(double pos_x, double pos_y, double scale,
                                              double rotation_degrees, double opacity);
   Q_INVOKABLE void resetSelectedClipTransform();
+  Q_INVOKABLE void beginSelectedClipTransform();
+  Q_INVOKABLE void updateSelectedClipTransform(double pos_x, double pos_y, double scale,
+                                                double rotation_degrees, double opacity);
+  Q_INVOKABLE void updateSelectedClipTranslationFromViewer(double start_x, double start_y,
+      double delta_x, double delta_y, double painted_width, double painted_height,
+      double scale, double rotation_degrees, double opacity);
+  Q_INVOKABLE void endSelectedClipTransform();
+  Q_INVOKABLE void cancelSelectedClipTransform();
   Q_INVOKABLE void duplicateSelected();
   // ---- Drag & drop from the library. `lane` is the index of the timeline track under the
   // cursor, `pixel` the x inside the timeline area. The preview and the drop share one resolver,
@@ -314,7 +326,7 @@ public:
   Q_INVOKABLE void detachWaveformItem(QObject* item);
 signals:
   void statusChanged(); void technicalStatusChanged(); void mediaChanged(); void errorChanged();
-  void previewChanged(); void auditionChanged(); void positionChanged(); void selectedTitleOnScreenChanged(); void playbackChanged(); void busyChanged();
+  void previewChanged(); void auditionChanged(); void positionChanged(); void selectedTitleOnScreenChanged(); void selectedClipOnScreenChanged(); void playbackChanged(); void busyChanged();
   void exportRunningChanged(); void exportProgressChanged(); void exportStatusChanged();
   void exportDestinationChanged();
   void projectDirtyChanged(); void activeProjectPathChanged();

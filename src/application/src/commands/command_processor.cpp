@@ -144,13 +144,63 @@ void CommandProcessor::set_clip_fades(domain::ClipId clip_id, domain::MediaTime 
 }
 
 void CommandProcessor::set_clip_visual_transform(domain::ClipId clip_id,
-                                                 domain::VisualTransform transform) {
+                                                  domain::VisualTransform transform) {
   validate_visual_transform(transform);
   if (const auto* clip = document_.timeline().find_clip(clip_id);
       clip != nullptr && clip->visual_transform() == transform) {
     return;
   }
   execute(SetClipVisualTransformCommand{clip_id, transform});
+}
+
+void CommandProcessor::begin_clip_visual_transform(domain::ClipId clip_id) {
+  if (interactive_transform_) throw std::logic_error{"visual transform edit already active"};
+  if (open_group_ != 0) throw std::logic_error{"cannot begin visual transform inside command group"};
+  if (document_.timeline().find_clip(clip_id) == nullptr) {
+    throw std::invalid_argument{"clip id does not exist in timeline"};
+  }
+  interactive_transform_ = InteractiveTransform{clip_id, false};
+}
+
+void CommandProcessor::update_clip_visual_transform(domain::VisualTransform transform) {
+  if (!interactive_transform_) throw std::logic_error{"no visual transform edit active"};
+  validate_visual_transform(transform);
+  const auto clip_id = interactive_transform_->clip_id;
+  const auto* clip = document_.timeline().find_clip(clip_id);
+  if (clip == nullptr) throw std::logic_error{"interactive transform clip disappeared"};
+  if (clip->visual_transform() == transform) return;
+
+  if (!interactive_transform_->has_history_entry) {
+    set_clip_visual_transform(clip_id, transform);
+    interactive_transform_->has_history_entry = history_capacity_ != 0;
+    return;
+  }
+
+  if (undo_stack_.empty()) throw std::logic_error{"interactive transform history disappeared"};
+  auto* prior = std::get_if<SetClipVisualTransformCommand>(&undo_stack_.back().forward);
+  if (prior == nullptr || prior->clip_id != clip_id || undo_stack_.back().group != 0) {
+    throw std::logic_error{"interactive transform is not the newest command"};
+  }
+  document_.ensure_new_edit_possible();
+  const SetClipVisualTransformCommand update{clip_id, transform};
+  apply(document_, update, ApplyMode::NewEdit);
+  document_.commit_new_edit();
+  undo_stack_.back().forward = update;
+  undo_stack_.back().after_state_id = document_.history_state_id();
+  undo_stack_.back().canvas_after = document_.canvas_;
+  redo_stack_.clear();
+}
+
+void CommandProcessor::end_clip_visual_transform() noexcept { interactive_transform_.reset(); }
+
+void CommandProcessor::cancel_clip_visual_transform() {
+  if (!interactive_transform_) return;
+  const bool has_entry = interactive_transform_->has_history_entry;
+  interactive_transform_.reset();
+  if (!has_entry) return;
+  if (!undo_one()) throw std::logic_error{"interactive transform history disappeared"};
+  if (redo_stack_.empty()) throw std::logic_error{"interactive transform rollback failed"};
+  redo_stack_.pop_back();
 }
 
 domain::ClipId CommandProcessor::split_clip(domain::ClipId clip_id,
@@ -188,6 +238,7 @@ void CommandProcessor::end_group() noexcept {
 }
 
 bool CommandProcessor::undo() {
+  if (interactive_transform_) throw std::logic_error{"cannot undo during visual transform edit"};
   if (undo_stack_.empty()) return false;
   const auto group = undo_stack_.back().group;
   if (!undo_one()) return false;
@@ -198,6 +249,7 @@ bool CommandProcessor::undo() {
 }
 
 bool CommandProcessor::redo() {
+  if (interactive_transform_) throw std::logic_error{"cannot redo during visual transform edit"};
   if (redo_stack_.empty()) return false;
   const auto group = redo_stack_.back().group;
   if (!redo_one()) return false;

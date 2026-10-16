@@ -49,6 +49,93 @@ Item {
 
         Image { id: frame; anchors.fill: parent; source: controller.previewSource; cache: false; fillMode: Image.PreserveAspectFit; visible: controller.previewSource.length > 0 }
 
+        // Clip transform overlay. Viewer pixels are transient input only: deltas
+        // are divided by the painted canvas and sent as canvas-relative values.
+        Item {
+            id: clipPlacer
+            anchors.fill: parent
+            readonly property var geometry: controller.selectedClipVisualGeometry
+            readonly property bool ready: controller.previewSource.length > 0 && controller.selectedClipOnScreen
+                                          && geometry !== undefined && geometry.width !== undefined && frame.paintedWidth > 0
+            readonly property real picX: frame.x + (frame.width - frame.paintedWidth) / 2
+            readonly property real picY: frame.y + (frame.height - frame.paintedHeight) / 2
+            visible: ready
+
+            Item {
+                id: clipBounds
+                x: clipPlacer.picX + (clipPlacer.geometry.centerX - clipPlacer.geometry.width / 2) * frame.paintedWidth
+                y: clipPlacer.picY + (clipPlacer.geometry.centerY - clipPlacer.geometry.height / 2) * frame.paintedHeight
+                width: Math.max(8, clipPlacer.geometry.width * frame.paintedWidth)
+                height: Math.max(8, clipPlacer.geometry.height * frame.paintedHeight)
+                rotation: clipPlacer.geometry.rotation
+                transformOrigin: Item.Center
+
+                Rectangle {
+                    anchors.fill: parent
+                    color: "transparent"
+                    border.width: moveArea.containsMouse || moveArea.pressed ? 2 : 1
+                    border.color: Theme.focus
+                }
+                MouseArea {
+                    id: moveArea
+                    anchors.fill: parent
+                    anchors.margins: 7
+                    hoverEnabled: true
+                    cursorShape: pressed ? Qt.ClosedHandCursor : Qt.OpenHandCursor
+                    drag.target: moveGhost
+                    property real startX: 0
+                    property real startY: 0
+                    onPressed: {
+                        startX = controller.selectedClipPosX; startY = controller.selectedClipPosY
+                        moveGhost.x = 0; moveGhost.y = 0
+                        controller.beginSelectedClipTransform()
+                    }
+                    onPositionChanged: if (drag.active) {
+                        var angle = clipBounds.rotation * Math.PI / 180
+                        var screenDx = Math.cos(angle) * moveGhost.x - Math.sin(angle) * moveGhost.y
+                        var screenDy = Math.sin(angle) * moveGhost.x + Math.cos(angle) * moveGhost.y
+                        controller.updateSelectedClipTranslationFromViewer(startX, startY, screenDx, screenDy,
+                            frame.paintedWidth, frame.paintedHeight,
+                            controller.selectedClipScale, controller.selectedClipRotation, controller.selectedClipOpacity)
+                    }
+                    onReleased: { moveGhost.x = 0; moveGhost.y = 0; controller.endSelectedClipTransform() }
+                    onCanceled: { moveGhost.x = 0; moveGhost.y = 0; controller.cancelSelectedClipTransform() }
+                    Item { id: moveGhost }
+                }
+                Repeater {
+                    model: [{sx: -1, sy: -1}, {sx: 1, sy: -1}, {sx: -1, sy: 1}, {sx: 1, sy: 1}]
+                    delegate: Rectangle {
+                        required property var modelData
+                        readonly property int sx: modelData.sx
+                        readonly property int sy: modelData.sy
+                        x: sx < 0 ? -width / 2 : clipBounds.width - width / 2
+                        y: sy < 0 ? -height / 2 : clipBounds.height - height / 2
+                        width: 11; height: 11; radius: 2
+                        color: Theme.focus
+                        border.width: 1; border.color: Theme.bgViewer
+                        MouseArea {
+                            anchors.fill: parent; anchors.margins: -6
+                            cursorShape: Qt.SizeFDiagCursor
+                            drag.target: scaleGhost
+                            property real startScale: 1
+                            onPressed: { startScale = controller.selectedClipScale; scaleGhost.x = 0; scaleGhost.y = 0; controller.beginSelectedClipTransform() }
+                            onPositionChanged: {
+                                if (!drag.active) return
+                                var fx = 1 + parent.sx * scaleGhost.x / Math.max(4, clipBounds.width / 2)
+                                var fy = 1 + parent.sy * scaleGhost.y / Math.max(4, clipBounds.height / 2)
+                                var factor = Math.max(0.01, (fx + fy) / 2)
+                                controller.updateSelectedClipTransform(controller.selectedClipPosX, controller.selectedClipPosY,
+                                    Math.max(0.01, Math.min(100, startScale * factor)), controller.selectedClipRotation, controller.selectedClipOpacity)
+                            }
+                            onReleased: { scaleGhost.x = 0; scaleGhost.y = 0; controller.endSelectedClipTransform() }
+                            onCanceled: { scaleGhost.x = 0; scaleGhost.y = 0; controller.cancelSelectedClipTransform() }
+                            Item { id: scaleGhost }
+                        }
+                    }
+                }
+            }
+        }
+
         // Title placement: the selected title's block, drawn where the compositor puts it. Dragging
         // moves a ghost outline (no per-move re-render); releasing commits ONE position edit, which
         // preview and export both honour. Centre guides snap at the middle of the frame.
