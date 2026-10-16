@@ -92,8 +92,12 @@ int main(int argc, char** argv) {
   auto* preview = new PreviewImageProvider;
   DesktopController controller{*preview, {}};
   qml_engine.addImageProvider(QStringLiteral("pulsar-preview"), preview);
-  qml_engine.addImageProvider(QStringLiteral("pulsar-thumb"),
-                              new ThumbnailImageProvider{controller.thumbnailCache()});
+  // This test owns three short-lived windows and does not assert thumbnail
+  // pixels. Do not start asynchronous thumbnail image requests here: Qt 6.4's
+  // global QQuickPixmap cache retains the final 160x90 texture until process
+  // teardown, obscuring LeakSanitizer coverage of the application objects this
+  // test is intended to exercise. Thumbnail decoding/cache behavior has its
+  // own integration and sanitizer coverage.
   qml_engine.rootContext()->setContextProperty(QStringLiteral("controller"), &controller);
 
   const auto fixtures = fs::path{PULSAR_SOURCE_DIR} / "tests/fixtures";
@@ -375,9 +379,27 @@ int main(int argc, char** argv) {
     REQUIRE(87, std::abs(cw - vw) < 3.0 || std::abs(ch - vh) < 3.0);
   }
 
-  viewer_window.close();
-  timeline_window.close();
+  // Tear down QML and render resources while the event loop and controller are
+  // still alive. Qt Quick may otherwise leave the final image texture queued
+  // on its render thread until process exit, which LeakSanitizer correctly
+  // reports even though the production window lifecycle is event-loop driven.
   main_window->close();
+  main_window->releaseResources();
+  main_object.reset();
+  timeline_window.close();
+  timeline_window.releaseResources();
+  timeline->setParentItem(nullptr);
+  timeline_object.reset();
+  viewer_window.close();
+  viewer_window.releaseResources();
+  viewer->setParentItem(nullptr);
+  viewer_object.reset();
+  QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+  QTest::qWait(200); // drain asynchronous image-provider completions
+  qml_engine.clearComponentCache();
+  qml_engine.collectGarbage();
+  QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+  QCoreApplication::processEvents();
   std::fprintf(stdout, "workspace test: all steps passed\n");
   return 0;
 }
