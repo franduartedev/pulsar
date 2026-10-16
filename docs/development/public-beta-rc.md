@@ -183,4 +183,23 @@ Do not begin E6 automatically. Do not publish artifacts automatically.
 
 ## Release-evidence addendum
 
-To be completed immediately after building the artifacts from this baseline commit.
+- **Packaged source HEAD:** `6b84751a1110f5852a707aa892f4ff27ae9d4891`
+- **Package command:** `./packaging/linux/build-release.sh`
+- **Checksum verification:** 4/4 passed with `sha256sum -c dist/SHA256SUMS`.
+- **Portable tar version smoke:** `PULSAR 0.2.0-beta.1`.
+- **AppImage version smoke:** `PULSAR 0.2.0-beta.1` using
+  `APPIMAGE_EXTRACT_AND_RUN=1`.
+- **Release GUI launch:** passed against `build-release-rc` with the offscreen Qt
+  platform; the process stayed responsive until the five-second smoke timeout.
+- **Packaged GUI physical launch:** remains part of human sign-off. The package
+  intentionally ships XCB/Wayland rather than Qt's test-only offscreen platform,
+  and this build host has no Xvfb or physical display.
+
+| Artifact | Bytes | SHA-256 |
+|---|---:|---|
+| `dist/PULSAR-0.2.0-beta.1-linux-x86_64.tar.gz` | 63,524,353 | `24bcb8ebb97adaa0dbff978b2c87750b429ea86f62333369180c187270d9af68` |
+| `dist/PULSAR-0.2.0-beta.1-x86_64.AppImage` | 58,186,232 | `2d79bafdbcc2dbdbba854bc1a4f3e458cd5120df2fbbbd0b12e6b8982bcd0222` |
+| `dist/PULSAR-0.2.0-beta.1-source.tar.gz` | 2,800,905 | `48b021d531d884d3477e685ce436b3ceafe23bf40b49a90dfab8f3818bb2e431` |
+| `dist/PULSAR-0.2.0-beta.1-third-party-source.tar.gz` | 12,379,341 | `e2ff9bdfc3c04e0ffa84acbc4e7e7f8ddd7722b526f5098d658c43d061928a9a` |
+
+The artifact set was generated locally and was not uploaded or published.
