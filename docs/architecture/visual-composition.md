@@ -95,3 +95,17 @@ transforms apply in canvas space, so a future proxy only substitutes decode
 sources. Alpha converges on premultiplied source-over (titles already blend
 that way); video layers stay opaque-canvased with effective alpha from
 opacity × source alpha, integer-rounded and deterministic.
+
+## Direct manipulation and cross dissolve (E2.2 / E3.1)
+
+Viewer selection geometry is derived from canvas/source aspect and the persisted
+`VisualTransform`. Viewer deltas are divided by the painted canvas dimensions; letterbox
+offsets, widget dimensions and Viewer zoom never enter the document. A drag is an
+interactive `CommandProcessor` transaction whose preview updates replace one history
+entry, so release produces one logical undo step.
+
+`Transition` is an explicit adjacent-clip relationship. A cross dissolve evaluates the
+ordinary outgoing layer plus a pre-rolled incoming layer in `CompositionPlan`; the renderer
+has no UI-transition knowledge. Active decode state is keyed by clip so two clips on one
+track can coexist only while the plan requires them. Preview and export therefore consume
+the same source times, opacity curve and compositor.

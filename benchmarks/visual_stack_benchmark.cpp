@@ -70,6 +70,38 @@ app::ProjectSnapshot project(int layers, const std::filesystem::path& locator,
   return snapshot;
 }
 
+app::ProjectSnapshot dissolve_project(const std::filesystem::path& locator, bool showcase) {
+  app::ProjectDocument document;
+  auto snapshot = document.snapshot();
+  snapshot.canvas = app::ProjectCanvas{width, height, rate};
+  snapshot.assets.emplace_back(d::MediaId{1}, locator, 0, duration,
+      app::VideoAssetMetadata{"raw", width, height, {1, 30}, rate, std::nullopt});
+  snapshot.timeline.insert_clip(snapshot.video_track_id,
+      d::Clip{d::ClipId{1}, d::MediaId{1}, {{0, {1, 1}}, {1, {1, 1}}}, {0, {1, 1}}});
+  snapshot.timeline.insert_clip(snapshot.video_track_id,
+      d::Clip{d::ClipId{2}, d::MediaId{1}, {{1, {1, 1}}, {2, {1, 1}}}, {1, {1, 1}}});
+  snapshot.transitions.push_back({snapshot.video_track_id, d::ClipId{1}, d::ClipId{2},
+                                  d::TransitionType::CrossDissolve, {1, {1, 1}}});
+  if (showcase) {
+    for (int index = 0; index < 2; ++index) {
+      const d::TrackId track{static_cast<std::uint64_t>(index + 2)};
+      snapshot.timeline.add_track(d::Track{track, d::TrackKind::Video});
+      snapshot.visual_track_ids.push_back(track);
+      snapshot.timeline.insert_clip(track, d::Clip{d::ClipId{static_cast<std::uint64_t>(index + 3)},
+          d::MediaId{1}, {{0, {1, 1}}, {2, {1, 1}}}, {0, {1, 1}}, 0.0, false,
+          d::MediaTime::zero(), d::MediaTime::zero(),
+          d::VisualTransform{index == 0 ? 0.28 : -0.3, index == 0 ? 0.25 : -0.3,
+                             index == 0 ? 0.38 : 0.22, 0.0, index == 0 ? 1.0 : 0.85}});
+    }
+    snapshot.titles.emplace_back(d::TitleId{1}, "PULSAR", d::TimeRange{{1, {1, 2}}, {3, {1, 2}}});
+  }
+  snapshot.allocator_state.next_media_id = 2;
+  snapshot.allocator_state.next_clip_id = showcase ? 5 : 3;
+  snapshot.allocator_state.next_track_id = showcase ? 4 : 2;
+  snapshot.allocator_state.next_title_id = showcase ? 2 : 1;
+  return snapshot;
+}
+
 void run(int layers, const std::filesystem::path& locator, bool real_media, bool transformed = false) {
   const auto snapshot = project(layers, locator, transformed);
   const auto plan = ex::ExportPlan::build(snapshot);
@@ -94,6 +126,25 @@ void run(int layers, const std::filesystem::path& locator, bool real_media, bool
             << metrics.peak_active_decoders << ", peak retained source frames "
             << metrics.peak_live_source_frames << '\n';
 }
+
+void run_scenario(std::string_view label, app::ProjectSnapshot snapshot,
+                  bool real_media) {
+  const auto plan = ex::ExportPlan::build(snapshot);
+  Factory factory;
+  pulsar::media::ffmpeg::FFmpegOfflineVideoSourceFactory ffmpeg;
+  ex::OfflineVideoRenderer renderer{plan, real_media ? static_cast<ex::OfflineVideoSourceFactory&>(ffmpeg)
+                                                      : static_cast<ex::OfflineVideoSourceFactory&>(factory)};
+  const auto start = std::chrono::steady_clock::now();
+  for (int i = 0; i < frames; ++i) (void)renderer.render_frame(d::FrameNumber{i});
+  const auto elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+  const auto& metrics = renderer.metrics();
+  std::cout << (real_media ? "FFmpeg " : "CPU synthetic ") << label << ", " << width << 'x'
+            << height << ", " << frames << " frames: " << elapsed << " s (" << frames / elapsed
+            << " fps, " << elapsed * 1000.0 / frames << " ms/frame); peak decoders "
+            << metrics.peak_active_decoders << ", peak retained source frames "
+            << metrics.peak_live_source_frames << ", composite ms "
+            << metrics.composite_nanoseconds / 1'000'000.0 << '\n';
+}
 } // namespace
 
 int main(int argc, char** argv) {
@@ -103,4 +154,6 @@ int main(int argc, char** argv) {
   run(1, locator, real_media, false);
   run(1, locator, real_media, true);
   run(3, locator, real_media, true);
+  run_scenario("2 clips + cross dissolve", dissolve_project(locator, false), real_media);
+  run_scenario("showcase composition", dissolve_project(locator, true), real_media);
 }
