@@ -652,6 +652,54 @@ void EditorSession::cancel_clip_visual_transform() {
   synchronize_document_state();
 }
 
+bool EditorSession::selected_clip_has_transition() const {
+  if (!selected_clip_) return false;
+  return std::any_of(document_.transitions().begin(), document_.transitions().end(), [&](const auto& transition) {
+    return transition.outgoing_clip_id == *selected_clip_ || transition.incoming_clip_id == *selected_clip_;
+  });
+}
+
+void EditorSession::add_cross_dissolve_at_selected_edit() {
+  if (!selected_clip_) throw std::invalid_argument{"select a clip beside the edit"};
+  for (const auto& track : document_.timeline().tracks()) {
+    if (track.kind() != domain::TrackKind::Video) continue;
+    const auto& clips = track.clips();
+    for (std::size_t i = 0; i < clips.size(); ++i) {
+      if (clips[i].id() != *selected_clip_) continue;
+      const domain::Clip* outgoing = nullptr;
+      const domain::Clip* incoming = nullptr;
+      if (i + 1 < clips.size() && clips[i].timeline_range().end() == clips[i + 1].timeline_range().start()) {
+        outgoing = &clips[i]; incoming = &clips[i + 1];
+      } else if (i > 0 && clips[i - 1].timeline_range().end() == clips[i].timeline_range().start()) {
+        outgoing = &clips[i - 1]; incoming = &clips[i];
+      }
+      if (outgoing == nullptr) throw std::invalid_argument{"selected clip has no adjacent edit"};
+      const auto one_second = domain::MediaTime{1, domain::Rational{1, 1}};
+      auto duration = one_second;
+      if (duration > outgoing->duration()) duration = outgoing->duration();
+      if (duration > incoming->source_range().start()) duration = incoming->source_range().start();
+      if (duration <= domain::MediaTime::zero()) {
+        throw std::invalid_argument{"incoming clip has no source handle for a dissolve"};
+      }
+      processor_.add_transition({track.id(), outgoing->id(), incoming->id(),
+                                 domain::TransitionType::CrossDissolve, duration});
+      synchronize_document_state();
+      return;
+    }
+  }
+  throw std::invalid_argument{"selected clip is not on a video track"};
+}
+
+void EditorSession::remove_selected_clip_transition() {
+  if (!selected_clip_) return;
+  const auto found = std::find_if(document_.transitions().begin(), document_.transitions().end(), [&](const auto& transition) {
+    return transition.outgoing_clip_id == *selected_clip_ || transition.incoming_clip_id == *selected_clip_;
+  });
+  if (found == document_.transitions().end()) return;
+  processor_.remove_transition(*found);
+  synchronize_document_state();
+}
+
 void EditorSession::duplicate_selected() {
   if (selected_title_.has_value()) {
     const auto* title = document_.find_title(*selected_title_);

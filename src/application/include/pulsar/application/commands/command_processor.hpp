@@ -40,6 +40,8 @@ public:
   domain::TitleId add_title(domain::Title title);
   void replace_title(domain::Title title);
   void remove_title(domain::TitleId id);
+  void add_transition(domain::Transition transition);
+  void remove_transition(domain::Transition transition);
   void move_clip(domain::ClipId clip_id, domain::TrackId destination_track_id,
                  domain::MediaTime timeline_start);
   void trim_clip_start(domain::ClipId clip_id, domain::MediaTime timeline_start);

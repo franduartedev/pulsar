@@ -35,6 +35,7 @@ public:
   [[nodiscard]] domain::ClipId next_clip_id() const;
   // Titles are kept sorted by start and never overlap each other (one title track).
   [[nodiscard]] const std::vector<domain::Title>& titles() const noexcept { return titles_; }
+  [[nodiscard]] const std::vector<domain::Transition>& transitions() const noexcept { return transitions_; }
   [[nodiscard]] const domain::Title* find_title(domain::TitleId id) const noexcept;
   [[nodiscard]] domain::TitleId next_title_id() const { return allocator_.next_title(); }
 
@@ -89,6 +90,10 @@ private:
   void add_title_value(const domain::Title& title);
   void remove_title_value(domain::TitleId id);
   void replace_title_value(const domain::Title& title);
+  void add_transition_value(const domain::Transition& transition);
+  void remove_transition_value(const domain::Transition& transition);
+  void validate_transition(const domain::Transition& transition) const;
+  void ensure_clip_has_no_transition(domain::ClipId clip_id) const;
   void validate_clip_for_track(domain::TrackId track_id, const domain::Clip& clip) const;
   [[nodiscard]] domain::Timeline& timeline_mutable() noexcept { return timeline_; }
   [[nodiscard]] HistoryStateId next_history_state_id() const noexcept {
@@ -106,6 +111,7 @@ private:
   std::optional<ProjectCanvas> canvas_;
   std::vector<MediaAsset> assets_;
   std::vector<domain::Title> titles_;
+  std::vector<domain::Transition> transitions_;
   std::uint64_t asset_revision_{0};
   HistoryStateId current_history_state_id_{1};
   HistoryStateId saved_history_state_id_{1};

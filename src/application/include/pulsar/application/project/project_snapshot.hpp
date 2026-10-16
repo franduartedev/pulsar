@@ -4,6 +4,7 @@
 #include <pulsar/domain/ids/ids.hpp>
 #include <pulsar/domain/timeline/timeline.hpp>
 #include <pulsar/domain/timeline/title.hpp>
+#include <pulsar/domain/timeline/transition.hpp>
 
 #include <cstdint>
 #include <optional>
@@ -48,6 +49,7 @@ struct ProjectSnapshot {
   // Explicit bottom-to-top order; storage order and IDs have no visual meaning.
   std::vector<domain::TrackId> visual_track_ids{video_track_id};
   std::optional<ProjectCanvas> canvas{};
+  std::vector<domain::Transition> transitions{};
 };
 
 // Throws on incomplete, duplicate, non-video, or missing-primary stack entries.

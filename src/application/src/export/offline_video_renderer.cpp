@@ -83,9 +83,10 @@ void OfflineVideoRenderer::check_cancelled() const {
 }
 
 void OfflineVideoRenderer::open_source(domain::TrackId track_id, const VisualLayerPlan& layer,
-                                      domain::MediaTime source_time) {
+                                       domain::MediaTime source_time) {
   check_cancelled();
-  active_sources_.erase(track_id.value());
+  (void)track_id;
+  active_sources_.erase(layer.clip_id.value());
   std::unique_ptr<OfflineVideoSource> source;
   try {
     source = source_factory_.open(layer.source_locator, layer.video_stream_index);
@@ -112,7 +113,7 @@ void OfflineVideoRenderer::open_source(domain::TrackId track_id, const VisualLay
   }
   metrics_.decoded_source_frames += seek_result.frames_decoded_after_seek;
   metrics_.conversion_count += seek_result.frames_decoded_after_seek;
-  active_sources_[track_id.value()] = std::make_unique<ActiveSource>(ActiveSource{
+  active_sources_[layer.clip_id.value()] = std::make_unique<ActiveSource>(ActiveSource{
       layer.clip_id,
       layer.media_id,
       layer.video_stream_index,
@@ -127,7 +128,7 @@ void OfflineVideoRenderer::open_source(domain::TrackId track_id, const VisualLay
 
 const OfflineVideoSourceFrame* OfflineVideoRenderer::select_source_frame(
     domain::TrackId track_id, const VisualLayerPlan& layer, domain::MediaTime source_time) {
-  const auto found = active_sources_.find(track_id.value());
+  const auto found = active_sources_.find(layer.clip_id.value());
   const auto* active_source = found == active_sources_.end() ? nullptr : found->second.get();
   const bool same_segment =
       active_source && active_source->clip_id == layer.clip_id &&
@@ -138,7 +139,7 @@ const OfflineVideoSourceFrame* OfflineVideoRenderer::select_source_frame(
     open_source(track_id, layer, source_time);
   }
 
-  auto& active = *active_sources_.at(track_id.value());
+  auto& active = *active_sources_.at(layer.clip_id.value());
   active.last_source_time = source_time;
 
   auto check_timestamp = [](const OfflineVideoSourceFrame& frame) {
@@ -329,7 +330,7 @@ OfflineVideoFrame OfflineVideoRenderer::render_time(domain::FrameNumber frame_in
   // Evict inactive tracks before opening new ones, including their scaled caches.
   for (auto it = active_sources_.begin(); it != active_sources_.end();) {
     const bool still_active = std::any_of(plan.layers.begin(), plan.layers.end(),
-        [&](const VisualLayerPlan& layer) { return layer.track_id.value() == it->first; });
+        [&](const VisualLayerPlan& layer) { return layer.clip_id.value() == it->first; });
     if (!still_active) it = active_sources_.erase(it);
     else ++it;
   }
@@ -343,9 +344,10 @@ OfflineVideoFrame OfflineVideoRenderer::render_time(domain::FrameNumber frame_in
       diagnostic << " track_id=" << layer.track_id.value();
       diagnostic << " clip_id=" << layer.clip_id.value() << " media_id=" << layer.media_id.value()
                  << " source_time=" << static_cast<double>(layer.source_time);
+      if (layer.transform.opacity <= 0.0) continue;
       const auto* frame = select_source_frame(layer.track_id, layer, layer.source_time);
       if (frame) {
-        compose_frame(canvas, *active_sources_.at(layer.track_id.value()), *frame, layer.transform);
+        compose_frame(canvas, *active_sources_.at(layer.clip_id.value()), *frame, layer.transform);
       }
     }
     check_cancelled();

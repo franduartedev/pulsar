@@ -2,6 +2,7 @@
 #include <pulsar/application/composition/visual_composition_resolver.hpp>
 
 #include <utility>
+#include <algorithm>
 
 namespace pulsar::application {
 
@@ -30,6 +31,41 @@ CompositionPlan evaluate_composition_plan(const ProjectSnapshot& snapshot,
                                  "timeline ended before the composition plan"};
     }
     // TimelineGap: transparent, omitted. Lower layers show through.
+  }
+
+  // A dissolve is evaluated before its edit point: the outgoing clip is still
+  // the track's ordinary active layer and the incoming clip is pre-rolled from
+  // its source handle, then blended above it. No fake timeline clip is created.
+  for (const auto& transition : snapshot.transitions) {
+    const auto* outgoing = snapshot.timeline.find_clip(transition.outgoing_clip_id);
+    const auto* incoming = snapshot.timeline.find_clip(transition.incoming_clip_id);
+    if (outgoing == nullptr || incoming == nullptr) {
+      throw std::invalid_argument{"transition references a missing clip"};
+    }
+    const auto edit = incoming->timeline_range().start();
+    const auto start = edit - transition.duration;
+    if (timeline_position < start || timeline_position >= edit) continue;
+    const auto asset = std::find_if(snapshot.assets.begin(), snapshot.assets.end(), [&](const auto& item) {
+      return item.id() == incoming->media_id();
+    });
+    if (asset == snapshot.assets.end() || asset->availability() == MediaAvailability::Unavailable) {
+      throw CompositionPlanError{CompositionPlanErrorCode::MissingMedia,
+                                 "transition references missing incoming media"};
+    }
+    auto transform = incoming->visual_transform();
+    const double progress = static_cast<double>(timeline_position - start) /
+                            static_cast<double>(transition.duration);
+    transform.opacity *= std::clamp(progress, 0.0, 1.0);
+    VisualLayerPlan incoming_plan{transition.track_id, incoming->id(), incoming->media_id(),
+        incoming->source_range().start() + (timeline_position - edit), transform,
+        asset->source_locator(), asset->video_stream_index()};
+    const auto outgoing_layer = std::find_if(plan.layers.begin(), plan.layers.end(), [&](const auto& item) {
+      return item.clip_id == transition.outgoing_clip_id;
+    });
+    if (outgoing_layer == plan.layers.end()) {
+      throw std::invalid_argument{"transition outgoing clip is not active"};
+    }
+    plan.layers.insert(outgoing_layer + 1, std::move(incoming_plan));
   }
   return plan;
 }

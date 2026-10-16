@@ -5,6 +5,7 @@
 #include <pulsar/domain/time/media_time.hpp>
 #include <pulsar/domain/timeline/clip.hpp>
 #include <pulsar/domain/timeline/title.hpp>
+#include <pulsar/domain/timeline/transition.hpp>
 #include <pulsar/domain/timeline/track_kind.hpp>
 
 #include <variant>
@@ -115,12 +116,16 @@ struct ReplaceTitleCommand {
   domain::Title title;
 };
 
+struct AddTransitionCommand { domain::Transition transition; };
+struct RemoveTransitionCommand { domain::Transition transition; };
+
 using Command = std::variant<AddTrackCommand, RemoveTrackCommand, RestoreEmptyVisualTrackCommand,
                              ReorderVisualTrackCommand, AddClipCommand, RemoveClipCommand, MoveClipCommand,
                              TrimClipStartCommand, TrimClipEndCommand, SplitClipCommand,
                              SetClipAudioGainCommand, SetClipMutedCommand, SetClipFadesCommand,
                              SetClipVisualTransformCommand, RestoreClipCommand,
                              RestoreSplitCommand, ImportAssetCommand, RemoveAssetCommand,
-                             AddTitleCommand, RemoveTitleCommand, ReplaceTitleCommand>;
+                              AddTitleCommand, RemoveTitleCommand, ReplaceTitleCommand,
+                              AddTransitionCommand, RemoveTransitionCommand>;
 
 } // namespace pulsar::application

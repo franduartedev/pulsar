@@ -208,9 +208,10 @@ std::string ProjectCodec::encode(const ProjectSnapshot& snapshot) {
     }
   }
   const bool needs_v6 = snapshot.visual_track_ids.size() > 1 || has_visual_transforms ||
+      !snapshot.transitions.empty() ||
       (snapshot.canvas && snapshot.canvas != legacy_project_canvas(snapshot));
   const std::size_t record_count = 1 + 1 + snapshot.timeline.tracks().size() + 1 +
-                                   snapshot.assets.size() + snapshot.titles.size() +
+                                    snapshot.assets.size() + snapshot.titles.size() + snapshot.transitions.size() +
                                     (needs_v6 ? 1 + (snapshot.canvas ? 1 : 0) : 0);
   std::size_t clip_count = 0;
   for (const auto& track : snapshot.timeline.tracks()) clip_count += track.clips().size();
@@ -339,6 +340,13 @@ std::string ProjectCodec::encode(const ProjectSnapshot& snapshot) {
     }
   }
 
+  for (const auto& transition : snapshot.transitions) {
+    output << "TRANSITION CROSS_DISSOLVE " << transition.track_id.value() << ' '
+           << transition.outgoing_clip_id.value() << ' ' << transition.incoming_clip_id.value() << ' ';
+    append_time(output, transition.duration);
+    output << "\n";
+  }
+
   for (const auto& title : snapshot.titles) {
     output << "TITLE " << title.id().value() << ' ';
     append_time(output, title.start());
@@ -383,7 +391,7 @@ ProjectRestoreState ProjectCodec::decode(std::string_view bytes) {
   bool version6 = false;
   bool allocator = false;
   bool ended = false;
-  enum class Section { Header, Timeline, Tracks, VideoTrack, VisualTracks, Assets, Clips, Titles, Allocator, End };
+  enum class Section { Header, Timeline, Tracks, VideoTrack, VisualTracks, Assets, Clips, Transitions, Titles, Allocator, End };
   Section section = Section::Header;
   std::size_t line_number = 0;
   std::size_t records = 0;
@@ -628,8 +636,28 @@ ProjectRestoreState ProjectCodec::decode(std::string_view bytes) {
           parse_fail(line_number, error.what());
         }
         section = Section::Clips;
+      } else if (tokens[0].text == "TRANSITION") {
+        if (!version6 || (section != Section::Clips && section != Section::Transitions) ||
+            tokens.size() != 8 || tokens[1].text != "CROSS_DISSOLVE") {
+          parse_fail(line_number, "invalid TRANSITION");
+        }
+        std::size_t i = 2;
+        const auto track_id = domain::TrackId{unsigned_number(tokens[i++], line_number, "transition track id")};
+        const auto outgoing = domain::ClipId{unsigned_number(tokens[i++], line_number, "transition outgoing clip id")};
+        const auto incoming = domain::ClipId{unsigned_number(tokens[i++], line_number, "transition incoming clip id")};
+        const auto duration = media_time(tokens, i, line_number, "transition duration");
+        try {
+          domain::Transition value{track_id, outgoing, incoming,
+                                   domain::TransitionType::CrossDissolve, duration};
+          domain::validate_transition_value(value);
+          state.transitions.push_back(value);
+        } catch (const std::exception& error) {
+          parse_fail(line_number, error.what());
+        }
+        section = Section::Transitions;
       } else if (tokens[0].text == "TITLE") {
-        if (!video_track || (section != Section::Assets && section != Section::Clips && section != Section::Titles) || tokens.size() != 14)
+        if (!video_track || (section != Section::Assets && section != Section::Clips &&
+                             section != Section::Transitions && section != Section::Titles) || tokens.size() != 14)
           parse_fail(line_number, "invalid TITLE");
         std::size_t i = 1;
         const auto title_id = domain::TitleId{unsigned_number(tokens[i++], line_number, "title id")};
@@ -677,7 +705,8 @@ ProjectRestoreState ProjectCodec::decode(std::string_view bytes) {
           parse_fail(line_number, error.what());
         }
       } else if (tokens[0].text == "ALLOCATOR") {
-        if (allocator || !video_track || (section != Section::Clips && section != Section::Assets && section != Section::Titles) ||
+        if (allocator || !video_track || (section != Section::Clips && section != Section::Assets &&
+            section != Section::Transitions && section != Section::Titles) ||
             (tokens.size() != 5 && tokens.size() != 6)) parse_fail(line_number, "invalid ALLOCATOR");
         if (tokens.size() == 6) state.allocator_state.next_title_id = unsigned_number(tokens[5], line_number, "next title id");
         state.allocator_state.next_media_id = unsigned_number(tokens[1], line_number, "next media id");

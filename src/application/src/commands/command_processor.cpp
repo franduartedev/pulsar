@@ -101,6 +101,14 @@ void CommandProcessor::replace_title(domain::Title title) { execute(ReplaceTitle
 
 void CommandProcessor::remove_title(domain::TitleId id) { execute(RemoveTitleCommand{id}); }
 
+void CommandProcessor::add_transition(domain::Transition transition) {
+  execute(AddTransitionCommand{std::move(transition)});
+}
+
+void CommandProcessor::remove_transition(domain::Transition transition) {
+  execute(RemoveTransitionCommand{std::move(transition)});
+}
+
 void CommandProcessor::remove_clip(domain::ClipId clip_id) {
   execute(RemoveClipCommand{clip_id});
 }
@@ -403,18 +411,23 @@ void CommandProcessor::apply(ProjectDocument& document, const Command& command, 
             document.allocator_.consume_clip();
           }
         } else if constexpr (std::is_same_v<CommandType, RemoveClipCommand>) {
+          document.ensure_clip_has_no_transition(concrete_command.clip_id);
           timeline.remove_clip(concrete_command.clip_id);
         } else if constexpr (std::is_same_v<CommandType, MoveClipCommand>) {
+          document.ensure_clip_has_no_transition(concrete_command.clip_id);
           const auto* clip = timeline.find_clip(concrete_command.clip_id);
           if (clip == nullptr) throw std::invalid_argument{"clip id does not exist in timeline"};
           document.validate_clip_for_track(concrete_command.destination_track_id, *clip);
           timeline.move_clip(concrete_command.clip_id, concrete_command.destination_track_id,
                              concrete_command.timeline_start);
         } else if constexpr (std::is_same_v<CommandType, TrimClipStartCommand>) {
+          document.ensure_clip_has_no_transition(concrete_command.clip_id);
           timeline.trim_clip_start(concrete_command.clip_id, concrete_command.timeline_start);
         } else if constexpr (std::is_same_v<CommandType, TrimClipEndCommand>) {
+          document.ensure_clip_has_no_transition(concrete_command.clip_id);
           timeline.trim_clip_end(concrete_command.clip_id, concrete_command.timeline_end);
         } else if constexpr (std::is_same_v<CommandType, SplitClipCommand>) {
+          document.ensure_clip_has_no_transition(concrete_command.clip_id);
           if (mode == ApplyMode::NewEdit) {
             if (concrete_command.right_clip_id != document.allocator_.next_clip()) {
               throw std::invalid_argument{"new split id is not the next document id"};
@@ -466,6 +479,10 @@ void CommandProcessor::apply(ProjectDocument& document, const Command& command, 
           document.remove_title_value(concrete_command.title_id);
         } else if constexpr (std::is_same_v<CommandType, ReplaceTitleCommand>) {
           document.replace_title_value(concrete_command.title);
+        } else if constexpr (std::is_same_v<CommandType, AddTransitionCommand>) {
+          document.add_transition_value(concrete_command.transition);
+        } else if constexpr (std::is_same_v<CommandType, RemoveTransitionCommand>) {
+          document.remove_transition_value(concrete_command.transition);
         }
       },
       command);
@@ -527,6 +544,15 @@ Command CommandProcessor::build_inverse(const ProjectDocument& document, const C
           const auto* existing = document.find_title(concrete_command.title.id());
           if (existing == nullptr) throw std::invalid_argument{"title does not exist in document"};
           return ReplaceTitleCommand{*existing};
+        } else if constexpr (std::is_same_v<CommandType, AddTransitionCommand>) {
+          return RemoveTransitionCommand{concrete_command.transition};
+        } else if constexpr (std::is_same_v<CommandType, RemoveTransitionCommand>) {
+          const auto found = std::find(document.transitions().begin(), document.transitions().end(),
+                                       concrete_command.transition);
+          if (found == document.transitions().end()) {
+            throw std::invalid_argument{"transition does not exist"};
+          }
+          return AddTransitionCommand{concrete_command.transition};
         } else if constexpr (std::is_same_v<CommandType, ImportAssetCommand>) {
           return RemoveAssetCommand{concrete_command.asset.id()};
         } else {

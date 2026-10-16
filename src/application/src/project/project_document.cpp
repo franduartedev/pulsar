@@ -209,13 +209,58 @@ ProjectDocument ProjectDocument::restore(const ProjectRestoreState& state) {
   restored.video_track_id_ = state.video_track_id;
   restored.visual_track_ids_ = state.visual_track_ids;
   restored.assets_ = state.assets;
+  restored.transitions_ = state.transitions;
   restored.canvas_ = state.canvas ? state.canvas : legacy_project_canvas(restored.snapshot());
   restored.allocator_.state = state.allocator_state;
+  for (const auto& transition : restored.transitions_) restored.validate_transition(transition);
   restored.current_history_state_id_ = 1;
   restored.saved_history_state_id_ = 1;
   restored.next_history_state_id_ = 2;
   restored.document_generation_ = 0;
   return restored;
+}
+
+void ProjectDocument::validate_transition(const domain::Transition& transition) const {
+  domain::validate_transition_value(transition);
+  const auto* track = timeline_.find_track(transition.track_id);
+  if (track == nullptr || track->kind() != domain::TrackKind::Video) {
+    throw std::invalid_argument{"transition track is not a video track"};
+  }
+  const auto* outgoing = track->find_clip(transition.outgoing_clip_id);
+  const auto* incoming = track->find_clip(transition.incoming_clip_id);
+  if (outgoing == nullptr || incoming == nullptr ||
+      outgoing->timeline_range().end() != incoming->timeline_range().start()) {
+    throw std::invalid_argument{"transition clips are not adjacent at one edit point"};
+  }
+  if (transition.duration > outgoing->duration() ||
+      incoming->source_range().start() < transition.duration) {
+    throw std::invalid_argument{"transition duration exceeds available clip handles"};
+  }
+}
+
+void ProjectDocument::add_transition_value(const domain::Transition& transition) {
+  validate_transition(transition);
+  const auto duplicate = std::find_if(transitions_.begin(), transitions_.end(), [&](const auto& item) {
+    return item.track_id == transition.track_id &&
+           (item.outgoing_clip_id == transition.outgoing_clip_id ||
+            item.incoming_clip_id == transition.incoming_clip_id);
+  });
+  if (duplicate != transitions_.end()) throw std::invalid_argument{"edit already has a transition"};
+  transitions_.push_back(transition);
+}
+
+void ProjectDocument::remove_transition_value(const domain::Transition& transition) {
+  const auto found = std::find(transitions_.begin(), transitions_.end(), transition);
+  if (found == transitions_.end()) throw std::invalid_argument{"transition does not exist"};
+  transitions_.erase(found);
+}
+
+void ProjectDocument::ensure_clip_has_no_transition(domain::ClipId clip_id) const {
+  if (std::any_of(transitions_.begin(), transitions_.end(), [&](const auto& transition) {
+        return transition.outgoing_clip_id == clip_id || transition.incoming_clip_id == clip_id;
+      })) {
+    throw std::invalid_argument{"remove the transition before changing this edit"};
+  }
 }
 
 const domain::Title* ProjectDocument::find_title(domain::TitleId id) const noexcept {
@@ -359,7 +404,7 @@ void ProjectDocument::validate_clip_for_track(domain::TrackId track_id,
 ProjectSnapshot ProjectDocument::snapshot() const {
   return ProjectSnapshot{timeline_, assets_, video_track_id_, allocator_.state,
                          current_history_state_id_, saved_history_state_id_, next_history_state_id_,
-                          document_generation_, titles_, visual_track_ids_, canvas_};
+                           document_generation_, titles_, visual_track_ids_, canvas_, transitions_};
 }
 
 void ProjectDocument::ensure_new_edit_possible() const {

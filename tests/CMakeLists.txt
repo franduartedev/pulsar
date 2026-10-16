@@ -93,6 +93,12 @@ pulsar_apply_project_options(pulsar_visual_transform_tests)
 pulsar_apply_compiler_warnings(pulsar_visual_transform_tests)
 add_test(NAME pulsar.application.visual_transform COMMAND pulsar_visual_transform_tests)
 
+add_executable(pulsar_transition_tests application/transition_test.cpp)
+target_link_libraries(pulsar_transition_tests PRIVATE pulsar::application pulsar::domain)
+pulsar_apply_project_options(pulsar_transition_tests)
+pulsar_apply_compiler_warnings(pulsar_transition_tests)
+add_test(NAME pulsar.application.transitions COMMAND pulsar_transition_tests)
+
 add_executable(pulsar_frame_coverage_parity_tests application/frame_coverage_parity_test.cpp)
 target_link_libraries(pulsar_frame_coverage_parity_tests PRIVATE pulsar::application)
 pulsar_apply_project_options(pulsar_frame_coverage_parity_tests)

@@ -259,6 +259,9 @@ public:
   void update_clip_visual_transform(domain::VisualTransform transform);
   void end_clip_visual_transform();
   void cancel_clip_visual_transform();
+  void add_cross_dissolve_at_selected_edit();
+  void remove_selected_clip_transition();
+  [[nodiscard]] bool selected_clip_has_transition() const;
   // "Duplicar": a copy of the selected clip (or title) right after the original, on the same
   // track, with the same source range, gain, mute and fades. One undo step; the copy becomes the
   // selection. Throws DuplicateException{NoSpace} (nothing changes) when the room is taken.

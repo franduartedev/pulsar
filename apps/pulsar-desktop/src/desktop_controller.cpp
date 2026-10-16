@@ -1598,6 +1598,32 @@ void DesktopController::cancelSelectedClipTransform() {
     setError(QStringLiteral("No se pudo cancelar la transformación."));
   }
 }
+void DesktopController::addCrossDissolve() {
+  if (!active_session_) return;
+  try {
+    active_session_->add_cross_dissolve_at_selected_edit();
+    clearError();
+    setStatus(QStringLiteral("Fundido cruzado agregado"));
+    clearProgram(has_video_media_ ? "loading" : "empty");
+    publishTimeline();
+  } catch (const std::exception& error) {
+    logCause("cross dissolve add failed", error);
+    setError(QStringLiteral("No se puede agregar el fundido: necesitás dos clips contiguos y margen de origen en el segundo."));
+  }
+}
+void DesktopController::removeSelectedTransition() {
+  if (!active_session_) return;
+  try {
+    active_session_->remove_selected_clip_transition();
+    clearError();
+    setStatus(QStringLiteral("Fundido eliminado"));
+    clearProgram(has_video_media_ ? "loading" : "empty");
+    publishTimeline();
+  } catch (const std::exception& error) {
+    logCause("cross dissolve remove failed", error);
+    setError(QStringLiteral("No se pudo eliminar el fundido."));
+  }
+}
 void DesktopController::duplicateSelected() {
   if (!active_session_) return;
   try {

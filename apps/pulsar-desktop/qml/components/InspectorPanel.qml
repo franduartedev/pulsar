@@ -357,6 +357,17 @@ Panel {
                 Text { width: parent.width; wrapMode: Text.WordWrap; text: "Posición en anchos/alto del lienzo. Escala uniforme y giro en grados."; color: Theme.textMuted; font.pixelSize: Theme.fontSizeXS }
             }
 
+            InspectorSection {
+                visible: inspector.clipSelected && controller.selectedClipKind !== "audio"
+                heading: "TRANSICIÓN"
+                PButton {
+                    width: parent.width; height: Theme.controlHeightSmall
+                    text: controller.selectedClipHasTransition ? "Quitar fundido cruzado" : "Agregar fundido cruzado"
+                    onClicked: controller.selectedClipHasTransition ? controller.removeSelectedTransition() : controller.addCrossDissolve()
+                }
+                Text { width: parent.width; wrapMode: Text.WordWrap; text: "Entre dos clips contiguos. Usa hasta 1 s del margen del segundo clip."; color: Theme.textMuted; font.pixelSize: Theme.fontSizeXS }
+            }
+
             // ---- AUDIO ---------------------------------------------------------
             InspectorSection {
                 visible: inspector.clipSelected
