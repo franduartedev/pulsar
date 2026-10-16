@@ -62,8 +62,8 @@ bounded clip thumbnails, and a dissolve overlay drawn over its real pre-edit
 interval. The dissolve remains an edit relationship; no synthetic media clip was
 introduced.
 
-Qt offscreen captures were inspected at 1366×768 and 1920×1080 for the empty
-workspace, and at 1920×1080 with imported media. The compact timeline toolbar
+Qt offscreen captures were inspected at 1280×720, 1366×768, 1680×1050, and
+1920×1080 for the empty workspace, and at 1920×1080 with imported media. The compact timeline toolbar
 switches to glyph-first controls below 1250 px; secondary top-bar actions yield
 below 1120 px so the project identity and Export action remain readable. The
 default 1280×760 workspace also launches without QML warnings.
