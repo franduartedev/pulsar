@@ -17,7 +17,7 @@ Item {
     function close() { visible = false }
 
     // Scrim: blocks the editor behind the dialog.
-    Rectangle { anchors.fill: parent; color: "#99000000" }
+    Rectangle { anchors.fill: parent; color: Theme.overlayScrim }
     MouseArea { anchors.fill: parent; acceptedButtons: Qt.AllButtons; hoverEnabled: true }
     Keys.onEscapePressed: dialog.cancelRequested()
 

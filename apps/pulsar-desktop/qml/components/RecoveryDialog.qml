@@ -14,7 +14,7 @@ Item {
     function open() { visible = true; recoverButton.forceActiveFocus() }
     function close() { visible = false }
 
-    Rectangle { anchors.fill: parent; color: "#99000000" }
+    Rectangle { anchors.fill: parent; color: Theme.overlayScrim }
     MouseArea { anchors.fill: parent; acceptedButtons: Qt.AllButtons; hoverEnabled: true }
 
     Rectangle {

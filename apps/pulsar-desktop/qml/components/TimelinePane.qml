@@ -339,7 +339,7 @@ Panel {
                     y: pane.titleLaneH + pane.dropLane * pane.trackLaneHeight + 6
                     width: pane.dropWidthPx; height: pane.trackLaneHeight - 12
                     radius: Theme.radiusS
-                    color: pane.dropValid ? "#4433cc88" : "#44f26d6d"
+                    color: pane.dropValid ? Theme.dropValidFill : Theme.dropInvalidFill
                     border.width: 2; border.color: pane.dropValid ? Theme.success : Theme.error
                     Text { visible: pane.dropValid && pane.dropLane === controller.timelineTracks.length; anchors.left: parent.left; anchors.leftMargin: 8; anchors.verticalCenter: parent.verticalCenter
                            width: Math.max(parent.width, 160); text: "Nueva pista de audio"; color: Theme.textPrimary; font.pixelSize: Theme.fontSizeXS; font.bold: true }

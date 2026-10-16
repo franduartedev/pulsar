@@ -55,7 +55,7 @@ Item {
                         width: 46; height: 34; radius: Theme.radiusS
                         color: modelData.color
                         border.width: swatchMouse.containsMouse ? 2 : 1
-                        border.color: swatchMouse.containsMouse ? Theme.accent : "#44ffffff"
+                        border.color: swatchMouse.containsMouse ? Theme.accent : Theme.lightBorder
                         MouseArea {
                             id: swatchMouse
                             anchors.fill: parent; hoverEnabled: true

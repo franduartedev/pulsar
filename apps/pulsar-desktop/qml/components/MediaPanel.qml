@@ -219,7 +219,7 @@ Panel {
                     visible: model.kind === "color"
                     anchors.fill: parent; anchors.margins: 5; radius: 3
                     color: model.kind === "color" ? ("#" + model.name.substring(model.name.length - 6)) : "transparent"
-                    border.width: 1; border.color: "#33ffffff"
+                    border.width: 1; border.color: Theme.lightBorder
                 }
                 TGlyph {
                     visible: model.kind !== "color"

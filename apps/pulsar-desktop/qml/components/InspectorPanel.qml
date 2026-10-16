@@ -407,8 +407,8 @@ Panel {
                     width: parent.width; height: 30
                     radius: Theme.radiusM
                     activeFocusOnTab: true
-                    color: muteMouse.pressed ? Theme.bgPressed
-                         : (controller.selectedClipMuted ? (muteMouse.containsMouse ? "#4a3a1c" : "#3a2f18")
+                     color: muteMouse.pressed ? Theme.bgPressed
+                          : (controller.selectedClipMuted ? (muteMouse.containsMouse ? Theme.mutedActiveHover : Theme.mutedActive)
                          : (muteMouse.containsMouse ? Theme.bgHover : Theme.bgElevated))
                     border.width: 1
                     border.color: activeFocus ? Theme.focus : (controller.selectedClipMuted ? Theme.warning : Theme.borderStrong)

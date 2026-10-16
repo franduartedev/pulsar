@@ -81,7 +81,7 @@ Rectangle {
         anchors.left: parent.left; anchors.leftMargin: block.contentX
         anchors.right: parent.right; anchors.top: parent.top
         height: block.nameStripHeight
-        color: "#33000000"
+        color: Theme.overlaySoft
     }
     Image {
         visible: block.showBackdrop
@@ -161,18 +161,18 @@ Rectangle {
         onPaint: {
             var ctx = getContext("2d")
             ctx.reset()
-            ctx.fillStyle = "#66000000"
+            ctx.fillStyle = Theme.overlayStrong
             var w = width, h = height
             if (block.fadeIn > 0) {
                 var fw = Math.min(w, block.fadeIn * block.width)
                 ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(fw, 0); ctx.lineTo(0, h); ctx.closePath(); ctx.fill()
-                ctx.strokeStyle = "#ccffffff"; ctx.lineWidth = 1
+                ctx.strokeStyle = Theme.strongLightLine; ctx.lineWidth = 1
                 ctx.beginPath(); ctx.moveTo(0, h); ctx.lineTo(fw, 0); ctx.stroke()
             }
             if (block.fadeOut > 0) {
                 var ow = Math.min(w, block.fadeOut * block.width)
                 ctx.beginPath(); ctx.moveTo(w, 0); ctx.lineTo(w - ow, 0); ctx.lineTo(w, h); ctx.closePath(); ctx.fill()
-                ctx.strokeStyle = "#ccffffff"; ctx.lineWidth = 1
+                ctx.strokeStyle = Theme.strongLightLine; ctx.lineWidth = 1
                 ctx.beginPath(); ctx.moveTo(w - ow, 0); ctx.lineTo(w, h); ctx.stroke()
             }
         }

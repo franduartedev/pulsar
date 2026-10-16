@@ -11,7 +11,7 @@ Item {
     function open() { visible = true; closeButton.forceActiveFocus() }
     function close() { visible = false }
 
-    Rectangle { anchors.fill: parent; color: "#99000000" }
+    Rectangle { anchors.fill: parent; color: Theme.overlayScrim }
     MouseArea { anchors.fill: parent; acceptedButtons: Qt.AllButtons; onClicked: dialog.close() }
     focus: visible
     Keys.onEscapePressed: dialog.close()

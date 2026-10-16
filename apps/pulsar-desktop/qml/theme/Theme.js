@@ -15,6 +15,14 @@ var bgViewer   = "#030405"   // video mat, near-pure black
 var bgInput    = "#0d1015"
 var bgPressed  = "#222833"
 
+// Public semantic surface names. Components should describe intent rather
+// than a particular layer number; the compact aliases keep that vocabulary
+// stable if the graphite palette is tuned later.
+var backgroundBase   = bgRoot
+var backgroundPanel  = bgPanel
+var backgroundRaised = bgElevated
+var backgroundViewer = bgViewer
+
 // ---- Text -----------------------------------------------------------------
 var textPrimary   = "#e8ebf0"
 var textSecondary = "#9ba4b1"
@@ -38,6 +46,18 @@ var focus         = "#8db8ff"
 var success = "#3fcf8e"
 var warning = "#e3ab4f"
 var error   = "#f26d6d"
+
+// Translucent state fills. Keeping alpha here avoids slightly different
+// greens/reds and modal scrims appearing throughout the interface.
+var overlayScrim       = "#99000000"
+var overlaySoft        = "#33000000"
+var overlayStrong      = "#66000000"
+var dropValidFill      = "#443fcf8e"
+var dropInvalidFill    = "#44f26d6d"
+var mutedActive        = "#3a2f18"
+var mutedActiveHover   = "#4a3a1c"
+var lightBorder        = "#33ffffff"
+var strongLightLine    = "#ccffffff"
 
 // ---- Timeline content -----------------------------------------------------
 var clipVideo         = "#243449"

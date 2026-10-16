@@ -95,7 +95,7 @@ Item {
         nameFilters: dialog.showAllFiles ? ["*"] : dialog.mediaFilters
     }
 
-    Rectangle { anchors.fill: parent; color: "#99000000" }
+    Rectangle { anchors.fill: parent; color: Theme.overlayScrim }
     MouseArea { anchors.fill: parent; acceptedButtons: Qt.AllButtons; hoverEnabled: true }
 
     Rectangle {
@@ -192,7 +192,7 @@ Item {
                         id: mark
                         anchors.left: parent.left; anchors.leftMargin: 8; anchors.verticalCenter: parent.verticalCenter
                         width: 18; height: 18; radius: row.dir ? 3 : 4
-                        color: row.dir ? "#2b3a52" : (row.picked ? Theme.accent : "transparent")
+                        color: row.dir ? Theme.accentDim : (row.picked ? Theme.accent : "transparent")
                         border.width: row.dir ? 0 : 1; border.color: row.picked ? Theme.accent : Theme.borderStrong
                         Text { visible: row.picked; anchors.centerIn: parent; text: "✓"; color: Theme.textOnAccent; font.pixelSize: 12; font.bold: true }
                         Rectangle { visible: row.dir; anchors.left: parent.left; anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; anchors.margins: 3; height: 8; radius: 2; color: Theme.focus; opacity: 0.8 }
