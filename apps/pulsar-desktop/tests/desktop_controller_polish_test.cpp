@@ -16,6 +16,7 @@
 #include <array>
 #include <cstdio>
 #include <filesystem>
+#include <fstream>
 #include <functional>
 #include <memory>
 
@@ -68,6 +69,27 @@ int main(int argc, char** argv) {
   controller.openPath(QString::fromStdString((fixtures / "e6_video_a.mp4").string()));
   REQUIRE(1, wait_until([&] { return controller.hasVideoMedia() && !controller.busy(); }));
 
+  // Exercise the requested 1920x1080 project canvas while retaining the small
+  // decode fixture. A non-default transform makes the saved fixture v6 so its
+  // explicit CANVAS record can be replaced deterministically.
+  controller.selectTimelineClip(clip_key(controller, 0));
+  controller.setSelectedClipTransform(0.0, 0.0, 0.99, 0.0, 1.0);
+  const auto geometry_root = fs::temp_directory_path() / "pulsar-polish-viewer-geometry";
+  fs::remove_all(geometry_root); fs::create_directories(geometry_root);
+  const auto geometry_project = geometry_root / "viewer-1920x1080.pulsar";
+  REQUIRE(180, controller.saveProject(QString::fromStdString(geometry_project.string())));
+  std::ifstream input{geometry_project};
+  std::string project_text{std::istreambuf_iterator<char>{input}, {}};
+  input.close();
+  const auto canvas_record = project_text.find("CANVAS 320 180 ");
+  REQUIRE(181, canvas_record != std::string::npos);
+  project_text.replace(canvas_record, std::string{"CANVAS 320 180 "}.size(), "CANVAS 1920 1080 ");
+  std::ofstream{geometry_project, std::ios::trunc} << project_text;
+  REQUIRE(182, controller.openProject(QString::fromStdString(geometry_project.string())));
+  REQUIRE(183, wait_until([&] { return controller.hasVideoMedia() && !controller.busy(); }));
+  controller.selectTimelineClip(clip_key(controller, 0));
+  controller.setSelectedClipTransform(0.0, 0.0, 1.0, 0.0, 1.0);
+
   // ---- Actual QML pointer routing: press/move/release through ViewerPane ----------------
   QQmlComponent viewer_component{
       &qml_engine,
@@ -81,9 +103,9 @@ int main(int argc, char** argv) {
   auto* viewer = qobject_cast<QQuickItem*>(viewer_object.get());
   REQUIRE(190, viewer != nullptr);
   QQuickWindow viewer_window;
-  viewer_window.resize(900, 520);
+  viewer_window.resize(960, 540);
   viewer->setParentItem(viewer_window.contentItem());
-  viewer->setSize(QSizeF{900.0, 520.0});
+  viewer->setSize(QSizeF{960.0, 540.0});
   viewer_window.show();
   REQUIRE(189, QTest::qWaitForWindowExposed(&viewer_window));
   viewer_window.requestActivate();
@@ -91,67 +113,147 @@ int main(int argc, char** argv) {
   REQUIRE(191, wait_until([&] {
     return !controller.previewSource().isEmpty() && controller.selectedClipOnScreen();
   }));
-  auto* move_area = find_quick_item(viewer, QStringLiteral("viewerMoveArea"));
-  REQUIRE(192, move_area != nullptr && move_area->isVisible());
-  const auto move_start = move_area->mapToScene(
-      QPointF{move_area->width() / 2.0, move_area->height() / 2.0}).toPoint();
+  auto* interaction = find_quick_item(viewer, QStringLiteral("viewerInteractionArea"));
+  auto* overlay = find_quick_item(viewer, QStringLiteral("viewerInteractionOverlay"));
+  auto* canvas = find_quick_item(viewer, QStringLiteral("viewerCanvasRect"));
+  auto* bounds = find_quick_item(viewer, QStringLiteral("viewerSelectionBounds"));
+  REQUIRE(192, interaction != nullptr && overlay != nullptr && canvas != nullptr && bounds != nullptr &&
+                   interaction->isVisible() && bounds->isVisible());
+  const auto bounds_center = [&] {
+    return bounds->mapToScene(QPointF{bounds->width() / 2.0, bounds->height() / 2.0});
+  };
+  const auto bounds_origin = [&] { return bounds->mapToScene(QPointF{0.0, 0.0}); };
+  const auto drag = [&](QPoint start, QPoint delta, int step) {
+    QTest::mousePress(&viewer_window, Qt::LeftButton, Qt::NoModifier, start);
+    REQUIRE(step, interaction->property("gesture").toString().length() > 0);
+    QTest::mouseMove(&viewer_window, start, 10);
+    QTest::mouseMove(&viewer_window, start + delta, 20);
+    QTest::mouseRelease(&viewer_window, Qt::LeftButton, Qt::NoModifier, start + delta);
+    return 0;
+  };
+
+  // A — identity visual: exact screen delta maps to canvas-normalized position.
+  const auto move_start = bounds_center().toPoint();
+  const auto origin_before_move = bounds_origin();
   const auto source_before_move = controller.previewSource();
   QTest::mousePress(&viewer_window, Qt::LeftButton, Qt::NoModifier, move_start);
-  QTest::mouseMove(&viewer_window, move_start + QPoint{30, 15}, 20);
-  REQUIRE(193, wait_until([&] { return std::abs(controller.selectedClipPosX()) > 0.001; }) &&
-                   move_area->isVisible() && !controller.previewSource().isEmpty());
-  const double first_x = controller.selectedClipPosX();
-  QTest::mouseMove(&viewer_window, move_start + QPoint{75, 35}, 20);
-  REQUIRE(194, wait_until([&] { return controller.previewSource() != source_before_move; }) &&
-                   move_area->property("pressed").toBool());
-  QTest::mouseRelease(&viewer_window, Qt::LeftButton, Qt::NoModifier,
-                      move_start + QPoint{75, 35});
-  REQUIRE(195, controller.selectedClipPosX() > first_x && controller.selectedClipPosY() > 0.0);
-  controller.undoEdit();
-  REQUIRE(196, controller.selectedClipPosX() == 0.0 && controller.selectedClipPosY() == 0.0);
-  controller.redoEdit();
-  REQUIRE(197, controller.selectedClipPosX() > first_x);
-  controller.undoEdit();
-  REQUIRE(198, wait_until([&] {
-    return controller.selectedClipScale() == 1.0 && move_area->isVisible();
+  REQUIRE(193, interaction->property("gesture").toString() == QStringLiteral("move") &&
+                   controller.selectedClipPosX() == 0.0 && controller.selectedClipPosY() == 0.0);
+  QTest::mouseMove(&viewer_window, move_start, 10); // no first-event jump
+  REQUIRE(194, controller.selectedClipPosX() == 0.0 && controller.selectedClipPosY() == 0.0);
+  QTest::mouseMove(&viewer_window, move_start + QPoint{100, 50}, 20);
+  const double expected_x = 100.0 / canvas->width();
+  const double expected_y = 50.0 / canvas->height();
+  REQUIRE(195, wait_until([&] {
+    return std::abs(controller.selectedClipPosX() - expected_x) < 1e-6 &&
+           std::abs(controller.selectedClipPosY() - expected_y) < 1e-6;
   }));
+  REQUIRE(196, std::abs(bounds_origin().x() - origin_before_move.x() - 100.0) < 0.1 &&
+                   std::abs(bounds_origin().y() - origin_before_move.y() - 50.0) < 0.1);
+  REQUIRE(199, wait_until([&] { return controller.previewSource() != source_before_move; }) &&
+                   interaction->property("pressed").toBool() && interaction->isVisible());
+  QTest::mouseRelease(&viewer_window, Qt::LeftButton, Qt::NoModifier,
+                      move_start + QPoint{100, 50});
+  controller.undoEdit();
+  REQUIRE(197, controller.selectedClipPosX() == 0.0 && controller.selectedClipPosY() == 0.0);
+  controller.redoEdit();
+  REQUIRE(198, std::abs(controller.selectedClipPosX() - expected_x) < 1e-6);
+  controller.undoEdit();
 
-  const std::array<QPair<int, int>, 4> corners{{{-1, -1}, {1, -1}, {-1, 1}, {1, 1}}};
-  int corner_step = 210;
-  for (const auto& [sx, sy] : corners) {
-    auto* handle = find_quick_item(viewer,
-        QStringLiteral("viewerScaleHandle_%1_%2").arg(sx).arg(sy));
-    REQUIRE(corner_step++, handle != nullptr && handle->isVisible());
-    const auto start = handle->mapToScene(
-        QPointF{handle->width() / 2.0, handle->height() / 2.0}).toPoint();
-    auto* handle_mouse = find_quick_item(handle,
-        QStringLiteral("viewerScaleMouse_%1_%2").arg(sx).arg(sy));
-    REQUIRE(corner_step++, handle_mouse != nullptr);
+  // B — movement is scale-independent and still follows the pointer exactly.
+  controller.setSelectedClipTransform(0.0, 0.0, 0.60, 0.0, 1.0);
+  REQUIRE(200, wait_until([&] { return std::abs(bounds->width() / canvas->width() - 0.60) < 0.01; }));
+  const auto scaled_origin = bounds_origin();
+  const auto scaled_start = bounds_center().toPoint();
+  REQUIRE(201, drag(scaled_start, QPoint{100, 50}, 201) == 0);
+  REQUIRE(202, std::abs(controller.selectedClipPosX() - expected_x) < 1e-6 &&
+                   std::abs(controller.selectedClipPosY() - expected_y) < 1e-6 &&
+                   std::abs(bounds_origin().x() - scaled_origin.x() - 100.0) < 0.1 &&
+                   std::abs(bounds_origin().y() - scaled_origin.y() - 50.0) < 0.1);
+  controller.undoEdit();
+  REQUIRE(203, controller.selectedClipPosX() == 0.0 && controller.selectedClipPosY() == 0.0 &&
+                   std::abs(controller.selectedClipScale() - 0.60) < 1e-9);
+
+  // C–F — radial projection around the renderer's centre anchor makes every
+  // corner symmetric. Outward grows; inward shrinks; press alone never jumps.
+  struct ScaleCase { int sx; int sy; QPoint delta; bool grows; };
+  const std::array<ScaleCase, 4> scale_cases{{
+      {-1, -1, {-40, -30}, true}, {1, -1, {-40, 30}, false},
+      {-1, 1, {-40, 30}, true}, {1, 1, {-40, -30}, false}}};
+  int scale_step = 210;
+  for (const auto& scale_case : scale_cases) {
+    controller.setSelectedClipTransform(0.0, 0.0, 0.60, 0.0, 1.0);
+    REQUIRE(scale_step++, wait_until([&] { return std::abs(controller.selectedClipScale() - 0.60) < 1e-9; }));
+    auto* handle = find_quick_item(viewer, QStringLiteral("viewerScaleHandle_%1_%2")
+        .arg(scale_case.sx).arg(scale_case.sy));
+    REQUIRE(scale_step++, handle != nullptr && handle->isVisible());
+    const auto start_f = handle->mapToScene(QPointF{handle->width() / 2.0, handle->height() / 2.0});
+    const auto center_f = bounds_center();
+    const QPoint start = start_f.toPoint();
+    const double vx = start.x() - center_f.x();
+    const double vy = start.y() - center_f.y();
+    const double ratio = ((vx + scale_case.delta.x()) * vx +
+                          (vy + scale_case.delta.y()) * vy) / (vx * vx + vy * vy);
+    const double old_width = bounds->width();
     QTest::mousePress(&viewer_window, Qt::LeftButton, Qt::NoModifier, start);
-    QTest::mouseMove(&viewer_window, start + QPoint{sx * 8, sy * 8}, 20);
-    REQUIRE(corner_step++, wait_until([&] { return controller.selectedClipScale() > 1.01; }) &&
-                               handle->isVisible());
-    QTest::mouseMove(&viewer_window, start + QPoint{sx * 12, sy * 12}, 20);
+    REQUIRE(scale_step++, interaction->property("gesture").toString() == QStringLiteral("scale") &&
+                              std::abs(controller.selectedClipScale() - 0.60) < 1e-9);
+    QTest::mouseMove(&viewer_window, start + scale_case.delta, 20);
+    const double expected_scale = 0.60 * ratio;
+    REQUIRE(scale_step++, std::abs(controller.selectedClipScale() - expected_scale) < 0.002 &&
+                              (scale_case.grows ? bounds->width() > old_width : bounds->width() < old_width));
     QTest::mouseRelease(&viewer_window, Qt::LeftButton, Qt::NoModifier,
-                        start + QPoint{sx * 12, sy * 12});
-    REQUIRE(corner_step++, controller.selectedClipScale() > 1.01);
+                        start + scale_case.delta);
     controller.undoEdit();
-    REQUIRE(corner_step++, wait_until([&] {
-      return controller.selectedClipScale() == 1.0 && handle->isVisible();
-    }));
+    REQUIRE(scale_step++, std::abs(controller.selectedClipScale() - 0.60) < 1e-9);
   }
+
+  // Crossing the centre anchor clamps to the domain minimum instead of
+  // producing a negative, NaN, or mirrored scale.
+  controller.setSelectedClipTransform(0.0, 0.0, 0.60, 0.0, 1.0);
+  auto* crossing_handle = find_quick_item(viewer, QStringLiteral("viewerScaleHandle_1_1"));
+  REQUIRE(235, crossing_handle != nullptr);
+  const auto crossing_start = crossing_handle->mapToScene(
+      QPointF{crossing_handle->width() / 2.0, crossing_handle->height() / 2.0}).toPoint();
+  const auto crossing_center = bounds_center().toPoint();
+  const QPoint across_anchor = crossing_center - (crossing_start - crossing_center) / 2;
+  QTest::mousePress(&viewer_window, Qt::LeftButton, Qt::NoModifier, crossing_start);
+  QTest::mouseMove(&viewer_window, across_anchor, 20);
+  QTest::mouseRelease(&viewer_window, Qt::LeftButton, Qt::NoModifier, across_anchor);
+  REQUIRE(236, std::isfinite(controller.selectedClipScale()) &&
+                   std::abs(controller.selectedClipScale() - 0.01) < 1e-9);
+  controller.undoEdit();
+
+  // G–I — resize, letterbox and pillarbox only change Viewer pixels.
+  controller.setSelectedClipTransform(0.10, -0.10, 0.60, 0.0, 1.0);
+  const double persisted_x = controller.selectedClipPosX();
+  const double persisted_y = controller.selectedClipPosY();
+  const double persisted_scale = controller.selectedClipScale();
+  viewer_window.resize(960, 700); viewer->setSize(QSizeF{960.0, 700.0});
+  REQUIRE(240, wait_until([&] { return canvas->height() < overlay->height() - 1.0; }));
+  REQUIRE(241, controller.selectedClipPosX() == persisted_x && controller.selectedClipPosY() == persisted_y &&
+                   controller.selectedClipScale() == persisted_scale);
+  const auto letterbox_center = bounds_center();
+  REQUIRE(242, std::abs(letterbox_center.x() - (canvas->mapToScene(QPointF{}).x() + 0.60 * canvas->width())) < 0.1 &&
+                   std::abs(letterbox_center.y() - (canvas->mapToScene(QPointF{}).y() + 0.40 * canvas->height())) < 0.1);
+  viewer_window.resize(1200, 540); viewer->setSize(QSizeF{1200.0, 540.0});
+  REQUIRE(243, wait_until([&] { return canvas->width() < overlay->width() - 1.0; }) &&
+                   controller.selectedClipPosX() == persisted_x && controller.selectedClipPosY() == persisted_y &&
+                   controller.selectedClipScale() == persisted_scale);
+
+  controller.setSelectedClipTransform(0.0, 0.0, 1.0, 0.0, 1.0);
   controller.seekToEnd();
   REQUIRE(230, wait_until([&] { return !controller.selectedClipOnScreen(); }) &&
-                   !move_area->isVisible());
+                   !interaction->isVisible());
   controller.seekToStart();
   REQUIRE(231, wait_until([&] {
-    return controller.selectedClipOnScreen() && !controller.previewSource().isEmpty();
+    return controller.selectedClipOnScreen() && interaction->isVisible();
   }));
 
   // ---- Viewer direct manipulation: pixels are transient, live updates coalesce ---------
   controller.selectTimelineClip(clip_key(controller, 0));
   const auto geometry = controller.selectedClipVisualGeometry();
-  REQUIRE(200, controller.selectedClipOnScreen() && geometry.value("width").toDouble() > 0.0 &&
+  REQUIRE(300, controller.selectedClipOnScreen() && geometry.value("width").toDouble() > 0.0 &&
                    geometry.value("height").toDouble() > 0.0);
   controller.beginSelectedClipTransform();
   controller.updateSelectedClipTranslationFromViewer(0.0, 0.0, 40.0, 20.0,
@@ -159,12 +261,12 @@ int main(int argc, char** argv) {
   controller.updateSelectedClipTranslationFromViewer(0.0, 0.0, 100.0, 50.0,
                                                        1000.0, 500.0, 1.0, 0.0, 1.0);
   controller.endSelectedClipTransform();
-  REQUIRE(201, std::abs(controller.selectedClipPosX() - 0.1) < 1e-9 &&
+  REQUIRE(301, std::abs(controller.selectedClipPosX() - 0.1) < 1e-9 &&
                    std::abs(controller.selectedClipPosY() - 0.1) < 1e-9);
   controller.undoEdit();
-  REQUIRE(202, controller.selectedClipPosX() == 0.0 && controller.selectedClipPosY() == 0.0);
+  REQUIRE(302, controller.selectedClipPosX() == 0.0 && controller.selectedClipPosY() == 0.0);
   controller.redoEdit();
-  REQUIRE(203, std::abs(controller.selectedClipPosX() - 0.1) < 1e-9 &&
+  REQUIRE(303, std::abs(controller.selectedClipPosX() - 0.1) < 1e-9 &&
                    std::abs(controller.selectedClipPosY() - 0.1) < 1e-9);
   controller.undoEdit();
 
@@ -173,7 +275,7 @@ int main(int argc, char** argv) {
   controller.updateSelectedClipTranslationFromViewer(0.0, 0.0, 200.0, 100.0,
                                                        2000.0, 1000.0, 1.0, 0.0, 1.0);
   controller.endSelectedClipTransform();
-  REQUIRE(204, std::abs(controller.selectedClipPosX() - 0.1) < 1e-9 &&
+  REQUIRE(304, std::abs(controller.selectedClipPosX() - 0.1) < 1e-9 &&
                    std::abs(controller.selectedClipPosY() - 0.1) < 1e-9);
   controller.undoEdit();
 
@@ -182,9 +284,9 @@ int main(int argc, char** argv) {
   controller.updateSelectedClipTransform(0.0, 0.0, 1.2, 0.0, 1.0);
   controller.updateSelectedClipTransform(0.0, 0.0, 1.5, 0.0, 1.0);
   controller.endSelectedClipTransform();
-  REQUIRE(205, std::abs(controller.selectedClipScale() - 1.5) < 1e-9);
+  REQUIRE(305, std::abs(controller.selectedClipScale() - 1.5) < 1e-9);
   controller.undoEdit();
-  REQUIRE(206, controller.selectedClipScale() == 1.0);
+  REQUIRE(306, controller.selectedClipScale() == 1.0);
 
   // ---- Sound library: Spanish names, categories, durations, auditionable (when the pack is installed) ----
   if (controller.soundPackAvailable()) {
@@ -269,5 +371,6 @@ int main(int argc, char** argv) {
   controller.selectTimelineClip(clip_key(controller, 0));
   REQUIRE(23, std::abs(controller.selectedClipFadeIn() - 0.5) < 1e-9 && std::abs(controller.selectedClipFadeOut() - 1.25) < 1e-9);
   fs::remove_all(root);
+  fs::remove_all(geometry_root);
   return 0;
 }

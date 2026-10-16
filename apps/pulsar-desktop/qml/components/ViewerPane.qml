@@ -50,65 +50,55 @@ Item {
 
         Image { id: frame; anchors.fill: parent; source: controller.previewSource; cache: false; fillMode: Image.PreserveAspectFit; visible: controller.previewSource.length > 0 }
 
-        // Clip transform overlay. Viewer pixels are transient input only: deltas
-        // are divided by the painted canvas and sent as canvas-relative values.
+        // Stable interaction surface. It owns the pointer grab independently of
+        // the asynchronously replaced frame/texture. All gesture geometry is
+        // snapshotted in this item's coordinate system at press time.
         Item {
-            id: clipPlacer
+            id: interactionOverlay
+            objectName: "viewerInteractionOverlay"
             anchors.fill: parent
+            z: 20
             readonly property var geometry: controller.selectedClipVisualGeometry
-            readonly property bool ready: controller.previewSource.length > 0 && controller.selectedClipOnScreen
-                                          && geometry !== undefined && geometry.width !== undefined && frame.paintedWidth > 0
-            readonly property real picX: frame.x + (frame.width - frame.paintedWidth) / 2
-            readonly property real picY: frame.y + (frame.height - frame.paintedHeight) / 2
-            visible: ready
+            readonly property real canvasAspect: controller.viewerCanvasAspectRatio
+            readonly property real canvasWidth: canvasAspect > 0
+                ? Math.min(width, height * canvasAspect) : 0
+            readonly property real canvasHeight: canvasAspect > 0
+                ? Math.min(height, width / canvasAspect) : 0
+            readonly property real canvasX: (width - canvasWidth) / 2
+            readonly property real canvasY: (height - canvasHeight) / 2
+            readonly property bool available: controller.selectedClipOnScreen
+                && geometry !== undefined && geometry.width !== undefined
+                && canvasWidth > 0 && canvasHeight > 0
+            visible: available || interactionArea.gesture.length > 0
 
             Item {
-                id: clipBounds
-                x: clipPlacer.picX + (clipPlacer.geometry.centerX - clipPlacer.geometry.width / 2) * frame.paintedWidth
-                y: clipPlacer.picY + (clipPlacer.geometry.centerY - clipPlacer.geometry.height / 2) * frame.paintedHeight
-                width: Math.max(8, clipPlacer.geometry.width * frame.paintedWidth)
-                height: Math.max(8, clipPlacer.geometry.height * frame.paintedHeight)
-                rotation: clipPlacer.geometry.rotation === undefined ? 0 : clipPlacer.geometry.rotation
+                objectName: "viewerCanvasRect"
+                x: interactionOverlay.canvasX; y: interactionOverlay.canvasY
+                width: interactionOverlay.canvasWidth; height: interactionOverlay.canvasHeight
+            }
+
+            Item {
+                id: selectionBounds
+                objectName: "viewerSelectionBounds"
+                x: interactionOverlay.available
+                    ? interactionOverlay.canvasX + (interactionOverlay.geometry.centerX - interactionOverlay.geometry.width / 2) * interactionOverlay.canvasWidth : 0
+                y: interactionOverlay.available
+                    ? interactionOverlay.canvasY + (interactionOverlay.geometry.centerY - interactionOverlay.geometry.height / 2) * interactionOverlay.canvasHeight : 0
+                width: interactionOverlay.available
+                    ? Math.max(8, interactionOverlay.geometry.width * interactionOverlay.canvasWidth) : 8
+                height: interactionOverlay.available
+                    ? Math.max(8, interactionOverlay.geometry.height * interactionOverlay.canvasHeight) : 8
+                rotation: interactionOverlay.available && interactionOverlay.geometry.rotation !== undefined
+                    ? interactionOverlay.geometry.rotation : 0
                 transformOrigin: Item.Center
 
                 Rectangle {
                     anchors.fill: parent
                     color: "transparent"
                     border.width: 2
-                    border.color: moveArea.containsMouse || moveArea.pressed ? Theme.textOnAccent : Theme.focus
+                    border.color: interactionArea.gesture.length > 0 || interactionArea.insideSelection
+                        ? Theme.textOnAccent : Theme.focus
                     Behavior on border.color { ColorAnimation { duration: Theme.motionFast } }
-                }
-                MouseArea {
-                    id: moveArea
-                    objectName: "viewerMoveArea"
-                    anchors.fill: parent
-                    anchors.margins: 7
-                    hoverEnabled: true
-                    cursorShape: pressed ? Qt.ClosedHandCursor : Qt.SizeAllCursor
-                    property real startX: 0
-                    property real startY: 0
-                    property real pressViewerX: 0
-                    property real pressViewerY: 0
-                    onPressed: function(mouse) {
-                        startX = controller.selectedClipPosX; startY = controller.selectedClipPosY
-                        var point = mapToItem(pane, mouse.x, mouse.y)
-                        pressViewerX = point.x; pressViewerY = point.y
-                        controller.beginSelectedClipTransform()
-                    }
-                    onPositionChanged: function(mouse) {
-                        if (!pressed) return
-                        var point = mapToItem(pane, mouse.x, mouse.y)
-                        var dx = point.x - pressViewerX
-                        var dy = point.y - pressViewerY
-                        var angle = clipBounds.rotation * Math.PI / 180
-                        var screenDx = Math.cos(angle) * dx - Math.sin(angle) * dy
-                        var screenDy = Math.sin(angle) * dx + Math.cos(angle) * dy
-                        controller.updateSelectedClipTranslationFromViewer(startX, startY, screenDx, screenDy,
-                            frame.paintedWidth, frame.paintedHeight,
-                            controller.selectedClipScale, controller.selectedClipRotation, controller.selectedClipOpacity)
-                    }
-                    onReleased: controller.endSelectedClipTransform()
-                    onCanceled: controller.cancelSelectedClipTransform()
                 }
                 Repeater {
                     model: [{sx: -1, sy: -1}, {sx: 1, sy: -1}, {sx: -1, sy: 1}, {sx: 1, sy: 1}]
@@ -120,47 +110,190 @@ Item {
                         readonly property int sy: modelData.sy
                         // Keep the complete handle inside the canvas for a
                         // full-frame VIDEO 1 clip instead of clipping half of it.
-                        x: sx < 0 ? 0 : clipBounds.width - width
-                        y: sy < 0 ? 0 : clipBounds.height - height
+                        x: sx < 0 ? 0 : selectionBounds.width - width
+                        y: sy < 0 ? 0 : selectionBounds.height - height
                         width: 12; height: 12; radius: 3
-                        scale: handleMouse.containsMouse || handleMouse.pressed ? 1.18 : 1.0
-                        color: handleMouse.containsMouse || handleMouse.pressed ? Theme.textOnAccent : Theme.focus
+                        scale: interactionArea.hoveredSx === sx && interactionArea.hoveredSy === sy ? 1.18 : 1.0
+                        color: interactionArea.hoveredSx === sx && interactionArea.hoveredSy === sy
+                            ? Theme.textOnAccent : Theme.focus
                         border.width: 1; border.color: Theme.bgViewer
                         Behavior on color { ColorAnimation { duration: Theme.motionFast } }
                         Behavior on scale { NumberAnimation { duration: Theme.motionFast } }
-                        MouseArea {
-                            id: handleMouse
-                            objectName: "viewerScaleMouse_" + parent.sx + "_" + parent.sy
-                            anchors.fill: parent; anchors.margins: -6
-                            hoverEnabled: true
-                            cursorShape: parent.sx === parent.sy ? Qt.SizeFDiagCursor : Qt.SizeBDiagCursor
-                            property real startScale: 1
-                            property real startWidth: 1
-                            property real startHeight: 1
-                            property real pressViewerX: 0
-                            property real pressViewerY: 0
-                            onPressed: function(mouse) {
-                                startScale = controller.selectedClipScale
-                                startWidth = clipBounds.width; startHeight = clipBounds.height
-                                var point = mapToItem(pane, mouse.x, mouse.y)
-                                pressViewerX = point.x; pressViewerY = point.y
-                                controller.beginSelectedClipTransform()
-                            }
-                            onPositionChanged: function(mouse) {
-                                if (!pressed) return
-                                var point = mapToItem(pane, mouse.x, mouse.y)
-                                var dx = point.x - pressViewerX
-                                var dy = point.y - pressViewerY
-                                var fx = 1 + parent.sx * dx / Math.max(4, startWidth / 2)
-                                var fy = 1 + parent.sy * dy / Math.max(4, startHeight / 2)
-                                var factor = Math.max(0.01, (fx + fy) / 2)
-                                controller.updateSelectedClipTransform(controller.selectedClipPosX, controller.selectedClipPosY,
-                                    Math.max(0.01, Math.min(100, startScale * factor)), controller.selectedClipRotation, controller.selectedClipOpacity)
-                            }
-                            onReleased: controller.endSelectedClipTransform()
-                            onCanceled: controller.cancelSelectedClipTransform()
-                        }
                     }
+                }
+            }
+
+            MouseArea {
+                id: interactionArea
+                objectName: "viewerInteractionArea"
+                anchors.fill: parent
+                acceptedButtons: Qt.LeftButton
+                hoverEnabled: true
+                preventStealing: true
+                enabled: interactionOverlay.available || gesture.length > 0
+
+                property string gesture: ""
+                property int cornerSx: 0
+                property int cornerSy: 0
+                property int hoveredSx: 0
+                property int hoveredSy: 0
+                property bool insideSelection: false
+                property bool firstMoveLogged: false
+                property real pressX: 0
+                property real pressY: 0
+                property real startCanvasX: 0
+                property real startCanvasY: 0
+                property real startCanvasWidth: 0
+                property real startCanvasHeight: 0
+                property real startBoundsX: 0
+                property real startBoundsY: 0
+                property real startBoundsWidth: 0
+                property real startBoundsHeight: 0
+                property real startCenterX: 0
+                property real startCenterY: 0
+                property real startPosX: 0
+                property real startPosY: 0
+                property real startScale: 1
+                property real startRotation: 0
+                property real startOpacity: 1
+                property real scaleVectorX: 0
+                property real scaleVectorY: 0
+
+                function cornerPoint(sx, sy) {
+                    var radians = selectionBounds.rotation * Math.PI / 180
+                    var dx = sx * selectionBounds.width / 2
+                    var dy = sy * selectionBounds.height / 2
+                    return Qt.point(selectionBounds.x + selectionBounds.width / 2
+                                    + Math.cos(radians) * dx - Math.sin(radians) * dy,
+                                    selectionBounds.y + selectionBounds.height / 2
+                                    + Math.sin(radians) * dx + Math.cos(radians) * dy)
+                }
+                function cornerAt(px, py) {
+                    var corners = [[-1, -1], [1, -1], [-1, 1], [1, 1]]
+                    for (var index = 0; index < corners.length; ++index) {
+                        var point = cornerPoint(corners[index][0], corners[index][1])
+                        var dx = px - point.x; var dy = py - point.y
+                        if (dx * dx + dy * dy <= 18 * 18) return corners[index]
+                    }
+                    return [0, 0]
+                }
+                function containsVisual(px, py) {
+                    var cx = selectionBounds.x + selectionBounds.width / 2
+                    var cy = selectionBounds.y + selectionBounds.height / 2
+                    var radians = selectionBounds.rotation * Math.PI / 180
+                    var dx = px - cx; var dy = py - cy
+                    var localX = Math.cos(radians) * dx + Math.sin(radians) * dy
+                    var localY = -Math.sin(radians) * dx + Math.cos(radians) * dy
+                    return Math.abs(localX) <= selectionBounds.width / 2
+                        && Math.abs(localY) <= selectionBounds.height / 2
+                }
+                function updateHover(px, py) {
+                    if (gesture.length > 0) return
+                    var corner = cornerAt(px, py)
+                    hoveredSx = corner[0]; hoveredSy = corner[1]
+                    insideSelection = containsVisual(px, py)
+                }
+                function debugData(currentX, currentY, normalizedX, normalizedY, ratio, proposedScale) {
+                    return {
+                        gesture: gesture.toUpperCase(), cornerX: cornerSx, cornerY: cornerSy,
+                        corner: cornerSx < 0 ? (cornerSy < 0 ? "TOP_LEFT" : "BOTTOM_LEFT")
+                            : (cornerSx > 0 ? (cornerSy < 0 ? "TOP_RIGHT" : "BOTTOM_RIGHT") : "NONE"),
+                        pressX: pressX, pressY: pressY, currentX: currentX, currentY: currentY,
+                        canvasX: startCanvasX, canvasY: startCanvasY,
+                        canvasWidth: startCanvasWidth, canvasHeight: startCanvasHeight,
+                        boundsX: startBoundsX, boundsY: startBoundsY,
+                        boundsWidth: startBoundsWidth, boundsHeight: startBoundsHeight,
+                        initialX: startPosX, initialY: startPosY, initialScale: startScale,
+                        initialRotation: startRotation, initialOpacity: startOpacity,
+                        normalizedX: normalizedX, normalizedY: normalizedY,
+                        scaleRatio: ratio,
+                        proposedX: gesture === "move" ? startPosX + normalizedX : startPosX,
+                        proposedY: gesture === "move" ? startPosY + normalizedY : startPosY,
+                        proposedScale: proposedScale
+                    }
+                }
+                function clearGesture() {
+                    gesture = ""; cornerSx = 0; cornerSy = 0; firstMoveLogged = false
+                }
+
+                cursorShape: gesture === "move" ? Qt.ClosedHandCursor
+                    : ((gesture === "scale" ? cornerSx : hoveredSx) !== 0
+                       ? (((gesture === "scale" ? cornerSx : hoveredSx)
+                           === (gesture === "scale" ? cornerSy : hoveredSy))
+                          ? Qt.SizeFDiagCursor : Qt.SizeBDiagCursor)
+                       : (insideSelection ? Qt.SizeAllCursor : Qt.ArrowCursor))
+
+                onPressed: function(mouse) {
+                    var corner = cornerAt(mouse.x, mouse.y)
+                    if (corner[0] === 0 && !containsVisual(mouse.x, mouse.y)) {
+                        mouse.accepted = false
+                        return
+                    }
+                    gesture = corner[0] === 0 ? "move" : "scale"
+                    cornerSx = corner[0]; cornerSy = corner[1]
+                    pressX = mouse.x; pressY = mouse.y
+                    startCanvasX = interactionOverlay.canvasX; startCanvasY = interactionOverlay.canvasY
+                    startCanvasWidth = interactionOverlay.canvasWidth; startCanvasHeight = interactionOverlay.canvasHeight
+                    startBoundsX = selectionBounds.x; startBoundsY = selectionBounds.y
+                    startBoundsWidth = selectionBounds.width; startBoundsHeight = selectionBounds.height
+                    startCenterX = selectionBounds.x + selectionBounds.width / 2
+                    startCenterY = selectionBounds.y + selectionBounds.height / 2
+                    startPosX = controller.selectedClipPosX; startPosY = controller.selectedClipPosY
+                    startScale = controller.selectedClipScale
+                    startRotation = controller.selectedClipRotation; startOpacity = controller.selectedClipOpacity
+                    scaleVectorX = pressX - startCenterX; scaleVectorY = pressY - startCenterY
+                    firstMoveLogged = false
+                    controller.debugViewerGesture("BEGIN", debugData(mouse.x, mouse.y, 0, 0, 1, startScale))
+                    controller.beginSelectedClipTransform()
+                }
+                onPositionChanged: function(mouse) {
+                    updateHover(mouse.x, mouse.y)
+                    if (gesture.length === 0) return
+                    var normalizedX = (mouse.x - pressX) / startCanvasWidth
+                    var normalizedY = (mouse.y - pressY) / startCanvasHeight
+                    var ratio = 1
+                    var proposedScale = startScale
+                    if (gesture === "move") {
+                        controller.updateSelectedClipTransform(startPosX + normalizedX, startPosY + normalizedY,
+                            startScale, startRotation, startOpacity)
+                    } else {
+                        var denominator = scaleVectorX * scaleVectorX + scaleVectorY * scaleVectorY
+                        var currentX = mouse.x - startCenterX; var currentY = mouse.y - startCenterY
+                        ratio = denominator > 0.0001
+                            ? (currentX * scaleVectorX + currentY * scaleVectorY) / denominator : 1
+                        proposedScale = Math.max(0.01, Math.min(100, startScale * Math.max(0.01, ratio)))
+                        controller.updateSelectedClipTransform(startPosX, startPosY, proposedScale,
+                            startRotation, startOpacity)
+                    }
+                    if (!firstMoveLogged) {
+                        firstMoveLogged = true
+                        controller.debugViewerGesture("FIRST_MOVE",
+                            debugData(mouse.x, mouse.y, normalizedX, normalizedY, ratio, proposedScale))
+                    }
+                }
+                onReleased: function(mouse) {
+                    if (gesture.length === 0) return
+                    var committed = Math.abs(controller.selectedClipPosX - startPosX) > 0.0000001
+                        || Math.abs(controller.selectedClipPosY - startPosY) > 0.0000001
+                        || Math.abs(controller.selectedClipScale - startScale) > 0.0000001
+                    var data = debugData(mouse.x, mouse.y, 0, 0,
+                        startScale > 0 ? controller.selectedClipScale / startScale : 1,
+                        controller.selectedClipScale)
+                    data.committed = committed
+                    data.finalX = controller.selectedClipPosX; data.finalY = controller.selectedClipPosY
+                    data.finalScale = controller.selectedClipScale
+                    controller.endSelectedClipTransform()
+                    controller.debugViewerGesture("RELEASE", data)
+                    clearGesture()
+                    updateHover(mouse.x, mouse.y)
+                }
+                onCanceled: {
+                    if (gesture.length === 0) return
+                    var data = debugData(pressX, pressY, 0, 0, 1, startScale)
+                    data.committed = false
+                    controller.cancelSelectedClipTransform()
+                    controller.debugViewerGesture("CANCEL", data)
+                    clearGesture()
                 }
             }
         }
@@ -168,14 +301,14 @@ Item {
         Rectangle {
             // Discoverability cue, shown only when direct manipulation is
             // actually available for the selected visual at the playhead.
-            visible: clipPlacer.ready && !moveArea.pressed
+            visible: interactionOverlay.available && interactionArea.gesture.length === 0
             anchors.left: parent.left; anchors.top: parent.top
             anchors.leftMargin: Theme.spaceM; anchors.topMargin: Theme.spaceM
             height: 26; width: directHint.implicitWidth + 2 * Theme.spaceM
             radius: Theme.radiusM
             color: Theme.chipOverlay
             border.width: 1; border.color: Theme.accent
-            opacity: moveArea.containsMouse ? 1.0 : 0.88
+            opacity: interactionArea.insideSelection ? 1.0 : 0.88
             Text {
                 id: directHint; anchors.centerIn: parent
                 text: "Arrastrá para mover  ·  Esquinas para escalar"

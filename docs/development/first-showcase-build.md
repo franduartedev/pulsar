@@ -100,3 +100,29 @@ the same media/source range on the first non-overlapping audio track (or creates
 copies gain and fades, and mutes the source clip in one grouped command. The v6
 representation remains ordinary clips plus the existing mute state, so undo/redo,
 save/reopen, preview, waveform generation, and export require no format change.
+
+## Human polish fix 03 — Viewer correctness gate
+
+The Fix 02 Viewer gate was insufficient. Its pointer owner still lived inside the
+live selection bounds, its availability still depended on the asynchronous preview
+image, move deltas were unnecessarily rotated into clip-local coordinates, and
+scale averaged independent X/Y heuristics. Those choices could pass synthetic
+events while failing or mapping incorrectly on the Linux desktop.
+
+The Viewer now has one stable, full-canvas interaction overlay above the rendered
+frame. A single left-button `MouseArea` with `preventStealing` performs handle-first
+hit testing, owns the complete gesture, and stays alive while preview textures are
+replaced. It computes the displayed project-canvas rectangle from the persistent
+canvas aspect rather than `Image.paintedWidth`/`paintedHeight`. Press snapshots the
+canvas rectangle, screen bounds, pointer, and complete initial transform. Every
+move is derived from that snapshot: translation is direct screen delta divided by
+the displayed canvas dimensions, while scale is the pointer vector projected onto
+the press-time corner vector around the renderer's fixed centre anchor. Scale is
+finite and clamped before crossing the anchor can mirror the image.
+
+Debug builds log BEGIN, FIRST_MOVE, RELEASE/CANCEL records with clip id and the
+captured/proposed geometry. The Qt Quick integration gate uses the production
+Viewer hierarchy at 960×540 and checks both transform values and screen bounds for
+identity/scaled movement, every corner direction, anchor crossing, resize,
+letterbox, pillarbox, live Inspector properties, history coalescing, and frame
+replacement during an active pointer grab.

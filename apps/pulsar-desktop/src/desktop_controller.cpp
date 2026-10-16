@@ -5,6 +5,7 @@
 #include <pulsar/media/ffmpeg/ffmpeg_offline_frame_scaler.hpp>
 #include "builtin_sound_catalog.hpp"
 #include <QColor>
+#include <QDebug>
 #include <cctype>
 #include <QFileInfo>
 #include <QDir>
@@ -1542,6 +1543,12 @@ QVariantMap DesktopController::selectedClipVisualGeometry() const {
   result.insert(QStringLiteral("rotation"), transform.rotation_degrees);
   return result;
 }
+double DesktopController::viewerCanvasAspectRatio() const {
+  if (!active_session_ || !active_session_->document().canvas()) return 0.0;
+  const auto& canvas = *active_session_->document().canvas();
+  if (canvas.width <= 0 || canvas.height <= 0) return 0.0;
+  return static_cast<double>(canvas.width) / static_cast<double>(canvas.height);
+}
 bool DesktopController::selectedClipOnScreen() const {
   if (!active_session_ || !active_session_->selected_clip()) return false;
   const auto* clip = active_session_->document().timeline().find_clip(*active_session_->selected_clip());
@@ -1627,6 +1634,18 @@ void DesktopController::cancelSelectedClipTransform() {
     logCause("transform interaction cancel failed", error);
     setError(QStringLiteral("No se pudo cancelar la transformación."));
   }
+}
+void DesktopController::debugViewerGesture(const QString& phase, const QVariantMap& data) const {
+#ifndef NDEBUG
+  const auto clip = active_session_ ? active_session_->selected_clip() : std::nullopt;
+  const auto details = QJsonDocument{QJsonObject::fromVariantMap(data)}.toJson(QJsonDocument::Compact);
+  qInfo().noquote() << "viewer_gesture" << phase
+                    << "clip=" << (clip ? QString::number(clip->value()) : QStringLiteral("none"))
+                    << details;
+#else
+  Q_UNUSED(phase)
+  Q_UNUSED(data)
+#endif
 }
 void DesktopController::addCrossDissolve() {
   if (!active_session_) return;
