@@ -46,8 +46,13 @@ Rectangle {
     property real previewOffset: 0
     property real trimWidthDelta: 0
     property real pressTimelineX: 0
+    property real lastInsideCurrentX: 0
     property bool trimDragging: false
+    property bool trimIsStart: false
     property bool moveDragging: false
+    // TimelinePane that owns the pointer-drag lifecycle. Null when the block is
+    // embedded outside the Timeline (legacy VideoTrack) and unconstrained.
+    property var dragHost: null
     readonly property real nameStripHeight: 18
     signal activated()
     signal muteToggled()
@@ -59,6 +64,28 @@ Rectangle {
     // Mouse position in timeline pixels, as the controller expects (0..timelineWidth).
     function timelineX(area, mouse) {
         return area.mapToItem(block.parent, mouse.x, mouse.y).x - block.timelineOffset
+    }
+
+    // Re-derives the live preview from the pointer's last in-region position.
+    // Used by the host's edge-autoscroll tick so the block stays under the
+    // pointer as the viewport moves beneath it.
+    function refreshDragPreview() {
+        var current = block.lastInsideCurrentX
+        if (block.moveDragging) {
+            var moved = controller.previewTimelineMove(block.clipKey, block.pressTimelineX, current, block.timelineWidth)
+            block.previewOffset = moved.offset
+            block.snapGuide(moved.guide)
+        } else if (block.trimDragging) {
+            var trimmed = controller.previewTimelineTrim(block.clipKey, block.trimIsStart, current, block.timelineWidth)
+            if (block.trimIsStart) {
+                var delta = trimmed.px - (block.canonicalStartX - block.timelineOffset)
+                block.previewOffset = delta
+                block.trimWidthDelta = -delta
+            } else {
+                block.trimWidthDelta = trimmed.px - (block.canonicalStartX - block.timelineOffset + block.canonicalWidth)
+            }
+            block.snapGuide(trimmed.guide)
+        }
     }
 
     x: canonicalStartX + previewOffset
@@ -222,12 +249,23 @@ Rectangle {
             cursorShape: Qt.SizeHorCursor
             onPressed: function(mouse) {
                 block.pressTimelineX = block.timelineX(parent, mouse)
+                block.lastInsideCurrentX = block.pressTimelineX
                 block.trimDragging = false
+                block.trimIsStart = true
                 block.previewOffset = 0
                 block.trimWidthDelta = 0
+                if (block.dragHost) {
+                    var scene = leftHandle.mapToItem(null, mouse.x, mouse.y)
+                    block.dragHost.beginTimelineDrag(block, scene.x, scene.y)
+                }
             }
             onPositionChanged: function(mouse) {
                 if (!pressed) return
+                if (block.dragHost) {
+                    var scene = leftHandle.mapToItem(null, mouse.x, mouse.y)
+                    block.dragHost.updateTimelineDrag(scene.x, scene.y)
+                    if (!block.dragHost.dragInside) return
+                }
                 var current = block.timelineX(parent, mouse)
                 if (Math.abs(current - block.pressTimelineX) >= 4) block.trimDragging = true
                 if (block.trimDragging) {
@@ -235,17 +273,32 @@ Rectangle {
                     var delta = r.px - (block.canonicalStartX - block.timelineOffset)
                     block.previewOffset = delta
                     block.trimWidthDelta = -delta
+                    block.lastInsideCurrentX = current
                     block.snapGuide(r.guide)
                 }
             }
             onReleased: function(mouse) {
-                var current = block.timelineX(parent, mouse)
+                var inside = true
+                if (block.dragHost) {
+                    var scene = leftHandle.mapToItem(null, mouse.x, mouse.y)
+                    block.dragHost.updateTimelineDrag(scene.x, scene.y)
+                    inside = block.dragHost.dragInside
+                }
+                var current = inside ? block.timelineX(parent, mouse) : block.lastInsideCurrentX
                 if (block.trimDragging)
                     controller.trimTimelineClipStart(block.clipKey, current, block.timelineWidth)
                 block.previewOffset = 0
                 block.trimWidthDelta = 0
                 block.trimDragging = false
                 block.snapGuide(-1)
+                if (block.dragHost) block.dragHost.endTimelineDrag()
+            }
+            onCanceled: {
+                block.previewOffset = 0
+                block.trimWidthDelta = 0
+                block.trimDragging = false
+                block.snapGuide(-1)
+                if (block.dragHost) block.dragHost.endTimelineDrag()
             }
         }
     }
@@ -262,26 +315,51 @@ Rectangle {
             cursorShape: Qt.SizeHorCursor
             onPressed: function(mouse) {
                 block.pressTimelineX = block.timelineX(parent, mouse)
+                block.lastInsideCurrentX = block.pressTimelineX
                 block.trimDragging = false
+                block.trimIsStart = false
                 block.trimWidthDelta = 0
+                if (block.dragHost) {
+                    var scene = rightHandle.mapToItem(null, mouse.x, mouse.y)
+                    block.dragHost.beginTimelineDrag(block, scene.x, scene.y)
+                }
             }
             onPositionChanged: function(mouse) {
                 if (!pressed) return
+                if (block.dragHost) {
+                    var scene = rightHandle.mapToItem(null, mouse.x, mouse.y)
+                    block.dragHost.updateTimelineDrag(scene.x, scene.y)
+                    if (!block.dragHost.dragInside) return
+                }
                 var current = block.timelineX(parent, mouse)
                 if (Math.abs(current - block.pressTimelineX) >= 4) block.trimDragging = true
                 if (block.trimDragging) {
                     var r = controller.previewTimelineTrim(block.clipKey, false, current, block.timelineWidth)
                     block.trimWidthDelta = r.px - (block.canonicalStartX - block.timelineOffset + block.canonicalWidth)
+                    block.lastInsideCurrentX = current
                     block.snapGuide(r.guide)
                 }
             }
             onReleased: function(mouse) {
-                var current = block.timelineX(parent, mouse)
+                var inside = true
+                if (block.dragHost) {
+                    var scene = rightHandle.mapToItem(null, mouse.x, mouse.y)
+                    block.dragHost.updateTimelineDrag(scene.x, scene.y)
+                    inside = block.dragHost.dragInside
+                }
+                var current = inside ? block.timelineX(parent, mouse) : block.lastInsideCurrentX
                 if (block.trimDragging)
                     controller.trimTimelineClipEnd(block.clipKey, current, block.timelineWidth)
                 block.trimWidthDelta = 0
                 block.trimDragging = false
                 block.snapGuide(-1)
+                if (block.dragHost) block.dragHost.endTimelineDrag()
+            }
+            onCanceled: {
+                block.trimWidthDelta = 0
+                block.trimDragging = false
+                block.snapGuide(-1)
+                if (block.dragHost) block.dragHost.endTimelineDrag()
             }
         }
     }
@@ -289,6 +367,7 @@ Rectangle {
     // ---- Body: select, move ------------------------------------------------
     MouseArea {
         id: body
+        objectName: "clipBody"
         anchors.fill: parent
         anchors.leftMargin: leftHandle.width
         anchors.rightMargin: rightHandle.width
@@ -303,22 +382,39 @@ Rectangle {
                 return
             }
             block.pressTimelineX = block.timelineX(parent, mouse)
+            block.lastInsideCurrentX = block.pressTimelineX
             block.moveDragging = false
             block.previewOffset = 0
+            if (block.dragHost) {
+                var scene = body.mapToItem(null, mouse.x, mouse.y)
+                block.dragHost.beginTimelineDrag(block, scene.x, scene.y)
+            }
         }
         onPositionChanged: function(mouse) {
             if (!pressed || pressedButtons !== Qt.LeftButton) return
+            if (block.dragHost) {
+                var scene = body.mapToItem(null, mouse.x, mouse.y)
+                block.dragHost.updateTimelineDrag(scene.x, scene.y)
+                if (!block.dragHost.dragInside) return
+            }
             var current = block.timelineX(parent, mouse)
             if (Math.abs(current - block.pressTimelineX) >= 4) block.moveDragging = true
             if (block.moveDragging) {
                 var r = controller.previewTimelineMove(block.clipKey, block.pressTimelineX, current, block.timelineWidth)
                 block.previewOffset = r.offset
+                block.lastInsideCurrentX = current
                 block.snapGuide(r.guide)
             }
         }
         onReleased: function(mouse) {
             if (mouse.button === Qt.RightButton) return
-            var current = block.timelineX(parent, mouse)
+            var inside = true
+            if (block.dragHost) {
+                var scene = body.mapToItem(null, mouse.x, mouse.y)
+                block.dragHost.updateTimelineDrag(scene.x, scene.y)
+                inside = block.dragHost.dragInside
+            }
+            var current = inside ? block.timelineX(parent, mouse) : block.lastInsideCurrentX
             if (block.moveDragging) {
                 controller.moveTimelineClip(block.clipKey, block.pressTimelineX, current, block.timelineWidth)
             } else {
@@ -327,6 +423,13 @@ Rectangle {
             block.previewOffset = 0
             block.moveDragging = false
             block.snapGuide(-1)
+            if (block.dragHost) block.dragHost.endTimelineDrag()
+        }
+        onCanceled: {
+            block.previewOffset = 0
+            block.moveDragging = false
+            block.snapGuide(-1)
+            if (block.dragHost) block.dragHost.endTimelineDrag()
         }
     }
 

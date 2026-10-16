@@ -1549,6 +1549,14 @@ double DesktopController::viewerCanvasAspectRatio() const {
   if (canvas.width <= 0 || canvas.height <= 0) return 0.0;
   return static_cast<double>(canvas.width) / static_cast<double>(canvas.height);
 }
+int DesktopController::viewerCanvasPixelWidth() const {
+  const auto size = projectCanvasSize();
+  return size ? size->first : 0;
+}
+int DesktopController::viewerCanvasPixelHeight() const {
+  const auto size = projectCanvasSize();
+  return size ? size->second : 0;
+}
 bool DesktopController::selectedClipOnScreen() const {
   if (!active_session_ || !active_session_->selected_clip()) return false;
   const auto* clip = active_session_->document().timeline().find_clip(*active_session_->selected_clip());
@@ -1642,6 +1650,16 @@ void DesktopController::debugViewerGesture(const QString& phase, const QVariantM
   qInfo().noquote() << "viewer_gesture" << phase
                     << "clip=" << (clip ? QString::number(clip->value()) : QStringLiteral("none"))
                     << details;
+#else
+  Q_UNUSED(phase)
+  Q_UNUSED(data)
+#endif
+}
+void DesktopController::debugTimelineGesture(const QString& phase, const QVariantMap& data) const {
+#ifndef NDEBUG
+  const auto details = QJsonDocument{QJsonObject::fromVariantMap(data)}.toJson(QJsonDocument::Compact);
+  qInfo().noquote() << "timeline_gesture" << phase
+                    << "scroll=" << timeline_scroll_ << "zoom=" << timeline_zoom_ << details;
 #else
   Q_UNUSED(phase)
   Q_UNUSED(data)

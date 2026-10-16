@@ -5,7 +5,13 @@ import "../theme/Theme.js" as Theme
 // carries the source name and preview health; nothing overlays the image.
 Item {
     id: pane
+    objectName: "viewerPane"
     signal importRequested()
+
+    // Viewer display fit. "fit" shows the whole project canvas (default, no
+    // crop, aspect preserved); "actual" shows one project pixel per screen
+    // pixel. Display-only: never changes CanvasSpec, a transform or export.
+    property string fitMode: "fit"
 
     readonly property string stateLabel: controller.viewerState === "loading" ? "Preparando…"
         : (controller.viewerState === "gap" ? "Espacio vacío"
@@ -29,11 +35,21 @@ Item {
         Row {
             id: lateRow
             visible: controller.previewLate
-            anchors.right: parent.right; anchors.rightMargin: Theme.spaceL
+            anchors.right: fitControl.left; anchors.rightMargin: Theme.spaceM
             anchors.verticalCenter: parent.verticalCenter
             spacing: 6
             StatusDot { anchors.verticalCenter: parent.verticalCenter; tone: "warn" }
             Text { anchors.verticalCenter: parent.verticalCenter; text: "Preview con retraso"; color: Theme.warning; font.pixelSize: Theme.fontSizeXS }
+        }
+        Segmented {
+            id: fitControl
+            objectName: "viewerFitControl"
+            anchors.right: parent.right; anchors.rightMargin: Theme.spaceL
+            anchors.verticalCenter: parent.verticalCenter
+            width: 128
+            model: ["Ajustar", "100%"]
+            current: pane.fitMode === "actual" ? 1 : 0
+            onActivated: function(index) { pane.fitMode = index === 1 ? "actual" : "fit" }
         }
     }
 
@@ -48,7 +64,18 @@ Item {
         border.width: 1; border.color: Theme.borderSubtle
         clip: true
 
-        Image { id: frame; anchors.fill: parent; source: controller.previewSource; cache: false; fillMode: Image.PreserveAspectFit; visible: controller.previewSource.length > 0 }
+        Image {
+            id: frame
+            objectName: "viewerFrame"
+            x: interactionOverlay.canvasX
+            y: interactionOverlay.canvasY
+            width: interactionOverlay.canvasWidth
+            height: interactionOverlay.canvasHeight
+            source: controller.previewSource
+            cache: false
+            fillMode: Image.PreserveAspectFit
+            visible: controller.previewSource.length > 0 && width > 0 && height > 0
+        }
 
         // Stable interaction surface. It owns the pointer grab independently of
         // the asynchronously replaced frame/texture. All gesture geometry is
@@ -60,10 +87,17 @@ Item {
             z: 20
             readonly property var geometry: controller.selectedClipVisualGeometry
             readonly property real canvasAspect: controller.viewerCanvasAspectRatio
-            readonly property real canvasWidth: canvasAspect > 0
+            readonly property bool actualSize: pane.fitMode === "actual"
+            readonly property real fitCanvasWidth: canvasAspect > 0
                 ? Math.min(width, height * canvasAspect) : 0
-            readonly property real canvasHeight: canvasAspect > 0
+            readonly property real fitCanvasHeight: canvasAspect > 0
                 ? Math.min(height, width / canvasAspect) : 0
+            readonly property real canvasWidth: canvasAspect > 0
+                ? (actualSize && controller.viewerCanvasPixelWidth > 0
+                   ? controller.viewerCanvasPixelWidth : fitCanvasWidth) : 0
+            readonly property real canvasHeight: canvasAspect > 0
+                ? (actualSize && controller.viewerCanvasPixelHeight > 0
+                   ? controller.viewerCanvasPixelHeight : fitCanvasHeight) : 0
             readonly property real canvasX: (width - canvasWidth) / 2
             readonly property real canvasY: (height - canvasHeight) / 2
             readonly property bool available: controller.selectedClipOnScreen

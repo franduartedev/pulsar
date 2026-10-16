@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Window
 import "../theme/Theme.js" as Theme
 
 // Timeline: toolbar, ruler (click/drag to seek), track lanes with clips, one
@@ -46,6 +47,84 @@ Panel {
         if (hit !== null) controller.dropAsset(mediaId, hit.lane, hit.pixel, pane.timelineWidth)
     }
     function clearDrop() { dropVisible = false }
+
+    // ---- Pointer-drag lifecycle (one gesture at a time) --------------------
+    // Clip/title movement and edge-autoscroll may only run while a drag is live,
+    // the left button stays held, and the pointer remains inside the Timeline
+    // region. Leaving the region stops autoscroll and freezes the preview;
+    // release or cancel terminates the whole gesture. Nothing is left running.
+    property bool dragActive: false
+    property bool dragInside: false
+    property real dragSceneX: 0
+    property real dragSceneY: 0
+    property int edgeScrollDirection: 0          // -1 left, +1 right, 0 idle
+    property int edgeScrollTicks: 0
+    property var activeDragBlock: null           // the block under the pointer
+    readonly property real edgeScrollZone: 56
+    readonly property bool hostWindowActive: Window.active
+
+    function regionContains(sceneX, sceneY) {
+        var p = pane.mapFromItem(null, sceneX, sceneY)
+        return p.x >= 0 && p.x <= pane.width && p.y >= 0 && p.y <= pane.height
+    }
+    function recomputeEdgeScroll() {
+        if (!dragActive || !dragInside || controller.timelineZoom <= 1.0) { edgeScrollDirection = 0; return }
+        var localX = pane.mapFromItem(null, dragSceneX, dragSceneY).x
+        if (localX < pane.gutterWidth + pane.edgeScrollZone) edgeScrollDirection = -1
+        else if (localX > pane.width - pane.edgeScrollZone) edgeScrollDirection = 1
+        else edgeScrollDirection = 0
+    }
+    function beginTimelineDrag(block, sceneX, sceneY) {
+        activeDragBlock = block
+        dragActive = true
+        controller.debugTimelineGesture("BEGIN", { sceneX: sceneX, sceneY: sceneY })
+        updateTimelineDrag(sceneX, sceneY)
+    }
+    function updateTimelineDrag(sceneX, sceneY) {
+        if (!dragActive) return
+        var wasInside = dragInside
+        dragSceneX = sceneX; dragSceneY = sceneY
+        dragInside = regionContains(sceneX, sceneY)
+        if (wasInside && !dragInside)
+            controller.debugTimelineGesture("POINTER_EXIT", { sceneX: sceneX, sceneY: sceneY })
+        var previous = edgeScrollDirection
+        recomputeEdgeScroll()
+        if (previous === 0 && edgeScrollDirection !== 0)
+            controller.debugTimelineGesture("AUTOSCROLL_START", { direction: edgeScrollDirection })
+        else if (previous !== 0 && edgeScrollDirection === 0)
+            controller.debugTimelineGesture("AUTOSCROLL_STOP", {})
+    }
+    function endTimelineDrag() {
+        if (!dragActive) { activeDragBlock = null; return }
+        dragActive = false
+        dragInside = false
+        edgeScrollDirection = 0
+        activeDragBlock = null
+        controller.debugTimelineGesture("END", {})
+    }
+    function applyEdgeScroll() {
+        if (!dragActive || !dragInside || edgeScrollDirection === 0 || controller.timelineZoom <= 1.0) {
+            edgeScrollDirection = 0
+            return
+        }
+        controller.setTimelineScroll(controller.timelineScroll + edgeScrollDirection * 0.03)
+        // Re-derive the live preview against the new viewport so the dragged
+        // block stays under the pointer instead of sliding away with the view.
+        if (activeDragBlock && activeDragBlock.refreshDragPreview) activeDragBlock.refreshDragPreview()
+    }
+    onHostWindowActiveChanged: if (!hostWindowActive) endTimelineDrag()
+
+    // Single owner of edge-autoscroll. It can only run while a drag is live,
+    // the pointer is inside the Timeline seam, and an edge is engaged.
+    Timer {
+        id: edgeScrollTimer
+        objectName: "timelineEdgeScrollTimer"
+        interval: 16
+        repeat: true
+        running: pane.dragActive && pane.dragInside && pane.edgeScrollDirection !== 0
+        onRunningChanged: if (running) pane.edgeScrollTicks = 0
+        onTriggered: { pane.edgeScrollTicks += 1; pane.applyEdgeScroll() }
+    }
 
     // Right click on a clip: window coordinates for the context menu (hosted by Main).
     signal clipContextRequested(real sx, real sy)
@@ -191,11 +270,25 @@ Panel {
             contentHeight: Math.max(height, pane.titleLaneH + controller.timelineTracks.length * pane.trackLaneHeight)
             clip: true
             boundsBehavior: Flickable.StopAtBounds
+            // Track lanes scroll with the wheel only. Dragging is never a
+            // panning gesture here, so a pointer that leaves the Timeline can
+            // never leave a Flickable pan/flick momentum running (vertical
+            // scrolling stays available through the explicit WheelHandler).
+            interactive: false
             Item {
                 id: contentArea
                 width: trackScroll.width
                 height: trackScroll.contentHeight
                 Rectangle { anchors.fill: parent; color: Theme.laneAudio }
+                WheelHandler {
+                    acceptedModifiers: Qt.NoModifier
+                    onWheel: function(event) {
+                        var delta = event.angleDelta.y !== 0 ? event.angleDelta.y : event.angleDelta.x
+                        var maximum = Math.max(0, trackScroll.contentHeight - trackScroll.height)
+                        trackScroll.contentY = Math.max(0, Math.min(maximum, trackScroll.contentY - delta))
+                        event.accepted = true
+                    }
+                }
                 WheelHandler {
                     acceptedModifiers: Qt.ControlModifier
                     onWheel: function(event) { pane.wheelZoom(point.position.x, event.angleDelta.y) }
@@ -310,8 +403,12 @@ Panel {
                     Repeater {
                         model: controller.timelineClips
                         delegate: ClipBlock {
+                            objectName: "timelineClip_" + model.clipKey
                             z: model.selected ? 3 : 2
-                            visible: model.inViewport
+                            // A dragged clip stays painted even when the resize/scroll
+                            // preview pushes its committed position out of the viewport.
+                            visible: model.inViewport || moveDragging || trimDragging
+                            dragHost: pane
                             y: pane.titleLaneH + model.trackIndex * pane.trackLaneHeight + 6
                             canonicalStartX: model.startProgress * pane.timelineWidth
                             canonicalWidth: Math.max(3, (model.endProgress - model.startProgress) * pane.timelineWidth)
@@ -409,7 +506,9 @@ Panel {
                     Repeater {
                         model: controller.timelineTitles
                         delegate: TitleBlock {
-                            visible: model.inViewport
+                            objectName: "timelineTitle_" + model.titleKey
+                            visible: model.inViewport || moving || trimming
+                            dragHost: pane
                             y: 4; height: pane.titleLaneH - 8
                             canonicalStartX: model.startProgress * pane.timelineWidth
                             canonicalWidth: Math.max(6, (model.endProgress - model.startProgress) * pane.timelineWidth)

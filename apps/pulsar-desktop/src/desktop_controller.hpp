@@ -103,6 +103,8 @@ class DesktopController final : public QObject {
   Q_PROPERTY(double selectedClipOpacity READ selectedClipOpacity NOTIFY timelineChanged)
   Q_PROPERTY(QVariantMap selectedClipVisualGeometry READ selectedClipVisualGeometry NOTIFY timelineChanged)
   Q_PROPERTY(double viewerCanvasAspectRatio READ viewerCanvasAspectRatio NOTIFY mediaChanged)
+  Q_PROPERTY(int viewerCanvasPixelWidth READ viewerCanvasPixelWidth NOTIFY mediaChanged)
+  Q_PROPERTY(int viewerCanvasPixelHeight READ viewerCanvasPixelHeight NOTIFY mediaChanged)
   Q_PROPERTY(bool selectedClipOnScreen READ selectedClipOnScreen NOTIFY selectedClipOnScreenChanged)
   Q_PROPERTY(bool selectedClipHasTransition READ selectedClipHasTransition NOTIFY timelineChanged)
   Q_PROPERTY(bool canDuplicate READ canDuplicate NOTIFY timelineChanged)
@@ -185,6 +187,8 @@ public:
   [[nodiscard]] double selectedClipOpacity() const;
   [[nodiscard]] QVariantMap selectedClipVisualGeometry() const;
   [[nodiscard]] double viewerCanvasAspectRatio() const;
+  [[nodiscard]] int viewerCanvasPixelWidth() const;
+  [[nodiscard]] int viewerCanvasPixelHeight() const;
   [[nodiscard]] bool selectedClipOnScreen() const;
   [[nodiscard]] bool selectedClipHasTransition() const { return active_session_ && active_session_->selected_clip_has_transition(); }
   [[nodiscard]] bool canDuplicate() const { return active_session_ && active_session_->can_duplicate_selected(); }
@@ -265,6 +269,7 @@ public:
   Q_INVOKABLE void endSelectedClipTransform();
   Q_INVOKABLE void cancelSelectedClipTransform();
   Q_INVOKABLE void debugViewerGesture(const QString& phase, const QVariantMap& data) const;
+  Q_INVOKABLE void debugTimelineGesture(const QString& phase, const QVariantMap& data) const;
   Q_INVOKABLE void addCrossDissolve();
   Q_INVOKABLE void removeSelectedTransition();
   Q_INVOKABLE void adjustTrackGain(const QString& track_key, double delta_db);

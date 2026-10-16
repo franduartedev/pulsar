@@ -23,6 +23,29 @@ Window {
     property real inspectorWidth: Math.max(250, Math.min(310, width * 0.21))
     property bool compactWorkspace: height <= 650
 
+    // ---- Viewer / Timeline split -------------------------------------------
+    // Session UI state only: the divider position never enters the project file,
+    // a transform, or any export decision. The Viewer canvas re-fits to whatever
+    // height it is given (see ViewerPane), so resizing cannot move a clip.
+    property real timelineHeight: defaultSplit()
+    readonly property real minTimelineHeight: 176
+    readonly property real minViewerHeight: 200
+    readonly property real splitterHeight: 10
+    // True once the divider has been dragged: the user's split then survives
+    // window resizes instead of snapping back to the proportional default.
+    property bool splitAdjusted: false
+    function defaultSplit() { return Math.max(176, Math.min(240, Math.round(root.height * 0.28))) }
+    function clampTimelineHeight(value) {
+        if (!header || !statusBar) return Math.max(root.minTimelineHeight, value)
+        var maximum = root.height - header.height - statusBar.height - root.gap
+                      - root.splitterHeight - 2 - root.minViewerHeight
+        return Math.max(root.minTimelineHeight, Math.min(Math.max(root.minTimelineHeight, maximum), value))
+    }
+    function resetSplit() { splitAdjusted = false; timelineHeight = clampTimelineHeight(defaultSplit()) }
+    onHeightChanged: timelineHeight = splitAdjusted
+        ? clampTimelineHeight(timelineHeight)
+        : clampTimelineHeight(defaultSplit())
+
     // ---- Unsaved changes guard -------------------------------------------
     // Anything that would replace or close the project goes through guardedRun.
     //   Guardar  -> save (Save dialog if the project has no file yet); continue ONLY if it succeeded
@@ -156,7 +179,7 @@ Window {
         id: mediaPanel
         anchors.left: parent.left
         anchors.top: header.bottom
-        anchors.bottom: timelinePane.top
+        anchors.bottom: splitHandle.top
         anchors.leftMargin: root.gap
         anchors.topMargin: root.gap
         anchors.bottomMargin: root.gap
@@ -189,7 +212,7 @@ Window {
         id: inspector
         anchors.right: parent.right
         anchors.top: header.bottom
-        anchors.bottom: timelinePane.top
+        anchors.bottom: splitHandle.top
         anchors.rightMargin: root.gap
         anchors.topMargin: root.gap
         anchors.bottomMargin: root.gap
@@ -202,7 +225,7 @@ Window {
         anchors.left: mediaPanel.right
         anchors.right: inspector.left
         anchors.top: header.bottom
-        anchors.bottom: timelinePane.top
+        anchors.bottom: splitHandle.top
         anchors.leftMargin: root.gap
         anchors.rightMargin: root.gap
         anchors.topMargin: root.gap
@@ -223,6 +246,49 @@ Window {
         }
     }
 
+    // Divider between the Viewer workspace and the Timeline. Drag to trade
+    // space; double-click restores the default split. Purely a workspace
+    // affordance: it never touches project data.
+    Rectangle {
+        id: splitHandle
+        objectName: "workspaceSplitter"
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.leftMargin: root.gap
+        anchors.rightMargin: root.gap
+        anchors.bottom: timelinePane.top
+        height: root.splitterHeight
+        color: splitMouse.containsMouse || splitMouse.pressed ? Theme.bgHover : "transparent"
+        Rectangle {
+            anchors.centerIn: parent
+            width: 44; height: 2; radius: 1
+            color: splitMouse.containsMouse || splitMouse.pressed ? Theme.accent : Theme.borderStrong
+        }
+        MouseArea {
+            id: splitMouse
+            objectName: "workspaceSplitMouse"
+            anchors.fill: parent
+            anchors.topMargin: -3
+            anchors.bottomMargin: -3
+            hoverEnabled: true
+            preventStealing: true
+            cursorShape: Qt.SizeVerCursor
+            property real pressSceneY: 0
+            property real pressHeight: 0
+            onPressed: function(mouse) {
+                pressSceneY = splitMouse.mapToItem(null, mouse.x, mouse.y).y
+                pressHeight = root.timelineHeight
+            }
+            onPositionChanged: function(mouse) {
+                if (!pressed) return
+                var sceneY = splitMouse.mapToItem(null, mouse.x, mouse.y).y
+                root.splitAdjusted = true
+                root.timelineHeight = root.clampTimelineHeight(pressHeight - (sceneY - pressSceneY))
+            }
+            onDoubleClicked: root.resetSplit()
+        }
+    }
+
     TimelinePane {
         id: timelinePane
         anchors.left: parent.left
@@ -231,8 +297,9 @@ Window {
         anchors.leftMargin: root.gap
         anchors.rightMargin: root.gap
         anchors.bottomMargin: 2
-        // The timeline is where editing happens: it gets a third of the window.
-        height: compactWorkspace ? 200 : Math.max(236, Math.min(360, Math.round(root.height * 0.36)))
+        // The splitter owns the divider; the Timeline takes the height it is
+        // assigned so the Viewer can stay dominant by default.
+        height: root.timelineHeight
         onClipContextRequested: function(sx, sy) { clipMenu.openAt(sx, sy) }
     }
 
@@ -262,7 +329,7 @@ Window {
         onRecoverRequested: { recoveryDialog.close(); controller.restoreRecovery() }
         onDiscardRequested: { recoveryDialog.close(); controller.discardRecovery() }
     }
-    Component.onCompleted: if (controller.recoveryAvailable) recoveryDialog.open()
+    Component.onCompleted: { if (controller.recoveryAvailable) recoveryDialog.open(); root.resetSplit() }
 
     PathPromptDialog {
         id: pathPrompt
