@@ -197,12 +197,12 @@ WaveformGeometry prepare_waveform_geometry(
     for (std::uint32_t x = 0; x < width; ++x) {
       const auto& extrema = columns[static_cast<std::size_t>(channel) * width + x];
       if (!extrema.occupied) continue;
-      constexpr double negative_scale = 32768.0;
-      constexpr double positive_scale = 32767.0;
-       const double top = center - static_cast<double>(extrema.maximum) * normalization / positive_scale *
-                                       (lane_height / 2.0);
-       const double bottom = center - static_cast<double>(extrema.minimum) * normalization / negative_scale *
-                                          (lane_height / 2.0);
+      constexpr double sample_scale = 32767.0;
+      const double peak = std::max(std::abs(static_cast<double>(extrema.minimum)),
+                                   std::abs(static_cast<double>(extrema.maximum)));
+      const double half_height = peak * normalization / sample_scale * (lane_height / 2.0);
+      const double top = center - half_height;
+      const double bottom = center + half_height;
       result.segments.push_back({x, std::clamp(top, lane_top, lane_top + lane_height),
                                    std::clamp(bottom, lane_top, lane_top + lane_height)});
     }

@@ -41,12 +41,12 @@ void test_silence_and_impulses() {
   const auto positive_geometry = application::prepare_waveform_geometry(
       positive, 2, {1.0, false, 2, 32.0});
   check(positive_geometry.segments.size() == 2);
-  check(positive_geometry.segments[1].top == 0.0);
+  check(positive_geometry.segments[1].top < 0.01 && positive_geometry.segments[1].bottom > 31.99);
 
   const auto negative = slice(1, {{0, 0}, {-32768, 0}});
   const auto negative_geometry = application::prepare_waveform_geometry(
       negative, 2, {1.0, false, 2, 32.0});
-  check(negative_geometry.segments[1].bottom == 32.0);
+  check(negative_geometry.segments[1].top == 0.0 && negative_geometry.segments[1].bottom == 32.0);
 
   // Quiet but meaningful material is normalized into a readable envelope;
   // silence remains exactly on the centre line.
