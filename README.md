@@ -2,7 +2,7 @@
 
 Native and lightweight video editor for predictable editing.
 
-> **Public Beta RC — PULSAR 0.2.0-beta.1** · Linux (x86_64) only · interface in Spanish
+> **First Public Beta — PULSAR 0.2.0-beta.1** · Linux (x86_64) only · interface in Spanish
 
 PULSAR is a native desktop video editor written in C++ with Qt 6 and FFmpeg. It aims
 at a small, predictable editing workflow: exact timing, no surprises on undo, and an

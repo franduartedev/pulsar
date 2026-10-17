@@ -1,19 +1,22 @@
-# PULSAR public beta release candidate baseline
+# PULSAR first public beta engineering baseline
 
 ## Identity and status
 
 - **Public version:** `0.2.0-beta.1`
 - **Branch:** `develop/v1.2`
-- **Packaged source HEAD:** recorded in the release-evidence addendum below after the
-  package build commits this baseline.
-- **Status:** `AUTOMATED BETA RC READY — HUMAN SIGN-OFF REQUIRED`
+- **Release source HEAD:** the commit containing the final documentation update;
+  the tag, branches, and build provenance are verified during release execution.
+- **Final source/workflow human gate:** `PASS`
+- **Final tagged binary human gate:** `PENDING`
 - **Platform:** Linux x86_64; Spanish interface.
 - **Project schema:** unchanged at v6. Loading compatibility remains v1–v6.
 
-This is an automated release-candidate baseline, not a publication claim. The previous
-packaged RC subsequently passed the real-desktop main workflow, including audio detach
-and direct Viewer move/scale with pixels following the bounds. The final-polish source
-changes and any rebuilt tagged artifact still require separate human confirmation.
+The final source was physically validated on the real desktop. The human gate covered
+the main editing workflow, audio, direct Viewer move/scale, displayed pixels matching
+selection bounds, stable Timeline interaction, tooltips, export source protection,
+normal export, transparent PNG overlays in preview and export, and correctly oriented
+real cellphone footage. This is not a publication claim: the exact tagged AppImage
+still requires separate physical validation after it is built.
 
 ## Product baseline
 
@@ -128,7 +131,7 @@ after generating artifacts from the commit containing this baseline.
 | Debug desktop/full suite | 56/56 passed |
 | Release desktop/full suite | 56/56 passed |
 | ASAN+UBSAN core/full suite | 41/41 passed; leak detection enabled |
-| Affected sanitized async/QML/desktop set | 5/5 passed; leak detection enabled |
+| Affected sanitized final-polish desktop set | 4/4 passed; leak detection enabled |
 | FFmpeg regressions | 10/10 passed |
 | Pixel transform tests | production Viewer move/scale and still composition passed |
 | Persistence | schema v1–v6 compatibility and transformed save/reopen passed |
@@ -164,10 +167,9 @@ workers/caches.
 - MP4/H.264/AAC is the only export family.
 - No GPU renderer, E6 Adaptive Engine, proxies, effects catalogue, subtitles, keyframes,
   masks, AI, cloud, collaboration, Windows, or macOS release.
-- The previous packaged RC passed physical desktop validation of direct transformed
-  pixels; the final-polish source and eventual tagged package remain outstanding.
+- The final source/workflow human gate passed. The exact tagged package remains pending.
 
-## Human sign-off checklist
+## Final tagged-binary sign-off checklist
 
 1. Move a selected visual directly in the Viewer.
 2. Scale it from all corner handles.
@@ -182,25 +184,8 @@ workers/caches.
 
 Do not begin E6 automatically. Do not publish artifacts automatically.
 
-## Release-evidence addendum
+## Final release evidence
 
-- **Packaged source HEAD:** `6b84751a1110f5852a707aa892f4ff27ae9d4891`
-- **Package command:** `./packaging/linux/build-release.sh`
-- **Checksum verification:** 4/4 passed with `sha256sum -c dist/SHA256SUMS`.
-- **Portable tar version smoke:** `PULSAR 0.2.0-beta.1`.
-- **AppImage version smoke:** `PULSAR 0.2.0-beta.1` using
-  `APPIMAGE_EXTRACT_AND_RUN=1`.
-- **Release GUI launch:** passed against `build-release-rc` with the offscreen Qt
-  platform; the process stayed responsive until the five-second smoke timeout.
-- **Packaged GUI physical launch:** remains part of human sign-off. The package
-  intentionally ships XCB/Wayland rather than Qt's test-only offscreen platform,
-  and this build host has no Xvfb or physical display.
-
-| Artifact | Bytes | SHA-256 |
-|---|---:|---|
-| `dist/PULSAR-0.2.0-beta.1-linux-x86_64.tar.gz` | 63,524,353 | `24bcb8ebb97adaa0dbff978b2c87750b429ea86f62333369180c187270d9af68` |
-| `dist/PULSAR-0.2.0-beta.1-x86_64.AppImage` | 58,186,232 | `2d79bafdbcc2dbdbba854bc1a4f3e458cd5120df2fbbbd0b12e6b8982bcd0222` |
-| `dist/PULSAR-0.2.0-beta.1-source.tar.gz` | 2,800,905 | `48b021d531d884d3477e685ce436b3ceafe23bf40b49a90dfab8f3818bb2e431` |
-| `dist/PULSAR-0.2.0-beta.1-third-party-source.tar.gz` | 12,379,341 | `e2ff9bdfc3c04e0ffa84acbc4e7e7f8ddd7722b526f5098d658c43d061928a9a` |
-
-The artifact set was generated locally and was not uploaded or published.
+Final tagged artifact names, sizes, and hashes are generated from the clean tag
+checkout and belong in its `SHA256SUMS` and GitHub Release body. They are not
+written back into the tagged source tree.

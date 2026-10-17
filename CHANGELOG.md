@@ -5,7 +5,7 @@ the version is defined once, in the root `CMakeLists.txt`.
 
 ## 0.2.0-beta.1
 
-First public beta release candidate (Linux x86_64).
+First public beta (Linux x86_64).
 
 ### Added
 - Multiple visual tracks, picture-in-picture and direct Viewer move/scale.
