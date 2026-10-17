@@ -365,24 +365,36 @@ Panel {
                               visible: modelData.kind === "audio" || !!modelData.primary
                               x: 12; y: parent.height - 24; z: 3; spacing: 3
                               Repeater {
-                                  model: [
-                                      {label: "−", active: false, action: "down"},
-                                      {label: "M", active: !!modelData.muted, action: "mute"},
-                                      {label: "S", active: !!modelData.solo, action: "solo"},
-                                      {label: "+", active: false, action: "up"}
-                                  ]
-                                  delegate: Rectangle {
-                                      id: audioButton
-                                      required property var modelData
-                                      width: 20; height: 18; radius: Theme.radiusS
-                                      color: modelData.active ? Theme.accentDim : (audioMouse.containsMouse ? Theme.bgHover : Theme.bgInput)
-                                      border.width: 1; border.color: modelData.active ? Theme.accent : Theme.borderStrong
-                                      Text { anchors.centerIn: parent; text: audioButton.modelData.label; color: audioButton.modelData.active ? Theme.focus : Theme.textPrimary; font.pixelSize: Theme.fontSizeXS; font.bold: true }
-                                      MouseArea { id: audioMouse; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
-                                          onClicked: {
-                                              if (audioButton.modelData.action === "mute") controller.toggleTrackMute(lane.trackKey)
-                                              else if (audioButton.modelData.action === "solo") controller.toggleTrackSolo(lane.trackKey)
-                                              else controller.adjustTrackGain(lane.trackKey, audioButton.modelData.action === "up" ? 1 : -1)
+                                   model: [
+                                       {label: "−", active: false, action: "down", tip: "Bajar volumen de pista"},
+                                       {label: "M", active: !!modelData.muted, action: "mute", tip: "Silenciar pista"},
+                                       {label: "S", active: !!modelData.solo, action: "solo", tip: "Solo: escuchar solo esta pista"},
+                                       {label: "+", active: false, action: "up", tip: "Subir volumen de pista"}
+                                   ]
+                                   delegate: Rectangle {
+                                       id: audioButton
+                                       required property var modelData
+                                       Accessible.name: modelData.tip
+                                       width: 20; height: 18; radius: Theme.radiusS
+                                       color: modelData.active ? Theme.accentDim : (audioMouse.containsMouse ? Theme.bgHover : Theme.bgInput)
+                                       border.width: 1; border.color: modelData.active ? Theme.accent : Theme.borderStrong
+                                       Text { anchors.centerIn: parent; text: audioButton.modelData.label; color: audioButton.modelData.active ? Theme.focus : Theme.textPrimary; font.pixelSize: Theme.fontSizeXS; font.bold: true }
+                                       Timer { id: audioTipDelay; interval: 600; onTriggered: audioTip.visible = audioMouse.containsMouse }
+                                       Rectangle {
+                                           id: audioTip
+                                           visible: false; z: 10; y: -26
+                                           x: audioButton.modelData.action === "up" ? audioButton.width - width : 0
+                                           width: audioTipText.implicitWidth + 12; height: 22; radius: Theme.radiusS
+                                           color: Theme.bgElevated; border.color: Theme.borderStrong
+                                           Text { id: audioTipText; anchors.centerIn: parent; text: audioButton.modelData.tip; color: Theme.textPrimary; font.pixelSize: Theme.fontSizeXS }
+                                       }
+                                       MouseArea { id: audioMouse; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                                           onContainsMouseChanged: { audioTip.visible = false; if (containsMouse) audioTipDelay.restart(); else audioTipDelay.stop() }
+                                           onClicked: {
+                                               audioTip.visible = false
+                                               if (audioButton.modelData.action === "mute") controller.toggleTrackMute(lane.trackKey)
+                                               else if (audioButton.modelData.action === "solo") controller.toggleTrackSolo(lane.trackKey)
+                                               else controller.adjustTrackGain(lane.trackKey, audioButton.modelData.action === "up" ? 1 : -1)
                                           }
                                       }
                                   }

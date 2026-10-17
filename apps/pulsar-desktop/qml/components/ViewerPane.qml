@@ -21,6 +21,7 @@ Item {
 
     Item {
         id: chrome
+        z: 30
         anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top
         height: 36
         Text {
@@ -48,6 +49,7 @@ Item {
             anchors.verticalCenter: parent.verticalCenter
             width: 128
             model: ["Ajustar", "100%"]
+            tips: ["Ajustar el lienzo a la ventana", "Mostrar a tamaño real (100%)"]
             current: pane.fitMode === "actual" ? 1 : 0
             onActivated: function(index) { pane.fitMode = index === 1 ? "actual" : "fit" }
         }

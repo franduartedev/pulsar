@@ -1,19 +1,19 @@
 # PULSAR
 
-Lightweight video editor built for fast, predictable editing.
+Native and lightweight video editor for predictable editing.
 
 > **Public Beta RC — PULSAR 0.2.0-beta.1** · Linux (x86_64) only · interface in Spanish
 
-PULSAR is a desktop video editor written in C++ with Qt 6 and FFmpeg. It aims at a
-small, fast, predictable editing workflow: exact timing, no surprises on undo, and
-an export you can trust.
+PULSAR is a native desktop video editor written in C++ with Qt 6 and FFmpeg. It aims
+at a small, predictable editing workflow: exact timing, no surprises on undo, and an
+export you can trust.
 
 ## What it does today
 
 - Multi-track video timeline: import, **Insert** at the playhead, **Add to end** (gapless), arrange and overlay
 - Split, trim and move clips, with **magnetic snapping**
 - Undo / redo
-- Independent audio tracks, **detach audio** from a video clip, built-in sound effects (25 original SFX)
+- Independent audio tracks, **detach audio** from a video clip, and 37 original built-in sound effects
 - Per-clip gain and mute, waveforms
 - Save and reopen projects (`.pulsar`)
 - Export to **H.264 / AAC (MP4)**
@@ -38,6 +38,8 @@ subtitles, keyframes, masks, color tools or proxies. See the
 
 No Qt or FFmpeg installation is needed. It was tested on Ubuntu 24.04; the bundle needs
 glibc 2.39 or newer (see the release notes). `./pulsar --version` prints the version.
+The AppImage normally requires FUSE 2 (`libfuse2`); when FUSE is unavailable, run it
+with `--appimage-extract-and-run`.
 
 ## Report a bug
 

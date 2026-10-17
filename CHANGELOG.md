@@ -14,6 +14,9 @@ First public beta release candidate (Linux x86_64).
 - Filled asynchronous waveform envelopes and reliable embedded-audio detach.
 
 ### Fixed
+- Export now refuses any destination that resolves to a media source referenced
+  by the project, preventing successful publication from replacing original footage.
+- Delayed hover help clarifies Timeline track audio controls and Viewer fit modes.
 - A non-default transform on VIDEO 1 updated selection bounds and Inspector state
   but left the displayed decoder pixels full-canvas. Single-track transforms now
   route through the authoritative composition preview.
@@ -68,7 +71,7 @@ First public beta (Linux x86_64). History before this release is not itemised.
 - Multi-video timeline on a single video track: import, Insert at playhead, Add to end (exact, gapless).
 - Split, trim and move with magnetic snapping (8 px, exact result) and collision stop.
 - Undo / redo, including grouped edits (e.g. Detach audio is one step).
-- Independent audio tracks, Detach audio from video clips, 25 built-in original SFX.
+- Independent audio tracks, Detach audio from video clips, 37 built-in original SFX.
 - Per-clip gain and mute, waveform display, zoom/pan/fit, ruler with seek.
 - Project files (`.pulsar`), atomic save, reopen; clips with missing media open as offline.
 - H.264 / AAC MP4 export with progress, cancellation and atomic publish.

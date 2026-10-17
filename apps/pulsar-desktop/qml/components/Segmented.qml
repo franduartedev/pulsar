@@ -6,6 +6,7 @@ import "../theme/Theme.js" as Theme
 Rectangle {
     id: seg
     property var model: []
+    property var tips: []
     property int current: -1
     signal activated(int index)
     height: Theme.controlHeightSmall
@@ -19,12 +20,28 @@ Rectangle {
         Repeater {
             model: seg.model
             delegate: Rectangle {
+                id: segment
                 width: (row.width) / Math.max(1, seg.model.length); height: row.height
                 radius: Theme.radiusM - 1
                 color: seg.current === index ? Theme.accentDim : (cell.containsMouse ? Theme.bgHover : "transparent")
+                readonly property string tipText: index < seg.tips.length ? seg.tips[index] : ""
+                Accessible.name: tipText.length > 0 ? tipText : modelData
                 Text { anchors.centerIn: parent; text: modelData; font.pixelSize: Theme.fontSizeS
                        color: seg.current === index ? Theme.focus : Theme.textSecondary; font.bold: seg.current === index }
-                MouseArea { id: cell; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: seg.activated(index) }
+                Timer { id: tipDelay; interval: 600; onTriggered: tip.visible = segment.tipText.length > 0 && cell.containsMouse }
+                Rectangle {
+                    id: tip
+                    visible: false; z: 100; y: segment.height + 5
+                    x: index === seg.model.length - 1 ? segment.width - width : 0
+                    width: tipLabel.implicitWidth + 16; height: 24; radius: Theme.radiusS
+                    color: Theme.bgElevated; border.color: Theme.borderStrong
+                    Text { id: tipLabel; anchors.centerIn: parent; text: segment.tipText; color: Theme.textPrimary; font.pixelSize: Theme.fontSizeXS }
+                }
+                MouseArea {
+                    id: cell; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                    onContainsMouseChanged: { tip.visible = false; if (containsMouse) tipDelay.restart(); else tipDelay.stop() }
+                    onClicked: { tip.visible = false; seg.activated(index) }
+                }
             }
         }
     }

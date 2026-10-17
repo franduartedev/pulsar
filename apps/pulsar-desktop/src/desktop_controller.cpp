@@ -88,6 +88,23 @@ std::filesystem::path desktop_runtime_media_path(const std::filesystem::path& pr
              : pulsar::desktop::resolve_runtime_media_path(project_file, authored);
 }
 
+std::filesystem::path normalized_comparison_path(const std::filesystem::path& path) {
+  std::error_code error;
+  auto normalized = std::filesystem::weakly_canonical(path, error);
+  if (!error) return normalized.lexically_normal();
+  error.clear();
+  normalized = std::filesystem::absolute(path, error);
+  return (error ? path : normalized).lexically_normal();
+}
+
+bool resolves_to_same_file(const std::filesystem::path& left,
+                           const std::filesystem::path& right) {
+  if (normalized_comparison_path(left) == normalized_comparison_path(right)) return true;
+  std::error_code error;
+  const bool equivalent = std::filesystem::equivalent(left, right, error);
+  return !error && equivalent;
+}
+
 class ResolvingExportVideoSourceFactory final
     : public pulsar::application::exporting::OfflineVideoSourceFactory {
 public:
@@ -2699,6 +2716,15 @@ void DesktopController::exportProjectWithPreset(const QString& path, const QStri
   auto destination = std::filesystem::path{trimmed.toStdString()};
   if (destination.extension() != ".mp4" && destination.extension() != ".MP4") {
     setExportStatus(QStringLiteral("El destino debe ser un archivo .mp4."));
+    return;
+  }
+
+  for (const auto& asset : active_session_->document().asset_list()) {
+    if (pulsar::application::is_color_card_locator(asset.source_locator().generic_string())) continue;
+    const auto source = desktop_runtime_media_path(active_project_file_, asset.source_locator());
+    if (!resolves_to_same_file(destination, source)) continue;
+    setExportStatus(QStringLiteral("El destino es un archivo multimedia usado por el proyecto."));
+    setError(QStringLiteral("No se puede exportar sobre un archivo multimedia usado por el proyecto. Elige otro destino."));
     return;
   }
 

@@ -10,9 +10,10 @@
 - **Platform:** Linux x86_64; Spanish interface.
 - **Project schema:** unchanged at v6. Loading compatibility remains v1–v6.
 
-This is an automated release-candidate baseline, not a claim of physical-desktop
-validation or publication. Audio detach already has a real human pass. Viewer
-manipulation and the complete packaged workflow still require Fran's physical sign-off.
+This is an automated release-candidate baseline, not a publication claim. The previous
+packaged RC subsequently passed the real-desktop main workflow, including audio detach
+and direct Viewer move/scale with pixels following the bounds. The final-polish source
+changes and any rebuilt tagged artifact still require separate human confirmation.
 
 ## Product baseline
 
@@ -163,8 +164,8 @@ workers/caches.
 - MP4/H.264/AAC is the only export family.
 - No GPU renderer, E6 Adaptive Engine, proxies, effects catalogue, subtitles, keyframes,
   masks, AI, cloud, collaboration, Windows, or macOS release.
-- Physical desktop validation of direct transformed pixels and the final package remains
-  outstanding.
+- The previous packaged RC passed physical desktop validation of direct transformed
+  pixels; the final-polish source and eventual tagged package remain outstanding.
 
 ## Human sign-off checklist
 
