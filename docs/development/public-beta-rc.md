@@ -7,7 +7,7 @@
 - **Release source HEAD:** the commit containing the final documentation update;
   the tag, branches, and build provenance are verified during release execution.
 - **Final source/workflow human gate:** `PASS`
-- **Final tagged binary human gate:** `PENDING`
+- **Final tagged binary human gate:** `PASS` (exact tagged AppImage, SHA256 `69c044a4f4da10903e297a98e54ad5fd2800aadbd6fdd2105c7158bf83926297`)
 - **Platform:** Linux x86_64; Spanish interface.
 - **Project schema:** unchanged at v6. Loading compatibility remains v1–v6.
 
@@ -167,7 +167,7 @@ workers/caches.
 - MP4/H.264/AAC is the only export family.
 - No GPU renderer, E6 Adaptive Engine, proxies, effects catalogue, subtitles, keyframes,
   masks, AI, cloud, collaboration, Windows, or macOS release.
-- The final source/workflow human gate passed. The exact tagged package remains pending.
+- The final source/workflow human gate passed. The exact tagged AppImage (SHA256 `69c044a4f4da10903e297a98e54ad5fd2800aadbd6fdd2105c7158bf83926297`) was then physically launched and tested on a real desktop: launch, version, import, timeline editing, split/move, Viewer move/scale, transparent PNG overlay, audio, project save/reopen, MP4 export (opened externally) and clean exit all passed.
 
 ## Final tagged-binary sign-off checklist
 
