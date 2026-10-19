@@ -13,6 +13,10 @@
 
 [**Download**](../../releases) · [Release notes](docs/release/0.2.0-beta.1.md) · [Report a bug](../../issues/new/choose) · [Roadmap](docs/release/roadmap.md) · [🇪🇸 Español](README.es.md)
 
+<br>
+
+<img src="docs/images/pulsar-editor.png" alt="PULSAR editor: library, viewer, inspector and multi-track timeline" width="900">
+
 </div>
 
 > [!NOTE]
