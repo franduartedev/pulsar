@@ -6,7 +6,7 @@ the version is defined once, in the root `CMakeLists.txt`.
 ## Unreleased
 
 ### Documentation
-- README rewritten for first-time visitors: status, requirements (glibc 2.39, FUSE 2), install steps,
+- README rewritten (with badges, highlights table and logo) plus a Spanish version `README.es.md`: status, requirements (glibc 2.39, FUSE 2), install steps,
   capabilities, known limitations, bug reporting. Sound effects count fixed to 37.
 - Feedback issue template.
 
