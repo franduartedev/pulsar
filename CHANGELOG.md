@@ -3,6 +3,13 @@
 Format: [Keep a Changelog](https://keepachangelog.com/). Versions follow `MAJOR.MINOR.PATCH[-label]`;
 the version is defined once, in the root `CMakeLists.txt`.
 
+## Unreleased
+
+### Documentation
+- README rewritten (with badges, highlights table and logo) plus a Spanish version `README.es.md`: status, requirements (glibc 2.39, FUSE 2), install steps,
+  capabilities, known limitations, bug reporting. Sound effects count fixed to 37.
+- Feedback issue template.
+
 ## 0.2.0-beta.1
 
 First public beta (Linux x86_64).
