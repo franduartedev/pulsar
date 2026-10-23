@@ -2,6 +2,7 @@
 
 #include <pulsar/application/audio/audio_converter.hpp>
 #include <pulsar/application/audio/clip_gain.hpp>
+#include <pulsar/application/audio/distant_music_processor.hpp>
 #include <pulsar/application/audio/output_stage.hpp>
 
 #include <algorithm>
@@ -200,6 +201,7 @@ public:
   bool eof{false};
   bool tail_flushed{false};
   bool failed{false};
+  std::unique_ptr<DistantMusicProcessor> distant_music;
 };
 
 AudioMixSession::AudioMixSession(AudioPlaybackSourceFactory source_factory, AudioMixFormat format)
@@ -243,7 +245,15 @@ void AudioMixSession::configure(ProjectSnapshot snapshot) {
             return same_identity(source->contributor, contributor);
           });
       if (replacement != contributors_.end()) {
+        const bool effect_changed = source->contributor.distant_music != replacement->distant_music;
         source->contributor = *replacement;
+        if (effect_changed) {
+          source->distant_music.reset();
+          if (replacement->distant_music.enabled) {
+            source->distant_music = std::make_unique<DistantMusicProcessor>(
+                replacement->distant_music, format_.sample_rate, format_.channel_count);
+          }
+        }
       }
     }
     select_range(*next_timeline_position_, *next_timeline_position_, true);
@@ -350,6 +360,10 @@ AudioMixSession::SourceState* AudioMixSession::open_source(
   auto state = std::make_unique<SourceState>(contributor, std::move(source),
                                              std::move(converter), timeline_position, target,
                                              origin);
+  if (contributor.distant_music.enabled) {
+    state->distant_music = std::make_unique<DistantMusicProcessor>(
+        contributor.distant_music, format_.sample_rate, format_.channel_count);
+  }
   auto* result = state.get();
   sources_.push_back(std::move(state));
   ++metrics_.source_opens;
@@ -643,7 +657,18 @@ AudioMixRenderResult AudioMixSession::render(domain::MediaTime timeline_position
         for (std::size_t channel = 0; channel < channels; ++channel) {
           const auto destination = (output_begin + frame) * channels + channel;
           const auto source_index = state->pcm_offset + frame * channels + channel;
-          mixed[destination] += state->pcm[source_index] * frame_gain;
+          float sample = state->pcm[source_index];
+          if (state->distant_music) {
+            std::vector<float> one_sample(channels);
+            for (std::size_t c = 0; c < channels; ++c) {
+              one_sample[c] = state->pcm[state->pcm_offset + frame * channels + c];
+            }
+            AudioBlock block{format_.sample_rate, format_.channel_count, 1,
+                             std::move(one_sample), {1, format_.sample_rate}, std::nullopt};
+            state->distant_music->process(block, first_clip_frame + static_cast<std::int64_t>(frame));
+            sample = block.samples()[channel];
+          }
+          mixed[destination] += sample * frame_gain;
         }
       }
       ++result.mixed_contributors;

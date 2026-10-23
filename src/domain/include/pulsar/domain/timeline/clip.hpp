@@ -4,6 +4,7 @@
 #include <pulsar/domain/time/media_time.hpp>
 #include <pulsar/domain/time/time_range.hpp>
 #include <pulsar/domain/timeline/visual_transform.hpp>
+#include <pulsar/domain/timeline/distant_music.hpp>
 
 #include <cstdint>
 
@@ -19,7 +20,8 @@ public:
   // may exceed a clip that was trimmed afterwards; the mixer limits them to the clip length.
   Clip(ClipId id, MediaId media_id, TimeRange source_range, MediaTime timeline_start,
        double audio_gain_db = 0.0, bool muted = false, MediaTime fade_in = MediaTime::zero(),
-       MediaTime fade_out = MediaTime::zero(), VisualTransform visual_transform = {});
+       MediaTime fade_out = MediaTime::zero(), VisualTransform visual_transform = {},
+       DistantMusicSettings distant_music = {});
 
   [[nodiscard]] constexpr ClipId id() const noexcept {
     return id_;
@@ -42,6 +44,7 @@ public:
   [[nodiscard]] MediaTime fade_in() const noexcept { return fade_in_; }
   [[nodiscard]] MediaTime fade_out() const noexcept { return fade_out_; }
   [[nodiscard]] const VisualTransform& visual_transform() const noexcept { return visual_transform_; }
+  [[nodiscard]] const DistantMusicSettings& distant_music() const noexcept { return distant_music_; }
 
   [[nodiscard]] MediaTime duration() const;
   [[nodiscard]] TimeRange timeline_range() const;
@@ -56,6 +59,7 @@ private:
   MediaTime fade_in_;
   MediaTime fade_out_;
   VisualTransform visual_transform_;
+  DistantMusicSettings distant_music_;
 };
 
 } // namespace pulsar::domain

@@ -623,6 +623,12 @@ void EditorSession::set_clip_fades(domain::ClipId clip, domain::MediaTime fade_i
   synchronize_document_state();
 }
 
+void EditorSession::set_clip_distant_music(domain::ClipId clip, domain::DistantMusicSettings settings) {
+  if (document_.timeline().find_clip(clip) == nullptr) throw std::invalid_argument{"unknown clip"};
+  processor_.set_clip_distant_music(clip, settings);
+  synchronize_document_state();
+}
+
 void EditorSession::set_clip_visual_transform(domain::ClipId clip, domain::VisualTransform transform) {
   if (document_.timeline().find_clip(clip) == nullptr) {
     throw std::invalid_argument{"unknown clip"};

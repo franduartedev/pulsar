@@ -1,6 +1,7 @@
 #include <pulsar/application/export/offline_audio_renderer.hpp>
 
 #include <pulsar/application/audio/clip_gain.hpp>
+#include <pulsar/application/audio/distant_music_processor.hpp>
 #include <pulsar/application/audio/output_stage.hpp>
 
 #include <algorithm>
@@ -75,6 +76,7 @@ struct OfflineAudioRenderer::ContributorState {
   // Interpolation taps are clamped to [first_valid_index, last_valid_index].
   std::int64_t first_valid_index{0};
   std::int64_t last_valid_index{-1};
+  std::unique_ptr<DistantMusicProcessor> distant_music;
 };
 
 OfflineAudioRenderer::OfflineAudioRenderer(const ExportPlan& plan,
@@ -127,6 +129,10 @@ OfflineAudioRenderer::ContributorState& OfflineAudioRenderer::state_for(
     const domain::FrameRate source_grid{state->source->sample_rate(), 1};
     state->fade = ClipFade::from_times(contributor.fade_in, contributor.fade_out,
                                        contributor.timeline_range.duration(), 48'000);
+  if (contributor.distant_music.enabled) {
+    state->distant_music = std::make_unique<DistantMusicProcessor>(
+        contributor.distant_music, 48'000, 2);
+  }
     state->first_clip_frame = domain::frame_at(contributor.timeline_range.start(),
                                                domain::FrameRate{48'000, 1}, domain::RoundingMode::Ceil).value();
     state->first_valid_index = domain::frame_at(contributor.source_range.start(), source_grid,
@@ -298,10 +304,19 @@ std::array<float, 2> OfflineAudioRenderer::contributor_sample(
       const auto first = sample_at_channel(state, first_tap_time, channel);
       const auto second = sample_at_channel(state, second_tap_time, channel);
       result[static_cast<std::size_t>(channel)] = static_cast<float>(
-          (static_cast<long double>(first) * (1.0L - fraction) +
-           static_cast<long double>(second) * fraction) * state.gain.linear *
-          (state.fade.active() ? state.fade.gain_at(output_frame - state.first_clip_frame) : 1.0F));
+          static_cast<long double>(first) * (1.0L - fraction) +
+          static_cast<long double>(second) * fraction);
     }
+    if (state.distant_music) {
+      AudioBlock block{48'000, 2, 1, {result[0], result[1]}, {1, 48'000}, std::nullopt};
+      state.distant_music->process(block, output_frame - state.first_clip_frame);
+      result[0] = block.samples()[0];
+      result[1] = block.samples()[1];
+    }
+    const float level = state.gain.linear *
+        (state.fade.active() ? state.fade.gain_at(output_frame - state.first_clip_frame) : 1.0F);
+    result[0] *= level;
+    result[1] *= level;
   } catch (const OfflineAudioRenderError& error) {
     // Context is built only on the failure path; nothing is formatted per sample.
     throw OfflineAudioRenderError{

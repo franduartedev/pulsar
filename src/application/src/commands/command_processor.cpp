@@ -159,6 +159,14 @@ void CommandProcessor::set_clip_fades(domain::ClipId clip_id, domain::MediaTime 
   execute(SetClipFadesCommand{clip_id, fade_in, fade_out});
 }
 
+void CommandProcessor::set_clip_distant_music(domain::ClipId clip_id,
+                                               domain::DistantMusicSettings settings) {
+  settings.validate();
+  if (const auto* clip = document_.timeline().find_clip(clip_id);
+      clip != nullptr && clip->distant_music() == settings) return;
+  execute(SetClipDistantMusicCommand{clip_id, settings});
+}
+
 void CommandProcessor::set_clip_visual_transform(domain::ClipId clip_id,
                                                   domain::VisualTransform transform) {
   validate_visual_transform(transform);
@@ -455,6 +463,8 @@ void CommandProcessor::apply(ProjectDocument& document, const Command& command, 
           timeline.set_clip_muted(concrete_command.clip_id, concrete_command.muted);
         } else if constexpr (std::is_same_v<CommandType, SetClipFadesCommand>) {
           timeline.set_clip_fades(concrete_command.clip_id, concrete_command.fade_in, concrete_command.fade_out);
+        } else if constexpr (std::is_same_v<CommandType, SetClipDistantMusicCommand>) {
+          timeline.set_clip_distant_music(concrete_command.clip_id, concrete_command.settings);
         } else if constexpr (std::is_same_v<CommandType, SetClipVisualTransformCommand>) {
           timeline.set_clip_visual_transform(concrete_command.clip_id, concrete_command.transform);
         } else if constexpr (std::is_same_v<CommandType, RestoreClipCommand>) {
@@ -545,6 +555,7 @@ Command CommandProcessor::build_inverse(const ProjectDocument& document, const C
         } else if constexpr (std::is_same_v<CommandType, SetClipAudioGainCommand> ||
                              std::is_same_v<CommandType, SetClipMutedCommand> ||
                              std::is_same_v<CommandType, SetClipFadesCommand> ||
+                             std::is_same_v<CommandType, SetClipDistantMusicCommand> ||
                              std::is_same_v<CommandType, SetClipVisualTransformCommand>) {
           const ClipLocation location = find_clip_location(document, concrete_command.clip_id);
           return RestoreClipCommand{location.track_id, location.clip};

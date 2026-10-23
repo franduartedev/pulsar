@@ -98,6 +98,13 @@ class DesktopController final : public QObject {
   Q_PROPERTY(bool selectedClipMuted READ selectedClipMuted NOTIFY timelineChanged)
   Q_PROPERTY(double selectedClipFadeIn READ selectedClipFadeIn NOTIFY timelineChanged)    // seconds
   Q_PROPERTY(double selectedClipFadeOut READ selectedClipFadeOut NOTIFY timelineChanged)  // seconds
+  Q_PROPERTY(bool selectedDistantMusicEnabled READ selectedDistantMusicEnabled NOTIFY timelineChanged)
+  Q_PROPERTY(double selectedDistantMusicGainDb READ selectedDistantMusicGainDb NOTIFY timelineChanged)
+  Q_PROPERTY(double selectedDistantMusicDuration READ selectedDistantMusicDuration NOTIFY timelineChanged)
+  Q_PROPERTY(double selectedDistantMusicStartCutoff READ selectedDistantMusicStartCutoff NOTIFY timelineChanged)
+  Q_PROPERTY(double selectedDistantMusicEndCutoff READ selectedDistantMusicEndCutoff NOTIFY timelineChanged)
+  Q_PROPERTY(double selectedDistantMusicReverb READ selectedDistantMusicReverb NOTIFY timelineChanged)
+  Q_PROPERTY(int selectedDistantMusicCurve READ selectedDistantMusicCurve NOTIFY timelineChanged)
   Q_PROPERTY(double selectedClipPosX READ selectedClipPosX NOTIFY timelineChanged)
   Q_PROPERTY(double selectedClipPosY READ selectedClipPosY NOTIFY timelineChanged)
   Q_PROPERTY(double selectedClipScale READ selectedClipScale NOTIFY timelineChanged)
@@ -188,6 +195,13 @@ public:
   [[nodiscard]] QString selectedClipKind() const;
   [[nodiscard]] double selectedClipFadeIn() const;
   [[nodiscard]] double selectedClipFadeOut() const;
+  [[nodiscard]] bool selectedDistantMusicEnabled() const;
+  [[nodiscard]] double selectedDistantMusicGainDb() const;
+  [[nodiscard]] double selectedDistantMusicDuration() const;
+  [[nodiscard]] double selectedDistantMusicStartCutoff() const;
+  [[nodiscard]] double selectedDistantMusicEndCutoff() const;
+  [[nodiscard]] double selectedDistantMusicReverb() const;
+  [[nodiscard]] int selectedDistantMusicCurve() const;
   [[nodiscard]] double selectedClipPosX() const;
   [[nodiscard]] double selectedClipPosY() const;
   [[nodiscard]] double selectedClipScale() const;
@@ -265,6 +279,9 @@ public:
   Q_INVOKABLE void setSelectedClipGainDb(double gain_db);
   Q_INVOKABLE void toggleSelectedClipMute();
   Q_INVOKABLE void setSelectedClipFades(double fade_in_seconds, double fade_out_seconds);
+  Q_INVOKABLE void applySelectedDistantMusicPreset();
+  Q_INVOKABLE void setSelectedDistantMusic(double gain_db, double duration, double start_cutoff,
+                                            double end_cutoff, double reverb, int curve, bool enabled);
   Q_INVOKABLE void setSelectedClipTransform(double pos_x, double pos_y, double scale,
                                              double rotation_degrees, double opacity);
   Q_INVOKABLE void resetSelectedClipTransform();

@@ -5,6 +5,12 @@ the version is defined once, in the root `CMakeLists.txt`.
 
 ## Unreleased
 
+### Added
+- **PULSAR Audio FX: Distant Music**: a non-destructive clip effect with a distance preset,
+  progressive gain, recovering high frequencies, curve choices and optional ambience. The
+  effect is processed in the shared preview/export audio paths and projects using it are saved
+  as format version 7.
+
 ### Documentation
 - README rewritten (with badges, highlights table and logo) plus a Spanish version `README.es.md`: status, requirements (glibc 2.39, FUSE 2), install steps,
   capabilities, known limitations, bug reporting. Sound effects count fixed to 37.

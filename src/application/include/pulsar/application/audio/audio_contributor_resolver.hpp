@@ -34,6 +34,7 @@ struct AudioContributor {
   domain::MediaTime fade_out{domain::MediaTime::zero()};
   double track_gain_db{0.0};
   bool track_muted{false};
+  domain::DistantMusicSettings distant_music{};
 };
 
 struct UnavailableAudioContributor {

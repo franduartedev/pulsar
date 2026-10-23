@@ -1498,6 +1498,48 @@ double DesktopController::selectedClipFadeOut() const {
   const auto* clip = active_session_->document().timeline().find_clip(*active_session_->selected_clip());
   return clip ? secondsAsDouble(clip->fade_out()) : 0.0;
 }
+
+bool DesktopController::selectedDistantMusicEnabled() const {
+  const auto* clip = active_session_ && active_session_->selected_clip()
+      ? active_session_->document().timeline().find_clip(*active_session_->selected_clip()) : nullptr;
+  return clip && clip->distant_music().enabled;
+}
+
+double DesktopController::selectedDistantMusicGainDb() const {
+  const auto* clip = active_session_ && active_session_->selected_clip()
+      ? active_session_->document().timeline().find_clip(*active_session_->selected_clip()) : nullptr;
+  return clip ? clip->distant_music().initial_gain_db : -30.0;
+}
+
+double DesktopController::selectedDistantMusicDuration() const {
+  const auto* clip = active_session_ && active_session_->selected_clip()
+      ? active_session_->document().timeline().find_clip(*active_session_->selected_clip()) : nullptr;
+  return clip ? clip->distant_music().duration_seconds : 4.0;
+}
+
+double DesktopController::selectedDistantMusicStartCutoff() const {
+  const auto* clip = active_session_ && active_session_->selected_clip()
+      ? active_session_->document().timeline().find_clip(*active_session_->selected_clip()) : nullptr;
+  return clip ? clip->distant_music().start_cutoff_hz : 900.0;
+}
+
+double DesktopController::selectedDistantMusicEndCutoff() const {
+  const auto* clip = active_session_ && active_session_->selected_clip()
+      ? active_session_->document().timeline().find_clip(*active_session_->selected_clip()) : nullptr;
+  return clip ? clip->distant_music().end_cutoff_hz : 18'000.0;
+}
+
+double DesktopController::selectedDistantMusicReverb() const {
+  const auto* clip = active_session_ && active_session_->selected_clip()
+      ? active_session_->document().timeline().find_clip(*active_session_->selected_clip()) : nullptr;
+  return clip ? clip->distant_music().reverb_amount : 0.18;
+}
+
+int DesktopController::selectedDistantMusicCurve() const {
+  const auto* clip = active_session_ && active_session_->selected_clip()
+      ? active_session_->document().timeline().find_clip(*active_session_->selected_clip()) : nullptr;
+  return clip ? static_cast<int>(clip->distant_music().curve) : 1;
+}
 void DesktopController::setSelectedClipFades(double fade_in_seconds, double fade_out_seconds) {
   if (!active_session_ || !active_session_->selected_clip() || !std::isfinite(fade_in_seconds) || !std::isfinite(fade_out_seconds)) return;
   try {
@@ -1510,6 +1552,32 @@ void DesktopController::setSelectedClipFades(double fade_in_seconds, double fade
   } catch (const std::exception& error) {
     logCause("edit failed", error);
     setError(QStringLiteral("No se pudo aplicar el cambio."));
+  }
+}
+
+void DesktopController::applySelectedDistantMusicPreset() {
+  setSelectedDistantMusic(-30.0, 4.0, 900.0, 18'000.0, 0.18, 1, true);
+}
+
+void DesktopController::setSelectedDistantMusic(double gain_db, double duration,
+                                                 double start_cutoff, double end_cutoff,
+                                                 double reverb, int curve, bool enabled) {
+  if (!active_session_ || !active_session_->selected_clip()) return;
+  if (curve < 0 || curve > 2) { setError(QStringLiteral("Curva de Audio FX inválida.")); return; }
+  pulsar::domain::DistantMusicSettings settings;
+  settings.enabled = enabled;
+  settings.initial_gain_db = gain_db;
+  settings.duration_seconds = duration;
+  settings.start_cutoff_hz = start_cutoff;
+  settings.end_cutoff_hz = end_cutoff;
+  settings.reverb_amount = reverb;
+  settings.curve = static_cast<pulsar::domain::DistantMusicCurve>(curve);
+  try {
+    active_session_->set_clip_distant_music(*active_session_->selected_clip(), settings);
+    clearError();
+    publishTimeline();
+  } catch (const std::exception&) {
+    setError(QStringLiteral("Los parámetros de Distant Music no son válidos."));
   }
 }
 double DesktopController::selectedClipPosX() const {

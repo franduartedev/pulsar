@@ -545,7 +545,7 @@ void repository_normalizes_codec_failures() {
 
   // Malformed bytes through the real repository surface as repository errors.
   const auto malformed = root / "malformed.pulsar";
-  { std::ofstream output{malformed}; output << "PULSAR_PROJECT 7\n"; }
+  { std::ofstream output{malformed}; output << "PULSAR_PROJECT 8\n"; }
   bool load_rejected = false;
   try {
     (void)repository.load(malformed);

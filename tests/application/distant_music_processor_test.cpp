@@ -1,0 +1,42 @@
+#include <pulsar/application/audio/distant_music_processor.hpp>
+
+#include <cassert>
+#include <stdexcept>
+#include <utility>
+#include <vector>
+
+using namespace pulsar;
+
+int main() {
+  domain::DistantMusicSettings settings;
+  settings.enabled = true;
+  settings.initial_gain_db = -30.0;
+  settings.duration_seconds = 1.0;
+  settings.start_cutoff_hz = 400.0;
+  settings.end_cutoff_hz = 18'000.0;
+  settings.reverb_amount = 0.2;
+
+  constexpr int rate = 48'000;
+  std::vector<float> samples(4'800 * 2, 1.0F);
+  application::AudioBlock block{rate, 2, 4'800, std::move(samples), {1, rate}, std::nullopt};
+  application::DistantMusicProcessor processor{settings, rate, 2};
+  processor.process(block, 0);
+
+  assert(block.samples().front() < 0.1F);
+  assert(block.samples().back() > block.samples().front());
+
+  processor.reset();
+  const auto before = block.samples().front();
+  processor.process(block, 48'000);
+  assert(block.samples().front() > before);
+
+  settings.reverb_amount = 2.0;
+  bool rejected = false;
+  try {
+    application::DistantMusicProcessor invalid{settings, rate, 2};
+  } catch (const std::invalid_argument&) {
+    rejected = true;
+  }
+  assert(rejected);
+  return 0;
+}

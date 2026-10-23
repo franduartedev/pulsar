@@ -7,10 +7,11 @@ namespace pulsar::domain {
 
 Clip::Clip(ClipId id, MediaId media_id, TimeRange source_range, MediaTime timeline_start,
            double audio_gain_db, bool muted, MediaTime fade_in, MediaTime fade_out,
-           VisualTransform visual_transform)
+           VisualTransform visual_transform, DistantMusicSettings distant_music)
     : id_{id}, media_id_{media_id}, source_range_{source_range},
       timeline_start_{timeline_start}, audio_gain_db_{audio_gain_db}, muted_{muted},
-      fade_in_{fade_in}, fade_out_{fade_out}, visual_transform_{visual_transform} {
+      fade_in_{fade_in}, fade_out_{fade_out}, visual_transform_{visual_transform},
+      distant_music_{distant_music} {
   if (source_range_.duration() <= MediaTime::zero()) {
     throw std::invalid_argument{"clip source range duration must be positive"};
   }
@@ -30,6 +31,7 @@ Clip::Clip(ClipId id, MediaId media_id, TimeRange source_range, MediaTime timeli
     throw std::invalid_argument{"clip fades must be between zero and the supported maximum"};
   }
   validate_visual_transform(visual_transform_);
+  distant_music_.validate();
 }
 
 void validate_visual_transform(const VisualTransform& value) {

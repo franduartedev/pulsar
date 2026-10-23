@@ -5,6 +5,7 @@ add_library(pulsar_application
   src/audio/audio_contributor_resolver.cpp
   src/audio/audio_mix_session.cpp
   src/audio/clip_gain.cpp
+  src/audio/distant_music_processor.cpp
   src/audio/audio_output_engine.cpp
   src/media/audio_block.cpp
   src/waveform/waveform_cache.cpp

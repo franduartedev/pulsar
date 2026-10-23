@@ -84,6 +84,11 @@ struct SetClipFadesCommand {
   domain::MediaTime fade_out;
 };
 
+struct SetClipDistantMusicCommand {
+  domain::ClipId clip_id;
+  domain::DistantMusicSettings settings;
+};
+
 struct SetClipVisualTransformCommand {
   domain::ClipId clip_id;
   domain::VisualTransform transform;
@@ -130,6 +135,7 @@ using Command = std::variant<AddTrackCommand, RemoveTrackCommand, RestoreEmptyVi
                              AddClipCommand, RemoveClipCommand, MoveClipCommand,
                              TrimClipStartCommand, TrimClipEndCommand, SplitClipCommand,
                              SetClipAudioGainCommand, SetClipMutedCommand, SetClipFadesCommand,
+                             SetClipDistantMusicCommand,
                              SetClipVisualTransformCommand, RestoreClipCommand,
                              RestoreSplitCommand, ImportAssetCommand, RemoveAssetCommand,
                               AddTitleCommand, RemoveTitleCommand, ReplaceTitleCommand,

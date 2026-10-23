@@ -203,10 +203,12 @@ std::string ProjectCodec::encode(const ProjectSnapshot& snapshot) {
   }
   bool has_visual_transforms = false;
   bool has_audio_track_state = false;
+  bool has_distant_music = false;
   for (const auto& track : snapshot.timeline.tracks()) {
     if (track.audio_state() != domain::AudioTrackState{}) has_audio_track_state = true;
     for (const auto& clip : track.clips()) {
       if (!clip.visual_transform().is_default()) has_visual_transforms = true;
+      if (clip.distant_music().enabled) has_distant_music = true;
     }
   }
   const bool needs_v6 = snapshot.visual_track_ids.size() > 1 || has_visual_transforms ||
@@ -236,7 +238,7 @@ std::string ProjectCodec::encode(const ProjectSnapshot& snapshot) {
     }
   }
   // Version 4 adds clip fades; every file that does not need a newer feature keeps its old version.
-  output << (needs_v6 ? "PULSAR_PROJECT 6\n" : needs_v5 ? "PULSAR_PROJECT 5\n" : needs_v4 ? "PULSAR_PROJECT 4\n" : has_titles ? "PULSAR_PROJECT 3\n" : "PULSAR_PROJECT 2\n");
+  output << (has_distant_music ? "PULSAR_PROJECT 7\n" : needs_v6 ? "PULSAR_PROJECT 6\n" : needs_v5 ? "PULSAR_PROJECT 5\n" : needs_v4 ? "PULSAR_PROJECT 4\n" : has_titles ? "PULSAR_PROJECT 3\n" : "PULSAR_PROJECT 2\n");
   output << "TIMELINE " << snapshot.timeline.id().value() << "\n";
   const auto tracks = sorted_tracks(snapshot.timeline);
   for (const auto* track : tracks) {
@@ -344,6 +346,13 @@ std::string ProjectCodec::encode(const ProjectSnapshot& snapshot) {
                << transform.position_y << ' ' << transform.scale << ' '
                << transform.rotation_degrees << ' ' << transform.opacity;
       }
+      if (clip.distant_music().enabled) {
+        const auto& fx = clip.distant_music();
+        output << " CLIP_DISTANT_MUSIC 1 " << std::setprecision(17)
+               << fx.initial_gain_db << ' ' << fx.duration_seconds << ' '
+               << fx.start_cutoff_hz << ' ' << fx.end_cutoff_hz << ' '
+               << fx.reverb_amount << ' ' << static_cast<int>(fx.curve);
+      }
       output << "\n";
     }
   }
@@ -397,6 +406,7 @@ ProjectRestoreState ProjectCodec::decode(std::string_view bytes) {
   bool timeline = false;
   bool video_track = false;
   bool version6 = false;
+  bool version7 = false;
   bool allocator = false;
   bool ended = false;
   enum class Section { Header, Timeline, Tracks, VideoTrack, VisualTracks, Assets, Clips, Transitions, Titles, Allocator, End };
@@ -431,11 +441,12 @@ ProjectRestoreState ProjectCodec::decode(std::string_view bytes) {
 
     try {
       if (tokens[0].text == "PULSAR_PROJECT") {
-        if (header || tokens.size() != 2 || (tokens[1].text != "1" && tokens[1].text != "2" && tokens[1].text != "3" && tokens[1].text != "4" && tokens[1].text != "5" && tokens[1].text != "6")) {
+        if (header || tokens.size() != 2 || (tokens[1].text != "1" && tokens[1].text != "2" && tokens[1].text != "3" && tokens[1].text != "4" && tokens[1].text != "5" && tokens[1].text != "6" && tokens[1].text != "7")) {
           parse_fail(line_number, "invalid header/version");
         }
         header = true;
-        version6 = tokens[1].text == "6";
+        version7 = tokens[1].text == "7";
+        version6 = version7 || tokens[1].text == "6";
         section = Section::Timeline;
       } else if (!header) {
         parse_fail(line_number, "header required");
@@ -614,6 +625,8 @@ ProjectRestoreState ProjectCodec::decode(std::string_view bytes) {
         bool saw_audio = false;
         bool saw_fade = false;
         bool saw_transform = false;
+        domain::DistantMusicSettings distant_music;
+        bool saw_distant_music = false;
         while (i < tokens.size()) {
           if (!tokens[i].quoted && tokens[i].text == "CLIP_AUDIO" && !saw_audio) {
             saw_audio = true;
@@ -637,6 +650,21 @@ ProjectRestoreState ProjectCodec::decode(std::string_view bytes) {
             visual_transform.scale = double_number(tokens[i++], line_number, "clip scale");
             visual_transform.rotation_degrees = double_number(tokens[i++], line_number, "clip rotation");
             visual_transform.opacity = double_number(tokens[i++], line_number, "clip opacity");
+          } else if (version7 && !tokens[i].quoted && tokens[i].text == "CLIP_DISTANT_MUSIC" && !saw_distant_music) {
+            saw_distant_music = true;
+            if (i + 6 >= tokens.size()) parse_fail(line_number, "invalid CLIP_DISTANT_MUSIC");
+            ++i;
+            const auto enabled = unsigned_number(tokens[i++], line_number, "Distant Music enabled");
+            if (enabled > 1) parse_fail(line_number, "invalid Distant Music enabled");
+            distant_music.enabled = enabled != 0;
+            distant_music.initial_gain_db = double_number(tokens[i++], line_number, "Distant Music gain");
+            distant_music.duration_seconds = double_number(tokens[i++], line_number, "Distant Music duration");
+            distant_music.start_cutoff_hz = double_number(tokens[i++], line_number, "Distant Music start cutoff");
+            distant_music.end_cutoff_hz = double_number(tokens[i++], line_number, "Distant Music end cutoff");
+            distant_music.reverb_amount = double_number(tokens[i++], line_number, "Distant Music reverb");
+            const auto curve = unsigned_number(tokens[i++], line_number, "Distant Music curve");
+            if (curve > 2) parse_fail(line_number, "invalid Distant Music curve");
+            distant_music.curve = static_cast<domain::DistantMusicCurve>(curve);
           } else {
             parse_fail(line_number, "invalid or duplicate CLIP properties");
           }
@@ -652,7 +680,7 @@ ProjectRestoreState ProjectCodec::decode(std::string_view bytes) {
         try {
           track->clips.emplace_back(clip_id, media_id,
                                     domain::TimeRange{source_start, source_end}, timeline_start,
-                                    audio_gain_db, muted, fade_in, fade_out, visual_transform);
+                                    audio_gain_db, muted, fade_in, fade_out, visual_transform, distant_music);
         } catch (const std::exception& error) {
           parse_fail(line_number, error.what());
         }
