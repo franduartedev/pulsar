@@ -233,6 +233,26 @@ Rectangle {
                 ctx.beginPath(); ctx.arc(px, py, 2.5, 0, 2 * Math.PI); ctx.fill()
             }
         }
+        MouseArea {
+            anchors.fill: parent
+            enabled: block.selected && block.audioClip && block.gainKeyframes.length > 0
+            acceptedButtons: Qt.LeftButton
+            cursorShape: enabled ? Qt.CrossCursor : Qt.ArrowCursor
+            onPressed: function(mouse) {
+                // Alt+click adds a point; regular clicks continue to the clip body.
+                mouse.accepted = (mouse.modifiers & Qt.AltModifier) !== 0
+            }
+            onClicked: function(mouse) {
+                if ((mouse.modifiers & Qt.AltModifier) === 0 || block.durationSeconds <= 0) return
+                var time = Math.max(0, Math.min(block.durationSeconds, mouse.x / width * block.durationSeconds))
+                var level = Math.max(0, Math.min(1, (height - 4 - mouse.y) / Math.max(4, height - 8)))
+                var value = -60 + level * 60
+                var next = controller.selectedDistantMusicGainKeyframes.slice()
+                next.push({time: time, value: value, interpolation: 1})
+                next.sort(function(a, b) { return Number(a.time) - Number(b.time) })
+                controller.setSelectedDistantMusicGainKeyframes(next)
+            }
+        }
     }
 
     // Fades: translucent ramps over the clip's sound, drawn only when a fade exists.
