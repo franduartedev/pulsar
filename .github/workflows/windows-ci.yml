@@ -37,6 +37,14 @@ jobs:
         shell: pwsh
         run: choco install ninja --no-progress --yes
 
+      - name: Cache vcpkg FFmpeg artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            C:\vcpkg\installed
+            C:\vcpkg\packages
+          key: windows-vcpkg-ffmpeg-${{ runner.os }}-${{ hashFiles('src/media/ffmpeg/CMakeLists.txt') }}
+
       - name: Install FFmpeg port
         shell: pwsh
         run: |
