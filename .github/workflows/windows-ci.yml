@@ -33,21 +33,20 @@ jobs:
         shell: pwsh
         run: choco install ninja --no-progress --yes
 
-      - name: Install FFmpeg
-        uses: lukka/run-vcpkg@v11
-        with:
-          vcpkgDirectory: '${{ github.workspace }}/vcpkg'
-
       - name: Install FFmpeg port
         shell: pwsh
-        run: .\vcpkg\vcpkg.exe install ffmpeg:x64-windows
+        run: |
+          $vcpkg = (Get-Command vcpkg.exe).Source
+          $vcpkgRoot = Split-Path -Parent $vcpkg
+          vcpkg install ffmpeg:x64-windows --disable-metrics
+          "PULSAR_VCPKG_TOOLCHAIN=$vcpkgRoot/scripts/buildsystems/vcpkg.cmake" >> $env:GITHUB_ENV
 
       - name: Configure
         shell: pwsh
         run: >-
           cmake -S . -B build -G Ninja
           -DCMAKE_BUILD_TYPE=Release
-          -DCMAKE_TOOLCHAIN_FILE="${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake"
+          -DCMAKE_TOOLCHAIN_FILE="$env:PULSAR_VCPKG_TOOLCHAIN"
           -DPULSAR_BUILD_DESKTOP=ON
 
       - name: Build
