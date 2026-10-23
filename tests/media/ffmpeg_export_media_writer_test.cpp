@@ -75,7 +75,7 @@ struct MuxEvidence {
 
 MuxEvidence inspect_mux(const std::filesystem::path& path) {
   AVFormatContext* format = nullptr;
-  assert(avformat_open_input(&format, path.c_str(), nullptr, nullptr) == 0);
+  assert(avformat_open_input(&format, path.string().c_str(), nullptr, nullptr) == 0);
   assert(avformat_find_stream_info(format, nullptr) >= 0);
   int video_index = -1;
   int audio_index = -1;
@@ -205,7 +205,7 @@ void verifies_mp4_profile_and_decodes_audio(pulsar::domain::FrameRate rate,
   assert(std::filesystem::file_size(path) > 0);
 
   const auto mux = inspect_mux(path);
-  assert(mux.audio_profile == FF_PROFILE_AAC_LOW);
+  assert(mux.audio_profile == AV_PROFILE_AAC_LOW);
   assert(mux.audio_initial_padding == 0);
   assert(mux.audio_time_base.num == 1 && mux.audio_time_base.den == 48'000);
   assert(mux.video_packet_count == plan.frame_count());

@@ -100,6 +100,39 @@ using FramePtr = std::unique_ptr<AVFrame, FrameDeleter>;
 using PacketPtr = std::unique_ptr<AVPacket, PacketDeleter>;
 using SwsPtr = std::unique_ptr<SwsContext, SwsDeleter>;
 
+// FFmpeg 7.1 added avcodec_get_supported_config(); FFmpeg 8 removed the public
+// AVCodec::sample_fmts and AVCodec::pix_fmts arrays. Keep both worlds working.
+#if LIBAVCODEC_VERSION_INT >= AV_VERSION_INT(61, 13, 100)
+[[nodiscard]] bool supports_sample_format(const AVCodec& codec, AVSampleFormat format) {
+  const void* configs = nullptr;
+  int count = 0;
+  if (avcodec_get_supported_config(nullptr, &codec, AV_CODEC_CONFIG_SAMPLE_FORMAT, 0, &configs,
+                                   &count) < 0 ||
+      configs == nullptr) {
+    return false;
+  }
+  const auto* formats = static_cast<const AVSampleFormat*>(configs);
+  for (int index = 0; index < count; ++index) {
+    if (formats[index] == format) return true;
+  }
+  return false;
+}
+
+[[nodiscard]] bool advertises_pixel_format(const AVCodec& codec, AVPixelFormat format) {
+  const void* configs = nullptr;
+  int count = 0;
+  if (avcodec_get_supported_config(nullptr, &codec, AV_CODEC_CONFIG_PIX_FORMAT, 0, &configs,
+                                   &count) < 0 ||
+      configs == nullptr) {
+    return true;
+  }
+  const auto* formats = static_cast<const AVPixelFormat*>(configs);
+  for (int index = 0; index < count; ++index) {
+    if (formats[index] == format) return true;
+  }
+  return false;
+}
+#else
 [[nodiscard]] bool supports_sample_format(const AVCodec& codec, AVSampleFormat format) {
   if (codec.sample_fmts == nullptr) return false;
   for (const auto* current = codec.sample_fmts; *current != AV_SAMPLE_FMT_NONE; ++current) {
@@ -107,6 +140,15 @@ using SwsPtr = std::unique_ptr<SwsContext, SwsDeleter>;
   }
   return false;
 }
+
+[[nodiscard]] bool advertises_pixel_format(const AVCodec& codec, AVPixelFormat format) {
+  if (codec.pix_fmts == nullptr) return true;
+  for (const auto* current = codec.pix_fmts; *current != AV_PIX_FMT_NONE; ++current) {
+    if (*current == format) return true;
+  }
+  return false;
+}
+#endif
 
 } // namespace
 
@@ -216,14 +258,8 @@ void FFmpegExportMediaWriter::Impl::setup_video() {
                                     "video frame rate numerator is invalid");
   const int denominator = checked_int(rate.denominator(), ExportMediaWriterErrorCode::InternalInvariant,
                                       "video frame rate denominator is invalid");
-  if (encoder->pix_fmts != nullptr) {
-    bool yuv420p = false;
-    for (const auto* format_value = encoder->pix_fmts; *format_value != AV_PIX_FMT_NONE;
-         ++format_value) {
-      yuv420p |= *format_value == AV_PIX_FMT_YUV420P;
-    }
-    if (!yuv420p) fail(ExportMediaWriterErrorCode::EncoderUnavailable,
-                       "libx264 does not advertise yuv420p");
+  if (!advertises_pixel_format(*encoder, AV_PIX_FMT_YUV420P)) {
+    fail(ExportMediaWriterErrorCode::EncoderUnavailable, "libx264 does not advertise yuv420p");
   }
   video_stream = avformat_new_stream(format.get(), nullptr);
   if (video_stream == nullptr) fail(ExportMediaWriterErrorCode::InternalInvariant,
@@ -293,7 +329,7 @@ void FFmpegExportMediaWriter::Impl::setup_audio() {
   audio_codec->sample_fmt = audio_sample_format;
   audio_codec->sample_rate = plan.audio_sample_rate();
   audio_codec->bit_rate = plan.profile().audio_bitrate();
-  audio_codec->profile = FF_PROFILE_AAC_LOW;
+  audio_codec->profile = AV_PROFILE_AAC_LOW;
   av_channel_layout_default(&audio_codec->ch_layout, plan.audio_channels());
   audio_codec->time_base = AVRational{1, plan.audio_sample_rate()};
   if ((format->oformat->flags & AVFMT_GLOBALHEADER) != 0) audio_codec->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
@@ -304,7 +340,7 @@ void FFmpegExportMediaWriter::Impl::setup_audio() {
     fail(ExportMediaWriterErrorCode::EncoderUnavailable,
          "AAC encoder did not accept the required 48 kHz stereo profile");
   }
-  if (audio_codec->profile != FF_PROFILE_AAC_LOW) {
+  if (audio_codec->profile != AV_PROFILE_AAC_LOW) {
     fail(ExportMediaWriterErrorCode::EncoderUnavailable,
          "AAC encoder did not accept the required AAC-LC profile");
   }
@@ -313,7 +349,7 @@ void FFmpegExportMediaWriter::Impl::setup_audio() {
   if (parameters_result < 0) fail(ExportMediaWriterErrorCode::InternalInvariant,
                                   "could not copy AAC parameters");
   audio_stream->time_base = audio_codec->time_base;
-  if (audio_stream->codecpar->profile != FF_PROFILE_AAC_LOW) {
+  if (audio_stream->codecpar->profile != AV_PROFILE_AAC_LOW) {
     fail(ExportMediaWriterErrorCode::EncoderUnavailable,
          "AAC stream parameters are not AAC-LC");
   }
