@@ -38,11 +38,17 @@ const std::vector<AudioRecipe>& builtin_audio_recipes() {
     radio.mix = 1.0;
     radio.drive = 0.12;
 
+    domain::UnderwaterSettings submerged;
+    submerged.enabled = true;
+    submerged.mix = 0.78;
+    submerged.depth = 0.82;
+
     return std::vector<AudioRecipe>{
-        {"reveal", "Revelación", reveal, {}},
-        {"suspense", "Suspenso", suspense, {}},
-        {"memory", "Memoria", memory, {}},
-        {"radio", "Radio", {}, radio},
+        {"reveal", "Revelación", reveal, {}, {}},
+        {"suspense", "Suspenso", suspense, {}, {}},
+        {"memory", "Memoria", memory, {}, {}},
+        {"radio", "Radio", {}, radio, {}},
+        {"submerge", "Sumergido", {}, {}, submerged},
     };
   }();
   return recipes;

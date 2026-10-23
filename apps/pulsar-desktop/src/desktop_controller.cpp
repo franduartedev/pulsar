@@ -1625,6 +1625,21 @@ double DesktopController::selectedTelephoneDrive() const {
       ? active_session_->document().timeline().find_clip(*active_session_->selected_clip()) : nullptr;
   return clip ? clip->telephone().drive : 0.12;
 }
+bool DesktopController::selectedUnderwaterEnabled() const {
+  const auto* clip = active_session_ && active_session_->selected_clip()
+      ? active_session_->document().timeline().find_clip(*active_session_->selected_clip()) : nullptr;
+  return clip && clip->underwater().enabled;
+}
+double DesktopController::selectedUnderwaterMix() const {
+  const auto* clip = active_session_ && active_session_->selected_clip()
+      ? active_session_->document().timeline().find_clip(*active_session_->selected_clip()) : nullptr;
+  return clip ? clip->underwater().mix : 0.72;
+}
+double DesktopController::selectedUnderwaterDepth() const {
+  const auto* clip = active_session_ && active_session_->selected_clip()
+      ? active_session_->document().timeline().find_clip(*active_session_->selected_clip()) : nullptr;
+  return clip ? clip->underwater().depth : 0.68;
+}
 QVariantList DesktopController::selectedDistantMusicGainKeyframes() const {
   QVariantList result;
   const auto* clip = active_session_ && active_session_->selected_clip()
@@ -1667,6 +1682,26 @@ void DesktopController::applySelectedDistantMusicPreset() {
 
 void DesktopController::applySelectedTelephonePreset() {
   setSelectedTelephone(1.0, 0.12, true);
+}
+
+void DesktopController::applySelectedUnderwaterPreset() {
+  setSelectedUnderwater(0.78, 0.82, true);
+}
+
+void DesktopController::setSelectedUnderwater(double mix, double depth, bool enabled) {
+  if (!active_session_ || !active_session_->selected_clip() || !std::isfinite(mix) ||
+      !std::isfinite(depth)) return;
+  pulsar::domain::UnderwaterSettings settings;
+  settings.enabled = enabled;
+  settings.mix = mix;
+  settings.depth = depth;
+  try {
+    active_session_->set_clip_underwater(*active_session_->selected_clip(), settings);
+    clearError();
+    publishTimeline();
+  } catch (const std::exception&) {
+    setError(QStringLiteral("Los parámetros de Underwater no son válidos."));
+  }
 }
 
 void DesktopController::setSelectedTelephone(double mix, double drive, bool enabled) {

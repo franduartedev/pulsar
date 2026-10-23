@@ -45,7 +45,7 @@ void resolve_track(const ProjectSnapshot& snapshot, const domain::Track& track,
           audio.channel_count, audio.time_base, clip.fade_in(), clip.fade_out(),
           track.audio_state().gain_db,
           track.audio_state().muted || (any_solo && !track.audio_state().solo),
-          clip.distant_music(), clip.telephone()});
+          clip.distant_music(), clip.telephone(), clip.underwater()});
   }
 }
 

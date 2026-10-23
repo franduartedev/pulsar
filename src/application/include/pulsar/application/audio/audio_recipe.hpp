@@ -2,6 +2,7 @@
 
 #include <pulsar/domain/timeline/distant_music.hpp>
 #include <pulsar/domain/timeline/telephone.hpp>
+#include <pulsar/domain/timeline/underwater.hpp>
 
 #include <string_view>
 #include <vector>
@@ -13,6 +14,7 @@ struct AudioRecipe {
   std::string_view name;
   domain::DistantMusicSettings distant_music;
   domain::TelephoneSettings telephone;
+  domain::UnderwaterSettings underwater;
 };
 
 // Immutable built-ins. Recipes are application data so UI clients can list

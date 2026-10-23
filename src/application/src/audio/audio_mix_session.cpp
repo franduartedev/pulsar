@@ -246,11 +246,13 @@ void AudioMixSession::configure(ProjectSnapshot snapshot) {
           });
       if (replacement != contributors_.end()) {
         const bool effect_changed = source->contributor.distant_music != replacement->distant_music ||
-                                     source->contributor.telephone != replacement->telephone;
+                                     source->contributor.telephone != replacement->telephone ||
+                                     source->contributor.underwater != replacement->underwater;
         source->contributor = *replacement;
         if (effect_changed) {
           source->effects = std::make_unique<AudioEffectChain>(AudioEffectChain::from_clip_effects(
-              replacement->distant_music, replacement->telephone, format_.sample_rate,
+              replacement->distant_music, replacement->telephone, replacement->underwater,
+              format_.sample_rate,
               format_.channel_count));
         }
       }
@@ -359,9 +361,9 @@ AudioMixSession::SourceState* AudioMixSession::open_source(
   auto state = std::make_unique<SourceState>(contributor, std::move(source),
                                              std::move(converter), timeline_position, target,
                                              origin);
-  if (contributor.distant_music.enabled || contributor.telephone.enabled) {
+  if (contributor.distant_music.enabled || contributor.telephone.enabled || contributor.underwater.enabled) {
     state->effects = std::make_unique<AudioEffectChain>(AudioEffectChain::from_clip_effects(
-        contributor.distant_music, contributor.telephone, format_.sample_rate,
+        contributor.distant_music, contributor.telephone, contributor.underwater, format_.sample_rate,
         format_.channel_count));
   }
   auto* result = state.get();

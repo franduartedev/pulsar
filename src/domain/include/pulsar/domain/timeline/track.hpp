@@ -60,6 +60,7 @@ private:
   void set_clip_fades(ClipId id, MediaTime fade_in, MediaTime fade_out);
   void set_clip_distant_music(ClipId id, DistantMusicSettings settings);
   void set_clip_telephone(ClipId id, TelephoneSettings settings);
+  void set_clip_underwater(ClipId id, UnderwaterSettings settings);
   void set_clip_visual_transform(ClipId id, VisualTransform transform);
   void set_audio_state(AudioTrackState state);
 

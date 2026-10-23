@@ -2,6 +2,7 @@
 #include <pulsar/application/audio/audio_effect_chain.hpp>
 #include <pulsar/application/audio/output_stage.hpp>
 #include <pulsar/application/audio/telephone_processor.hpp>
+#include <pulsar/application/audio/underwater_processor.hpp>
 
 #include <cassert>
 #include <cmath>
@@ -74,6 +75,7 @@ int main() {
   }
   assert(rejected);
 
+  settings.reverb_amount = 0.2;
   domain::TelephoneSettings telephone_settings;
   telephone_settings.enabled = true;
   telephone_settings.mix = 1.0;
@@ -88,16 +90,25 @@ int main() {
   settings.enabled = true;
   telephone_settings.enabled = true;
   auto clip_chain = application::AudioEffectChain::from_clip_effects(
-      settings, telephone_settings, rate, 2);
+      settings, telephone_settings, {}, rate, 2);
   assert(clip_chain.size() == 2);
   settings.enabled = false;
   telephone_settings.enabled = false;
   assert(application::AudioEffectChain::from_clip_effects(
-             settings, telephone_settings, rate, 2).empty());
+             settings, telephone_settings, {}, rate, 2).empty());
   telephone_settings.mix = 2.0;
   bool telephone_rejected = false;
   try { application::TelephoneProcessor invalid_telephone{telephone_settings, rate, 2}; }
   catch (const std::invalid_argument&) { telephone_rejected = true; }
   assert(telephone_rejected);
+  domain::UnderwaterSettings underwater_settings;
+  underwater_settings.enabled = true;
+  underwater_settings.mix = 0.8;
+  underwater_settings.depth = 0.75;
+  application::UnderwaterProcessor underwater{underwater_settings, rate, 2};
+  float underwater_samples[8] = {1.0F, -1.0F, 0.5F, -0.5F, 0.25F, -0.25F, 0.1F, -0.1F};
+  underwater.process_interleaved(underwater_samples, 4, 0);
+  for (const float sample : underwater_samples) assert(std::isfinite(sample));
+  underwater.reset();
   return 0;
 }

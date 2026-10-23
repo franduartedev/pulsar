@@ -2,6 +2,7 @@
 
 #include <pulsar/application/audio/distant_music_processor.hpp>
 #include <pulsar/application/audio/telephone_processor.hpp>
+#include <pulsar/application/audio/underwater_processor.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -32,6 +33,7 @@ public:
   // realtime preview and offline export agree as new effects are added.
   static AudioEffectChain from_clip_effects(const domain::DistantMusicSettings& distant_music,
                                             const domain::TelephoneSettings& telephone,
+                                            const domain::UnderwaterSettings& underwater,
                                             int sample_rate, int channel_count);
 
   [[nodiscard]] bool empty() const noexcept { return effects_.empty(); }

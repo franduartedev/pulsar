@@ -6,6 +6,7 @@ add_library(pulsar_application
   src/audio/audio_effect_chain.cpp
   src/audio/audio_recipe.cpp
   src/audio/telephone_processor.cpp
+  src/audio/underwater_processor.cpp
   src/audio/audio_mix_session.cpp
   src/audio/clip_gain.cpp
   src/audio/distant_music_processor.cpp

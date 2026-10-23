@@ -639,12 +639,18 @@ void EditorSession::set_clip_telephone(domain::ClipId clip, domain::TelephoneSet
   synchronize_document_state();
 }
 
+void EditorSession::set_clip_underwater(domain::ClipId clip, domain::UnderwaterSettings settings) {
+  processor_.set_clip_underwater(clip, std::move(settings));
+  synchronize_document_state();
+}
+
 void EditorSession::apply_audio_recipe(domain::ClipId clip,
                                        const application::AudioRecipe& recipe) {
   if (document_.timeline().find_clip(clip) == nullptr) throw std::invalid_argument{"unknown clip"};
   processor_.run_as_one_edit([&] {
     processor_.set_clip_distant_music(clip, recipe.distant_music);
     processor_.set_clip_telephone(clip, recipe.telephone);
+    processor_.set_clip_underwater(clip, recipe.underwater);
   });
   synchronize_document_state();
 }

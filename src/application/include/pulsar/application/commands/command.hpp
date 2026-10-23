@@ -6,6 +6,7 @@
 #include <pulsar/domain/time/media_time.hpp>
 #include <pulsar/domain/timeline/clip.hpp>
 #include <pulsar/domain/timeline/title.hpp>
+#include <pulsar/domain/timeline/underwater.hpp>
 #include <pulsar/domain/timeline/transition.hpp>
 #include <pulsar/domain/timeline/track_kind.hpp>
 #include <pulsar/domain/timeline/track.hpp>
@@ -99,6 +100,11 @@ struct SetClipTelephoneCommand {
   domain::TelephoneSettings settings;
 };
 
+struct SetClipUnderwaterCommand {
+  domain::ClipId clip_id;
+  domain::UnderwaterSettings settings;
+};
+
 struct SetClipVisualTransformCommand {
   domain::ClipId clip_id;
   domain::VisualTransform transform;
@@ -156,6 +162,7 @@ using Command = std::variant<AddTrackCommand, RemoveTrackCommand, RestoreEmptyVi
                              SetClipAudioGainCommand, SetClipMutedCommand, SetClipFadesCommand,
                              SetClipDistantMusicCommand,
                              SetClipTelephoneCommand,
+                             SetClipUnderwaterCommand,
                              SetClipVisualTransformCommand, RestoreClipCommand,
                               RestoreSplitCommand, ImportAssetCommand, RemoveAssetCommand,
                               ReplaceAssetCommand,

@@ -129,9 +129,9 @@ OfflineAudioRenderer::ContributorState& OfflineAudioRenderer::state_for(
     const domain::FrameRate source_grid{state->source->sample_rate(), 1};
     state->fade = ClipFade::from_times(contributor.fade_in, contributor.fade_out,
                                        contributor.timeline_range.duration(), 48'000);
-    if (contributor.distant_music.enabled || contributor.telephone.enabled) {
+    if (contributor.distant_music.enabled || contributor.telephone.enabled || contributor.underwater.enabled) {
       state->effects = std::make_unique<AudioEffectChain>(AudioEffectChain::from_clip_effects(
-          contributor.distant_music, contributor.telephone, 48'000, 2));
+          contributor.distant_music, contributor.telephone, contributor.underwater, 48'000, 2));
     }
     state->first_clip_frame = domain::frame_at(contributor.timeline_range.start(),
                                                domain::FrameRate{48'000, 1}, domain::RoundingMode::Ceil).value();

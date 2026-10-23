@@ -2,6 +2,7 @@
 
 #include <pulsar/application/project/project_snapshot.hpp>
 #include <pulsar/domain/time/time_range.hpp>
+#include <pulsar/domain/timeline/underwater.hpp>
 
 #include <cstddef>
 #include <filesystem>
@@ -36,6 +37,7 @@ struct AudioContributor {
   bool track_muted{false};
   domain::DistantMusicSettings distant_music{};
   domain::TelephoneSettings telephone{};
+  domain::UnderwaterSettings underwater{};
 };
 
 struct UnavailableAudioContributor {

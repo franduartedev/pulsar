@@ -6,6 +6,7 @@
 #include <pulsar/domain/timeline/visual_transform.hpp>
 #include <pulsar/domain/timeline/distant_music.hpp>
 #include <pulsar/domain/timeline/telephone.hpp>
+#include <pulsar/domain/timeline/underwater.hpp>
 
 #include <cstdint>
 
@@ -22,7 +23,8 @@ public:
   Clip(ClipId id, MediaId media_id, TimeRange source_range, MediaTime timeline_start,
        double audio_gain_db = 0.0, bool muted = false, MediaTime fade_in = MediaTime::zero(),
        MediaTime fade_out = MediaTime::zero(), VisualTransform visual_transform = {},
-       DistantMusicSettings distant_music = {}, TelephoneSettings telephone = {});
+       DistantMusicSettings distant_music = {}, TelephoneSettings telephone = {},
+       UnderwaterSettings underwater = {});
 
   [[nodiscard]] constexpr ClipId id() const noexcept {
     return id_;
@@ -47,6 +49,7 @@ public:
   [[nodiscard]] const VisualTransform& visual_transform() const noexcept { return visual_transform_; }
   [[nodiscard]] const DistantMusicSettings& distant_music() const noexcept { return distant_music_; }
   [[nodiscard]] const TelephoneSettings& telephone() const noexcept { return telephone_; }
+  [[nodiscard]] const UnderwaterSettings& underwater() const noexcept { return underwater_; }
 
   [[nodiscard]] MediaTime duration() const;
   [[nodiscard]] TimeRange timeline_range() const;
@@ -63,6 +66,7 @@ private:
   VisualTransform visual_transform_;
   DistantMusicSettings distant_music_;
   TelephoneSettings telephone_;
+  UnderwaterSettings underwater_;
 };
 
 } // namespace pulsar::domain

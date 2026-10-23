@@ -649,6 +649,17 @@ Panel {
                     FieldRow { label: "Mezcla"; PSlider { width: 150; value: controller.selectedTelephoneMix; onMoved: controller.setSelectedTelephone(value, controller.selectedTelephoneDrive, true) } Text { text: Math.round(controller.selectedTelephoneMix * 100) + "%"; color: Theme.textMuted; font.pixelSize: Theme.fontSizeXS } }
                     FieldRow { label: "Drive"; PSlider { width: 150; value: controller.selectedTelephoneDrive; onMoved: controller.setSelectedTelephone(controller.selectedTelephoneMix, value, true) } Text { text: Math.round(controller.selectedTelephoneDrive * 100) + "%"; color: Theme.textMuted; font.pixelSize: Theme.fontSizeXS } }
                 }
+                InspectorSection {
+                    visible: inspector.clipSelected && controller.selectedClipHasAudio
+                    heading: "UNDERWATER"
+                    Text { width: parent.width; wrapMode: Text.WordWrap; text: "Música sumergida: graves suaves, agudos velados y movimiento espacial sutil."; color: Theme.textMuted; font.pixelSize: Theme.fontSizeS }
+                    Row { width: parent.width; spacing: Theme.spaceS
+                        PButton { width: (parent.width - Theme.spaceS) / 2; height: Theme.controlHeightSmall; primary: true; text: "Aplicar Underwater"; onClicked: controller.applySelectedUnderwaterPreset() }
+                        PButton { width: (parent.width - Theme.spaceS) / 2; height: Theme.controlHeightSmall; text: controller.selectedUnderwaterEnabled ? "Bypass" : "Activar"; onClicked: controller.setSelectedUnderwater(controller.selectedUnderwaterMix, controller.selectedUnderwaterDepth, !controller.selectedUnderwaterEnabled) }
+                    }
+                    FieldRow { label: "Mezcla"; PSlider { width: 150; value: controller.selectedUnderwaterMix; onMoved: controller.setSelectedUnderwater(value, controller.selectedUnderwaterDepth, true) } Text { text: Math.round(controller.selectedUnderwaterMix * 100) + "%"; color: Theme.textMuted; font.pixelSize: Theme.fontSizeXS } }
+                    FieldRow { label: "Profundidad"; PSlider { width: 150; value: controller.selectedUnderwaterDepth; onMoved: controller.setSelectedUnderwater(controller.selectedUnderwaterMix, value, true) } Text { text: Math.round(controller.selectedUnderwaterDepth * 100) + "%"; color: Theme.textMuted; font.pixelSize: Theme.fontSizeXS } }
+                }
                 PButton { visible: inspector.clipSelected && controller.selectedClipHasAudio; width: parent.width; height: Theme.controlHeightSmall; text: "Restablecer efecto"; onClicked: controller.setSelectedDistantMusic(-30, 4, 900, 18000, 0.18, 1, false) }
                 Text { visible: inspector.clipSelected && !controller.selectedClipHasAudio; width: parent.width; wrapMode: Text.WordWrap; text: "Seleccioná un clip con audio para aplicar Distant Music."; color: Theme.textMuted; font.pixelSize: Theme.fontSizeS }
             }

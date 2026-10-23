@@ -90,7 +90,7 @@ void Timeline::move_clip(ClipId clip_id, TrackId destination_track_id, MediaTime
                         original_clip->source_range(), timeline_start,
                         original_clip->audio_gain_db(), original_clip->muted(),
                         original_clip->fade_in(), original_clip->fade_out(),
-                        original_clip->visual_transform(), original_clip->distant_music(), original_clip->telephone()};
+                        original_clip->visual_transform(), original_clip->distant_music(), original_clip->telephone(), original_clip->underwater()};
 
   Track replacement_source = tracks_[source_index];
   replacement_source.remove_clip(clip_id);
@@ -199,6 +199,17 @@ void Timeline::set_clip_telephone(domain::ClipId clip_id, TelephoneSettings sett
     if (tracks_[i].find_clip(clip_id) == nullptr) continue;
     Track replacement = tracks_[i];
     replacement.set_clip_telephone(clip_id, std::move(settings));
+    tracks_[i] = std::move(replacement);
+    return;
+  }
+  throw std::invalid_argument{"clip id does not exist in timeline"};
+}
+
+void Timeline::set_clip_underwater(domain::ClipId clip_id, UnderwaterSettings settings) {
+  for (std::size_t i = 0; i < tracks_.size(); ++i) {
+    if (tracks_[i].find_clip(clip_id) == nullptr) continue;
+    Track replacement = tracks_[i];
+    replacement.set_clip_underwater(clip_id, std::move(settings));
     tracks_[i] = std::move(replacement);
     return;
   }

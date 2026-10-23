@@ -255,6 +255,7 @@ public:
   void set_clip_fades(domain::ClipId clip, domain::MediaTime fade_in, domain::MediaTime fade_out);
   void set_clip_distant_music(domain::ClipId clip, domain::DistantMusicSettings settings);
   void set_clip_telephone(domain::ClipId clip, domain::TelephoneSettings settings);
+  void set_clip_underwater(domain::ClipId clip, domain::UnderwaterSettings settings);
   void apply_audio_recipe(domain::ClipId clip, const application::AudioRecipe& recipe);
   void relink_asset(domain::MediaId media, const std::filesystem::path& source_locator,
                     const application::MediaProbe& probe);
