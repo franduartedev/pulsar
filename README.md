@@ -34,13 +34,25 @@ export you can trust.**
 | 🎞️ **Multi-track timeline** | Insert at the playhead or add to end (gapless), split, trim, move with magnetic snapping, duplicate, undo / redo, frame step |
 | 🖼️ **Direct Viewer editing** | Move and scale clips right on the preview, picture-in-picture, *Ajustar* / *100%* modes |
 | 🔤 **Titles** | Static text on its own track, optional background box and opacity, identical in preview and export |
-| 🔊 **Audio** | Detach audio, per-clip and per-track gain / mute / solo, fades, waveforms, 37 original built-in sound effects with audition |
+| 🔊 **Audio** | Detach audio, per-clip and per-track gain / mute / solo, fades, waveforms, meters, safety limiting and 37 original built-in sound effects with audition |
+| 🎬 **PULSAR Audio FX** | Distant Music, Telephone and Underwater with presets, editable controls, keyframes and preview/export parity |
+| 🧭 **Creative analysis** | Pulse Map, Scene Cards and data-driven Cinematic Recipes for finding and shaping the emotional rhythm of a cut |
 | 🗂️ **Media bin** | Filters and search, multi-file and folder import, drag and drop onto the timeline |
 | 💾 **Safe projects** | Atomic saves of `.pulsar` projects, autosave and crash recovery |
 | 📤 **Export** | H.264 / AAC MP4 with Original / 1080p / 720p presets; refuses to overwrite media the project uses |
 | 🎯 **Preview = export** | Both use the same composition plan, so what you see is what you export |
 
 Also: PNG / JPEG / WebP images and colour cards as clips, and a cross-dissolve transition.
+
+### PULSAR Audio FX
+
+Audio FX are clip-level, undoable and persisted inside the project. `Distant Music`
+brings music forward with progressive gain and filter recovery; `Telephone` creates a
+focused radio/phone band; and `Underwater` adds a moving low-pass atmosphere. Each
+effect can be bypassed or combined with the others, and Underwater depth plus Distant
+Music gain support editable Hold / Linear / Smooth keyframes. Built-in recipes include
+`Revelación`, `Suspenso`, `Memoria`, `Radio`, `Sumergido`, `Inmersión Profunda` and
+`Señal Perdida`.
 
 ## 📦 Requirements
 
@@ -70,8 +82,8 @@ chmod +x PULSAR-0.2.0-beta.1-x86_64.AppImage
 - **Linux x86_64 only.** No Windows, macOS or mobile builds.
 - **Spanish-only interface**; the *Abrir proyecto* file picker is the toolkit's own (light, English).
 - **Preview can be slow** with transformed or multi-layer composition (CPU only, no GPU or proxies). Export is authoritative. Not tested with 4K / HEVC / long footage.
-- No animated titles, subtitles, keyframes, masks, colour tools or speed control; cross dissolve is the only transition.
-- No audio limiter or meters: summing several loud tracks can clip.
+- No animated titles, masks, colour tools or speed control; cross dissolve is currently the only transition.
+- Audio FX are currently clip-level; there is no bus/master FX rack or user-defined effect ordering yet.
 - No relink UI for missing media, recent-projects list or multi-selection.
 - Export is MP4 / H.264 / AAC only; no vertical (9:16) canvas presets (the canvas follows the first clip).
 - Images: PNG, JPEG and WebP only. An audio-only project cannot be exported.
