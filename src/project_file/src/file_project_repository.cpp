@@ -12,7 +12,11 @@
 #include <sstream>
 #include <string>
 #include <system_error>
+#ifdef _WIN32
+#include <windows.h>
+#else
 #include <unistd.h>
+#endif
 
 namespace pulsar::project_file {
 namespace {
@@ -72,11 +76,10 @@ void refresh_availability(application::ProjectRestoreState& state,
       const auto filename = logical.substr(std::string{"pulsar-sound:"}.size()) + ".wav";
       const auto root = assets_directory();
       const auto candidate = root / "sounds" / filename;
-      readable = !root.empty() && std::filesystem::is_regular_file(candidate, error) &&
-                 ::access(candidate.c_str(), R_OK) == 0;
+      readable = !root.empty() && std::filesystem::is_regular_file(candidate, error);
     } else {
       const bool regular = std::filesystem::is_regular_file(check_path, error);
-      readable = !error && regular && ::access(check_path.c_str(), R_OK) == 0;
+      readable = !error && regular;
     }
     const auto availability = readable ? application::MediaAvailability::Available
                                        : application::MediaAvailability::Unavailable;
@@ -111,8 +114,9 @@ application::ProjectSaveResult FileProjectRepository::save(
   if (!project_size_allowed(bytes.size())) {
     throw application::ProjectRepositoryError{"encoded project exceeds size limit"};
   }
-  int fd = -1;
   std::filesystem::path temporary;
+#ifndef _WIN32
+  int fd = -1;
   for (int attempt = 0; attempt < 32; ++attempt) {
     temporary = temp_path_for(destination, attempt);
     fd = ::open(temporary.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0600);
@@ -148,7 +152,48 @@ application::ProjectSaveResult FileProjectRepository::save(
     errno = saved_errno;
     fail("cannot close project temporary file");
   }
+#else
+  bool created = false;
+  for (int attempt = 0; attempt < 32 && !created; ++attempt) {
+    temporary = temp_path_for(destination, attempt);
+    std::error_code error;
+    if (std::filesystem::exists(temporary, error)) continue;
+    std::ofstream output{temporary, std::ios::binary | std::ios::trunc};
+    if (!output) continue;
+    output.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+    output.flush();
+    if (!output) {
+      std::filesystem::remove(temporary, error);
+      throw application::ProjectRepositoryError{"cannot write project temporary file"};
+    }
+    output.close();
+    const HANDLE handle = CreateFileW(temporary.c_str(), GENERIC_READ | GENERIC_WRITE,
+                                      FILE_SHARE_READ, nullptr, OPEN_EXISTING,
+                                      FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (handle == INVALID_HANDLE_VALUE || !FlushFileBuffers(handle)) {
+      if (handle != INVALID_HANDLE_VALUE) CloseHandle(handle);
+      std::filesystem::remove(temporary, error);
+      throw application::ProjectRepositoryError{"cannot flush project temporary file"};
+    }
+    CloseHandle(handle);
+    created = true;
+  }
+  if (!created) {
+    throw application::ProjectRepositoryError{"cannot obtain unique project temporary file"};
+  }
+  auto cleanup = [&] {
+    std::error_code error;
+    (void)std::filesystem::remove(temporary, error);
+  };
+  if (!MoveFileExW(temporary.c_str(), destination.c_str(),
+                   MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+    cleanup();
+    throw application::ProjectRepositoryError{"cannot atomically install project file"};
+  }
+  return application::ProjectSaveResult{application::ProjectSaveStatus::Durable};
+#endif
 
+#ifndef _WIN32
   if (::rename(temporary.c_str(), destination.c_str()) != 0) {
     const int saved_errno = errno;
     cleanup();
@@ -170,6 +215,7 @@ application::ProjectSaveResult FileProjectRepository::save(
         application::ProjectSaveStatus::CommittedDurabilityUncertain};
   }
   return application::ProjectSaveResult{application::ProjectSaveStatus::Durable};
+#endif
 }
 
 application::ProjectRestoreState FileProjectRepository::load(
