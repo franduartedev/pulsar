@@ -662,8 +662,9 @@ Panel {
                     FieldRow { label: "Drive"; PSlider { width: 150; value: controller.selectedTelephoneDrive; onMoved: controller.setSelectedTelephone(controller.selectedTelephoneMix, value, true) } Text { text: Math.round(controller.selectedTelephoneDrive * 100) + "%"; color: Theme.textMuted; font.pixelSize: Theme.fontSizeXS } }
                     Row { width: parent.width; spacing: Theme.spaceS
                         PButton { width: (parent.width - Theme.spaceS) / 2; height: Theme.controlHeightSmall; text: "Automatizar mezcla"; onClicked: controller.setSelectedTelephoneMixKeyframes([{time: 0, value: 0, interpolation: 0}, {time: 1.5, value: 1, interpolation: 2}]) }
-                        Text { text: controller.selectedTelephoneMixKeyframeCount + " keyframes"; color: Theme.textMuted; font.pixelSize: Theme.fontSizeXS; verticalAlignment: Text.AlignVCenter; height: Theme.controlHeightSmall }
+                        PButton { width: (parent.width - Theme.spaceS) / 2; height: Theme.controlHeightSmall; text: "Limpiar"; enabled: controller.selectedTelephoneMixKeyframeCount > 0; onClicked: controller.setSelectedTelephoneMixKeyframes([]) }
                     }
+                    Text { width: parent.width; text: controller.selectedTelephoneMixKeyframeCount === 0 ? "Sin automatización: la mezcla es constante." : controller.selectedTelephoneMixKeyframeCount + " puntos de mezcla"; color: Theme.textMuted; font.pixelSize: Theme.fontSizeXS }
                     Repeater { model: controller.selectedTelephoneMixKeyframes
                         delegate: Row { width: parent.width; spacing: Theme.spaceXS
                             Text { text: "t"; color: Theme.textMuted; width: 12; verticalAlignment: Text.AlignVCenter; height: Theme.controlHeightSmall }
@@ -673,6 +674,7 @@ Panel {
                             PButton { width: 24; height: Theme.controlHeightSmall; text: "×"; onClicked: controller.removeSelectedTelephoneMixKeyframe(index) }
                         }
                     }
+                    Canvas { visible: inspector.clipSelected && controller.selectedClipHasAudio; width: parent.width; height: 48; antialiasing: true; onPaint: { var p = getContext("2d"); var keys = controller.selectedTelephoneMixKeyframes; p.clearRect(0, 0, width, height); p.strokeStyle = Theme.borderStrong; p.lineWidth = 1; p.beginPath(); p.moveTo(0, height - 1); p.lineTo(width, height - 1); p.stroke(); p.strokeStyle = Theme.accent; p.lineWidth = 2; p.beginPath(); if (keys.length === 0) { p.moveTo(0, height / 2); p.lineTo(width, height / 2); } else { var maxTime = Math.max(0.1, Number(keys[keys.length - 1].time)); for (var i = 0; i < keys.length; ++i) { var key = keys[i]; var x = width * Math.max(0, Math.min(1, Number(key.time) / maxTime)); var y = height - 4 - Math.max(0, Math.min(1, Number(key.value))) * (height - 10); if (i === 0) p.moveTo(x, y); else p.lineTo(x, y); } } p.stroke(); p.fillStyle = Theme.focus; for (var k = 0; k < keys.length; ++k) { var point = keys[k]; var px = width * Math.max(0, Math.min(1, Number(point.time) / Math.max(0.1, Number(keys[keys.length - 1].time)))); var py = height - 4 - Math.max(0, Math.min(1, Number(point.value))) * (height - 10); p.beginPath(); p.arc(px, py, 3, 0, 2 * Math.PI); p.fill(); } } Connections { target: controller; function onTimelineChanged() { parent.requestPaint() } } }
                 }
                 InspectorSection {
                     visible: inspector.clipSelected && controller.selectedClipHasAudio
