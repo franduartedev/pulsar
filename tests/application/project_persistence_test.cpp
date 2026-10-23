@@ -147,8 +147,14 @@ void telephone_roundtrips_as_project_version_ten() {
   settings.enabled = true;
   settings.mix = 0.8;
   settings.drive = 0.25;
+  domain::DistantMusicSettings distant;
+  distant.enabled = true;
+  distant.gain_keyframes = {{0.0, -36.0, domain::KeyframeInterpolation::Hold},
+                            {2.0, 0.0, domain::KeyframeInterpolation::Smooth}};
+  processor.set_clip_distant_music(domain::ClipId{1}, distant);
   processor.set_clip_telephone(domain::ClipId{1}, settings);
   assert(document.timeline().find_clip(domain::ClipId{1})->telephone() == settings);
+  assert(document.timeline().find_clip(domain::ClipId{1})->distant_music() == distant);
   assert(processor.undo());
   assert(!document.timeline().find_clip(domain::ClipId{1})->telephone().enabled);
   assert(processor.redo());
@@ -157,6 +163,7 @@ void telephone_roundtrips_as_project_version_ten() {
   assert(bytes.find("CLIP_TELEPHONE 1") != std::string::npos);
   const auto restored = ProjectDocument::restore(ProjectCodec::decode(bytes));
   assert(restored.timeline().find_clip(domain::ClipId{1})->telephone() == settings);
+  assert(restored.timeline().find_clip(domain::ClipId{1})->distant_music() == distant);
   assert(ProjectCodec::encode(restored.snapshot()) == bytes);
 }
 
