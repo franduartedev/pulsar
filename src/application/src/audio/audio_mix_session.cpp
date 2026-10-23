@@ -2,7 +2,7 @@
 
 #include <pulsar/application/audio/audio_converter.hpp>
 #include <pulsar/application/audio/clip_gain.hpp>
-#include <pulsar/application/audio/distant_music_processor.hpp>
+#include <pulsar/application/audio/audio_effect_chain.hpp>
 #include <pulsar/application/audio/output_stage.hpp>
 
 #include <algorithm>
@@ -201,7 +201,7 @@ public:
   bool eof{false};
   bool tail_flushed{false};
   bool failed{false};
-  std::unique_ptr<DistantMusicProcessor> distant_music;
+  std::unique_ptr<AudioEffectChain> effects;
 };
 
 AudioMixSession::AudioMixSession(AudioPlaybackSourceFactory source_factory, AudioMixFormat format)
@@ -248,11 +248,9 @@ void AudioMixSession::configure(ProjectSnapshot snapshot) {
         const bool effect_changed = source->contributor.distant_music != replacement->distant_music;
         source->contributor = *replacement;
         if (effect_changed) {
-          source->distant_music.reset();
-          if (replacement->distant_music.enabled) {
-            source->distant_music = std::make_unique<DistantMusicProcessor>(
-                replacement->distant_music, format_.sample_rate, format_.channel_count);
-          }
+          source->effects = std::make_unique<AudioEffectChain>(
+              AudioEffectChain::from_distant_music(replacement->distant_music,
+                                                   format_.sample_rate, format_.channel_count));
         }
       }
     }
@@ -361,8 +359,9 @@ AudioMixSession::SourceState* AudioMixSession::open_source(
                                              std::move(converter), timeline_position, target,
                                              origin);
   if (contributor.distant_music.enabled) {
-    state->distant_music = std::make_unique<DistantMusicProcessor>(
-        contributor.distant_music, format_.sample_rate, format_.channel_count);
+    state->effects = std::make_unique<AudioEffectChain>(
+        AudioEffectChain::from_distant_music(contributor.distant_music, format_.sample_rate,
+                                             format_.channel_count));
   }
   auto* result = state.get();
   sources_.push_back(std::move(state));
@@ -650,8 +649,8 @@ AudioMixRenderResult AudioMixSession::render(domain::MediaTime timeline_position
                                              contributor.timeline_range.duration(), format_.sample_rate);
       const auto first_clip_frame = static_cast<std::int64_t>(
           frames_ceil(source_timeline - contributor.timeline_range.start(), format_.sample_rate));
-      if (state->distant_music) {
-        state->distant_music->process_interleaved(
+      if (state->effects) {
+        state->effects->process_interleaved(
             state->pcm.data() + state->pcm_offset, available, first_clip_frame);
       }
       for (std::size_t frame = 0; frame < available; ++frame) {

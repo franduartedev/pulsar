@@ -1,4 +1,5 @@
 #include <pulsar/application/audio/distant_music_processor.hpp>
+#include <pulsar/application/audio/audio_effect_chain.hpp>
 
 #include <cassert>
 #include <stdexcept>
@@ -34,6 +35,17 @@ int main() {
   float raw[4] = {1.0F, 1.0F, 1.0F, 1.0F};
   processor.process_interleaved(raw, 2, 0);
   assert(raw[0] < 0.1F && raw[2] > raw[0]);
+
+  auto chain = application::AudioEffectChain::from_distant_music(settings, rate, 2);
+  assert(!chain.empty());
+  assert(chain.size() == 1);
+  chain.process_interleaved(raw, 2, 0);
+  chain.reset();
+  assert(!chain.empty());
+
+  settings.enabled = false;
+  auto empty_chain = application::AudioEffectChain::from_distant_music(settings, rate, 2);
+  assert(empty_chain.empty());
 
   settings.reverb_amount = 2.0;
   bool rejected = false;

@@ -1,7 +1,7 @@
 #include <pulsar/application/export/offline_audio_renderer.hpp>
 
 #include <pulsar/application/audio/clip_gain.hpp>
-#include <pulsar/application/audio/distant_music_processor.hpp>
+#include <pulsar/application/audio/audio_effect_chain.hpp>
 #include <pulsar/application/audio/output_stage.hpp>
 
 #include <algorithm>
@@ -76,7 +76,7 @@ struct OfflineAudioRenderer::ContributorState {
   // Interpolation taps are clamped to [first_valid_index, last_valid_index].
   std::int64_t first_valid_index{0};
   std::int64_t last_valid_index{-1};
-  std::unique_ptr<DistantMusicProcessor> distant_music;
+  std::unique_ptr<AudioEffectChain> effects;
 };
 
 OfflineAudioRenderer::OfflineAudioRenderer(const ExportPlan& plan,
@@ -129,10 +129,10 @@ OfflineAudioRenderer::ContributorState& OfflineAudioRenderer::state_for(
     const domain::FrameRate source_grid{state->source->sample_rate(), 1};
     state->fade = ClipFade::from_times(contributor.fade_in, contributor.fade_out,
                                        contributor.timeline_range.duration(), 48'000);
-  if (contributor.distant_music.enabled) {
-    state->distant_music = std::make_unique<DistantMusicProcessor>(
-        contributor.distant_music, 48'000, 2);
-  }
+    if (contributor.distant_music.enabled) {
+      state->effects = std::make_unique<AudioEffectChain>(
+          AudioEffectChain::from_distant_music(contributor.distant_music, 48'000, 2));
+    }
     state->first_clip_frame = domain::frame_at(contributor.timeline_range.start(),
                                                domain::FrameRate{48'000, 1}, domain::RoundingMode::Ceil).value();
     state->first_valid_index = domain::frame_at(contributor.source_range.start(), source_grid,
@@ -307,10 +307,8 @@ std::array<float, 2> OfflineAudioRenderer::contributor_sample(
           static_cast<long double>(first) * (1.0L - fraction) +
           static_cast<long double>(second) * fraction);
     }
-    if (state.distant_music) {
-      state.distant_music->process_interleaved(result.data(), 1,
-                                               output_frame - state.first_clip_frame);
-    }
+    if (state.effects) state.effects->process_interleaved(
+        result.data(), 1, output_frame - state.first_clip_frame);
     const float level = state.gain.linear *
         (state.fade.active() ? state.fade.gain_at(output_frame - state.first_clip_frame) : 1.0F);
     result[0] *= level;
