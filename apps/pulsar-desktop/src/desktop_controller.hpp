@@ -117,6 +117,8 @@ class DesktopController final : public QObject {
   Q_PROPERTY(bool selectedUnderwaterEnabled READ selectedUnderwaterEnabled NOTIFY timelineChanged)
   Q_PROPERTY(double selectedUnderwaterMix READ selectedUnderwaterMix NOTIFY timelineChanged)
   Q_PROPERTY(double selectedUnderwaterDepth READ selectedUnderwaterDepth NOTIFY timelineChanged)
+  Q_PROPERTY(int selectedUnderwaterDepthKeyframeCount READ selectedUnderwaterDepthKeyframeCount NOTIFY timelineChanged)
+  Q_PROPERTY(QVariantList selectedUnderwaterDepthKeyframes READ selectedUnderwaterDepthKeyframes NOTIFY timelineChanged)
   Q_PROPERTY(QVariantList selectedDistantMusicGainKeyframes READ selectedDistantMusicGainKeyframes NOTIFY timelineChanged)
   Q_PROPERTY(QVariantList cinematicRecipes READ cinematicRecipes CONSTANT)
   Q_PROPERTY(double selectedClipPosX READ selectedClipPosX NOTIFY timelineChanged)
@@ -229,6 +231,8 @@ public:
   [[nodiscard]] bool selectedUnderwaterEnabled() const;
   [[nodiscard]] double selectedUnderwaterMix() const;
   [[nodiscard]] double selectedUnderwaterDepth() const;
+  [[nodiscard]] int selectedUnderwaterDepthKeyframeCount() const;
+  [[nodiscard]] QVariantList selectedUnderwaterDepthKeyframes() const;
   [[nodiscard]] QVariantList selectedDistantMusicGainKeyframes() const;
   [[nodiscard]] QVariantList cinematicRecipes() const;
   [[nodiscard]] double selectedClipPosX() const;
@@ -318,6 +322,10 @@ public:
   Q_INVOKABLE void applySelectedTelephonePreset();
   Q_INVOKABLE void setSelectedUnderwater(double mix, double depth, bool enabled);
   Q_INVOKABLE void applySelectedUnderwaterPreset();
+  Q_INVOKABLE void setSelectedUnderwaterDepthKeyframes(const QVariantList& keyframes);
+  Q_INVOKABLE void setSelectedUnderwaterDepthKeyframe(int index, double time_seconds,
+                                                       double value, int interpolation);
+  Q_INVOKABLE void removeSelectedUnderwaterDepthKeyframe(int index);
   Q_INVOKABLE void applySelectedCinematicRecipe(const QString& recipe);
   Q_INVOKABLE void setSelectedDistantMusic(double gain_db, double duration, double start_cutoff,
                                             double end_cutoff, double reverb, int curve, bool enabled);

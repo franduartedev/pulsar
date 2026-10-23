@@ -180,6 +180,24 @@ void underwater_roundtrips_as_project_version_eleven() {
   assert(ProjectCodec::encode(restored.snapshot()) == bytes);
 }
 
+void underwater_keyframes_roundtrip_as_project_version_twelve() {
+  auto document = make_document();
+  CommandProcessor processor{document};
+  domain::UnderwaterSettings settings;
+  settings.enabled = true;
+  settings.mix = 0.7;
+  settings.depth = 0.5;
+  settings.depth_keyframes = {{0.0, 0.95, domain::KeyframeInterpolation::Hold},
+                              {2.0, 0.15, domain::KeyframeInterpolation::Smooth}};
+  processor.set_clip_underwater(domain::ClipId{1}, settings);
+  const auto bytes = ProjectCodec::encode(document.snapshot());
+  assert(bytes.find("PULSAR_PROJECT 12") == 0);
+  assert(bytes.find("CLIP_UNDERWATER 1") != std::string::npos);
+  const auto restored = ProjectDocument::restore(ProjectCodec::decode(bytes));
+  assert(restored.timeline().find_clip(domain::ClipId{1})->underwater() == settings);
+  assert(ProjectCodec::encode(restored.snapshot()) == bytes);
+}
+
 void relinking_asset_is_undoable_and_preserves_clip_identity() {
   auto document = make_document();
   CommandProcessor processor{document};
@@ -723,6 +741,7 @@ int main() {
   subtitles_roundtrip_and_undo_as_project_version_nine();
   telephone_roundtrips_as_project_version_ten();
   underwater_roundtrips_as_project_version_eleven();
+  underwater_keyframes_roundtrip_as_project_version_twelve();
   relinking_asset_is_undoable_and_preserves_clip_identity();
   canvas_preset_is_undoable_and_persisted();
   builtin_locator_roundtrip();

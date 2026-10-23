@@ -1640,6 +1640,24 @@ double DesktopController::selectedUnderwaterDepth() const {
       ? active_session_->document().timeline().find_clip(*active_session_->selected_clip()) : nullptr;
   return clip ? clip->underwater().depth : 0.68;
 }
+int DesktopController::selectedUnderwaterDepthKeyframeCount() const {
+  const auto* clip = active_session_ && active_session_->selected_clip()
+      ? active_session_->document().timeline().find_clip(*active_session_->selected_clip()) : nullptr;
+  return clip ? static_cast<int>(clip->underwater().depth_keyframes.size()) : 0;
+}
+QVariantList DesktopController::selectedUnderwaterDepthKeyframes() const {
+  QVariantList result;
+  const auto* clip = active_session_ && active_session_->selected_clip()
+      ? active_session_->document().timeline().find_clip(*active_session_->selected_clip()) : nullptr;
+  if (clip == nullptr) return result;
+  for (const auto& keyframe : clip->underwater().depth_keyframes) {
+    result.push_back(QVariantMap{{QStringLiteral("time"), keyframe.time_seconds},
+                                 {QStringLiteral("value"), keyframe.value},
+                                 {QStringLiteral("interpolation"),
+                                  static_cast<int>(keyframe.interpolation)}});
+  }
+  return result;
+}
 QVariantList DesktopController::selectedDistantMusicGainKeyframes() const {
   QVariantList result;
   const auto* clip = active_session_ && active_session_->selected_clip()
@@ -1686,6 +1704,67 @@ void DesktopController::applySelectedTelephonePreset() {
 
 void DesktopController::applySelectedUnderwaterPreset() {
   setSelectedUnderwater(0.78, 0.82, true);
+}
+
+void DesktopController::setSelectedUnderwaterDepthKeyframes(const QVariantList& keyframes) {
+  if (!active_session_ || !active_session_->selected_clip()) return;
+  if (keyframes.size() > 128) {
+    setError(QStringLiteral("Hay demasiados keyframes para este efecto."));
+    return;
+  }
+  const auto* selected = active_session_->document().timeline().find_clip(*active_session_->selected_clip());
+  if (selected == nullptr) return;
+  auto settings = selected->underwater();
+  settings.depth_keyframes.clear();
+  for (const auto& item : keyframes) {
+    const auto map = item.toMap();
+    bool time_ok = false;
+    bool value_ok = false;
+    const double time = map.value(QStringLiteral("time")).toDouble(&time_ok);
+    const double value = map.value(QStringLiteral("value")).toDouble(&value_ok);
+    const int interpolation = map.value(QStringLiteral("interpolation"), 1).toInt();
+    if (!time_ok || !value_ok || interpolation < 0 || interpolation > 2) {
+      setError(QStringLiteral("Keyframe Underwater inválido."));
+      return;
+    }
+    settings.depth_keyframes.push_back({time, value,
+        static_cast<pulsar::domain::KeyframeInterpolation>(interpolation)});
+  }
+  try {
+    active_session_->set_clip_underwater(*active_session_->selected_clip(), settings);
+    clearError();
+    publishTimeline();
+  } catch (const std::exception&) {
+    setError(QStringLiteral("Los keyframes Underwater deben estar ordenados y entre 0 y 100%."));
+  }
+}
+void DesktopController::setSelectedUnderwaterDepthKeyframe(int index, double time_seconds,
+                                                              double value, int interpolation) {
+  if (!active_session_ || !active_session_->selected_clip()) return;
+  const auto* selected = active_session_->document().timeline().find_clip(*active_session_->selected_clip());
+  if (selected == nullptr || index < 0 || static_cast<std::size_t>(index) >=
+      selected->underwater().depth_keyframes.size() || interpolation < 0 || interpolation > 2) return;
+  auto settings = selected->underwater();
+  settings.depth_keyframes[static_cast<std::size_t>(index)] = {
+      time_seconds, value, static_cast<pulsar::domain::KeyframeInterpolation>(interpolation)};
+  try {
+    active_session_->set_clip_underwater(*active_session_->selected_clip(), settings);
+    clearError();
+    publishTimeline();
+  } catch (const std::exception&) {
+    setError(QStringLiteral("El keyframe Underwater debe mantener el orden y los límites permitidos."));
+  }
+}
+void DesktopController::removeSelectedUnderwaterDepthKeyframe(int index) {
+  if (!active_session_ || !active_session_->selected_clip()) return;
+  const auto* selected = active_session_->document().timeline().find_clip(*active_session_->selected_clip());
+  if (selected == nullptr || index < 0 || static_cast<std::size_t>(index) >=
+      selected->underwater().depth_keyframes.size()) return;
+  auto settings = selected->underwater();
+  settings.depth_keyframes.erase(settings.depth_keyframes.begin() + index);
+  active_session_->set_clip_underwater(*active_session_->selected_clip(), settings);
+  clearError();
+  publishTimeline();
 }
 
 void DesktopController::setSelectedUnderwater(double mix, double depth, bool enabled) {

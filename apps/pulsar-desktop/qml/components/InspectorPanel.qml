@@ -659,6 +659,21 @@ Panel {
                     }
                     FieldRow { label: "Mezcla"; PSlider { width: 150; value: controller.selectedUnderwaterMix; onMoved: controller.setSelectedUnderwater(value, controller.selectedUnderwaterDepth, true) } Text { text: Math.round(controller.selectedUnderwaterMix * 100) + "%"; color: Theme.textMuted; font.pixelSize: Theme.fontSizeXS } }
                     FieldRow { label: "Profundidad"; PSlider { width: 150; value: controller.selectedUnderwaterDepth; onMoved: controller.setSelectedUnderwater(controller.selectedUnderwaterMix, value, true) } Text { text: Math.round(controller.selectedUnderwaterDepth * 100) + "%"; color: Theme.textMuted; font.pixelSize: Theme.fontSizeXS } }
+                    FieldRow { label: "Automatización"; Text { text: controller.selectedUnderwaterDepthKeyframeCount + " keyframes"; color: Theme.textSecondary; font.pixelSize: Theme.fontSizeS } }
+                    Row { width: parent.width; spacing: Theme.spaceS
+                        PButton { width: (parent.width - Theme.spaceS) / 2; height: Theme.controlHeightSmall; text: "Crear movimiento"; onClicked: controller.setSelectedUnderwaterDepthKeyframes([{time: 0, value: controller.selectedUnderwaterDepth, interpolation: 0}, {time: 2, value: 0.2, interpolation: 2}]) }
+                        PButton { width: (parent.width - Theme.spaceS) / 2; height: Theme.controlHeightSmall; text: "Limpiar"; onClicked: controller.setSelectedUnderwaterDepthKeyframes([]) }
+                    }
+                    Column { visible: controller.selectedUnderwaterDepthKeyframeCount > 0; width: parent.width; spacing: 4
+                        Repeater { model: controller.selectedUnderwaterDepthKeyframes
+                            delegate: Row { width: parent.width; spacing: 4
+                                Text { width: 16; text: "#" + (index + 1); color: Theme.textMuted; font.pixelSize: Theme.fontSizeXS; verticalAlignment: Text.AlignVCenter }
+                                TextInput { width: 58; text: Number(modelData.time).toFixed(2); color: Theme.textPrimary; font.family: Theme.mono; font.pixelSize: Theme.fontSizeXS; validator: DoubleValidator { bottom: 0; top: 60; decimals: 2 }; onEditingFinished: controller.setSelectedUnderwaterDepthKeyframe(index, Number(text), Number(modelData.value), Number(modelData.interpolation)) }
+                                TextInput { width: 58; text: Number(modelData.value * 100).toFixed(0); color: Theme.textPrimary; font.family: Theme.mono; font.pixelSize: Theme.fontSizeXS; validator: DoubleValidator { bottom: 0; top: 100; decimals: 0 }; onEditingFinished: controller.setSelectedUnderwaterDepthKeyframe(index, Number(modelData.time), Number(text) / 100, Number(modelData.interpolation)) }
+                                PButton { width: 24; height: Theme.controlHeightSmall; text: "×"; onClicked: controller.removeSelectedUnderwaterDepthKeyframe(index) }
+                            }
+                        }
+                    }
                 }
                 PButton { visible: inspector.clipSelected && controller.selectedClipHasAudio; width: parent.width; height: Theme.controlHeightSmall; text: "Restablecer efecto"; onClicked: controller.setSelectedDistantMusic(-30, 4, 900, 18000, 0.18, 1, false) }
                 Text { visible: inspector.clipSelected && !controller.selectedClipHasAudio; width: parent.width; wrapMode: Text.WordWrap; text: "Seleccioná un clip con audio para aplicar Distant Music."; color: Theme.textMuted; font.pixelSize: Theme.fontSizeS }

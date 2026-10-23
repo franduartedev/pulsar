@@ -1,4 +1,5 @@
 #include <pulsar/application/audio/underwater_processor.hpp>
+#include <pulsar/application/audio/scalar_keyframe_evaluator.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -22,6 +23,7 @@ UnderwaterProcessor::UnderwaterProcessor(domain::UnderwaterSettings settings, in
 
 void UnderwaterProcessor::reset() noexcept {
   low_state_[0] = low_state_[1] = 0.0F;
+  depth_keyframe_cursor_ = 0;
 }
 
 void UnderwaterProcessor::process(AudioBlock& block, std::int64_t first_frame) noexcept {
@@ -33,9 +35,16 @@ void UnderwaterProcessor::process_interleaved(float* samples, std::size_t frame_
   if (samples == nullptr || frame_count == 0 || sample_rate_ <= 0 ||
       (channel_count_ != 1 && channel_count_ != 2)) return;
   const float mix = static_cast<float>(settings_.mix);
-  const float depth = static_cast<float>(settings_.depth);
+  depth_keyframe_cursor_ = 0;
   for (std::size_t frame = 0; frame < frame_count; ++frame) {
     const auto absolute_frame = first_frame + static_cast<std::int64_t>(frame);
+    const float depth = settings_.depth_keyframes.empty()
+                            ? static_cast<float>(settings_.depth)
+                            : evaluate_scalar_keyframes(
+                                  settings_.depth_keyframes,
+                                  static_cast<float>(absolute_frame) /
+                                      static_cast<float>(sample_rate_),
+                                  depth_keyframe_cursor_);
     const float motion = 1.0F + 0.08F * std::sin(
         static_cast<float>(absolute_frame) * 0.00019F);
     const float cutoff = std::clamp((2'400.0F - depth * 1'950.0F) * motion,

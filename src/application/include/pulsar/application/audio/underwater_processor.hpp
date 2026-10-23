@@ -21,6 +21,7 @@ private:
   int sample_rate_;
   int channel_count_;
   float low_state_[2]{0.0F, 0.0F};
+  std::size_t depth_keyframe_cursor_{0};
 };
 
 } // namespace pulsar::application

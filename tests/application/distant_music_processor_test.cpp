@@ -105,6 +105,8 @@ int main() {
   underwater_settings.enabled = true;
   underwater_settings.mix = 0.8;
   underwater_settings.depth = 0.75;
+  underwater_settings.depth_keyframes = {{0.0, 0.9, domain::KeyframeInterpolation::Hold},
+                                         {1.0, 0.2, domain::KeyframeInterpolation::Linear}};
   application::UnderwaterProcessor underwater{underwater_settings, rate, 2};
   float underwater_samples[8] = {1.0F, -1.0F, 0.5F, -0.5F, 0.25F, -0.25F, 0.1F, -0.1F};
   underwater.process_interleaved(underwater_samples, 4, 0);

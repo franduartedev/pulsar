@@ -90,6 +90,12 @@ std::vector<Token> tokenize(std::string_view line, std::size_t line_number) {
   return tokens;
 }
 
+bool is_unsigned_token(const Token& token) noexcept {
+  if (token.quoted || token.text.empty()) return false;
+  return std::all_of(token.text.begin(), token.text.end(),
+                     [](const char value) { return value >= '0' && value <= '9'; });
+}
+
 std::int64_t signed_number(const Token& token, std::size_t line, std::string_view field) {
   if (token.quoted || token.text.empty() || token.text.front() == '+') {
     parse_fail(line, "invalid " + std::string{field});
@@ -207,6 +213,7 @@ std::string ProjectCodec::encode(const ProjectSnapshot& snapshot) {
   bool has_distant_music_keyframes = false;
   bool has_telephone = false;
   bool has_underwater = false;
+  bool has_underwater_keyframes = false;
   for (const auto& track : snapshot.timeline.tracks()) {
     if (track.audio_state() != domain::AudioTrackState{}) has_audio_track_state = true;
     for (const auto& clip : track.clips()) {
@@ -217,6 +224,9 @@ std::string ProjectCodec::encode(const ProjectSnapshot& snapshot) {
       }
       if (clip.telephone().enabled) has_telephone = true;
       if (clip.underwater().enabled) has_underwater = true;
+      if (clip.underwater().enabled && !clip.underwater().depth_keyframes.empty()) {
+        has_underwater_keyframes = true;
+      }
     }
   }
   const bool needs_v6 = snapshot.visual_track_ids.size() > 1 || has_visual_transforms ||
@@ -247,7 +257,7 @@ std::string ProjectCodec::encode(const ProjectSnapshot& snapshot) {
     }
   }
   // Version 4 adds clip fades; every file that does not need a newer feature keeps its old version.
-  output << (has_underwater ? "PULSAR_PROJECT 11\n" : has_telephone ? "PULSAR_PROJECT 10\n" : has_subtitles ? "PULSAR_PROJECT 9\n" : has_distant_music_keyframes ? "PULSAR_PROJECT 8\n" : has_distant_music ? "PULSAR_PROJECT 7\n" : needs_v6 ? "PULSAR_PROJECT 6\n" : needs_v5 ? "PULSAR_PROJECT 5\n" : needs_v4 ? "PULSAR_PROJECT 4\n" : has_titles ? "PULSAR_PROJECT 3\n" : "PULSAR_PROJECT 2\n");
+  output << (has_underwater_keyframes ? "PULSAR_PROJECT 12\n" : has_underwater ? "PULSAR_PROJECT 11\n" : has_telephone ? "PULSAR_PROJECT 10\n" : has_subtitles ? "PULSAR_PROJECT 9\n" : has_distant_music_keyframes ? "PULSAR_PROJECT 8\n" : has_distant_music ? "PULSAR_PROJECT 7\n" : needs_v6 ? "PULSAR_PROJECT 6\n" : needs_v5 ? "PULSAR_PROJECT 5\n" : needs_v4 ? "PULSAR_PROJECT 4\n" : has_titles ? "PULSAR_PROJECT 3\n" : "PULSAR_PROJECT 2\n");
   output << "TIMELINE " << snapshot.timeline.id().value() << "\n";
   const auto tracks = sorted_tracks(snapshot.timeline);
   for (const auto* track : tracks) {
@@ -376,6 +386,13 @@ std::string ProjectCodec::encode(const ProjectSnapshot& snapshot) {
       if (clip.underwater().enabled) {
         const auto& fx = clip.underwater();
         output << " CLIP_UNDERWATER 1 " << std::setprecision(17) << fx.mix << ' ' << fx.depth;
+        if (!fx.depth_keyframes.empty()) {
+          output << ' ' << fx.depth_keyframes.size();
+          for (const auto& keyframe : fx.depth_keyframes) {
+            output << ' ' << keyframe.time_seconds << ' ' << keyframe.value << ' '
+                   << static_cast<int>(keyframe.interpolation);
+          }
+        }
       }
       output << "\n";
     }
@@ -443,6 +460,7 @@ ProjectRestoreState ProjectCodec::decode(std::string_view bytes) {
   bool version9 = false;
   bool version10 = false;
   bool version11 = false;
+  bool version12 = false;
   bool allocator = false;
   bool ended = false;
   enum class Section { Header, Timeline, Tracks, VideoTrack, VisualTracks, Assets, Clips, Transitions, Titles, Subtitles, Allocator, End };
@@ -477,15 +495,16 @@ ProjectRestoreState ProjectCodec::decode(std::string_view bytes) {
 
     try {
       if (tokens[0].text == "PULSAR_PROJECT") {
-        if (header || tokens.size() != 2 || (tokens[1].text != "1" && tokens[1].text != "2" && tokens[1].text != "3" && tokens[1].text != "4" && tokens[1].text != "5" && tokens[1].text != "6" && tokens[1].text != "7" && tokens[1].text != "8" && tokens[1].text != "9" && tokens[1].text != "10" && tokens[1].text != "11")) {
+        if (header || tokens.size() != 2 || (tokens[1].text != "1" && tokens[1].text != "2" && tokens[1].text != "3" && tokens[1].text != "4" && tokens[1].text != "5" && tokens[1].text != "6" && tokens[1].text != "7" && tokens[1].text != "8" && tokens[1].text != "9" && tokens[1].text != "10" && tokens[1].text != "11" && tokens[1].text != "12")) {
           parse_fail(line_number, "invalid header/version");
         }
         header = true;
-        version7 = tokens[1].text == "7" || tokens[1].text == "8" || tokens[1].text == "9" || tokens[1].text == "10" || tokens[1].text == "11";
-        version8 = tokens[1].text == "8" || tokens[1].text == "9" || tokens[1].text == "10" || tokens[1].text == "11";
-        version9 = tokens[1].text == "9" || tokens[1].text == "10" || tokens[1].text == "11";
-        version10 = tokens[1].text == "10" || tokens[1].text == "11";
-        version11 = tokens[1].text == "11";
+        version7 = tokens[1].text == "7" || tokens[1].text == "8" || tokens[1].text == "9" || tokens[1].text == "10" || tokens[1].text == "11" || tokens[1].text == "12";
+        version8 = tokens[1].text == "8" || tokens[1].text == "9" || tokens[1].text == "10" || tokens[1].text == "11" || tokens[1].text == "12";
+        version9 = tokens[1].text == "9" || tokens[1].text == "10" || tokens[1].text == "11" || tokens[1].text == "12";
+        version10 = tokens[1].text == "10" || tokens[1].text == "11" || tokens[1].text == "12";
+        version11 = tokens[1].text == "11" || tokens[1].text == "12";
+        version12 = tokens[1].text == "12";
         version6 = version7 || tokens[1].text == "6";
         section = Section::Timeline;
       } else if (!header) {
@@ -709,7 +728,7 @@ ProjectRestoreState ProjectCodec::decode(std::string_view bytes) {
             const auto curve = unsigned_number(tokens[i++], line_number, "Distant Music curve");
             if (curve > 2) parse_fail(line_number, "invalid Distant Music curve");
             distant_music.curve = static_cast<domain::DistantMusicCurve>(curve);
-            if (version8 && i < tokens.size()) {
+            if (version8 && i < tokens.size() && is_unsigned_token(tokens[i])) {
               const auto count = unsigned_number(tokens[i++], line_number,
                                                  "Distant Music keyframe count");
               if (count > 128 || i + count * 3 > tokens.size()) {
@@ -750,6 +769,28 @@ ProjectRestoreState ProjectCodec::decode(std::string_view bytes) {
             underwater.enabled = enabled != 0;
             underwater.mix = double_number(tokens[i++], line_number, "Underwater mix");
             underwater.depth = double_number(tokens[i++], line_number, "Underwater depth");
+            if (version12 && i < tokens.size() && is_unsigned_token(tokens[i])) {
+              const auto count = unsigned_number(tokens[i++], line_number,
+                                                 "Underwater depth keyframe count");
+              if (count > 128 || i + count * 3 > tokens.size()) {
+                parse_fail(line_number, "invalid Underwater depth keyframes");
+              }
+              underwater.depth_keyframes.reserve(static_cast<std::size_t>(count));
+              for (std::uint64_t keyframe = 0; keyframe < count; ++keyframe) {
+                domain::ScalarKeyframe value;
+                value.time_seconds = double_number(tokens[i++], line_number,
+                                                   "Underwater depth keyframe time");
+                value.value = double_number(tokens[i++], line_number,
+                                            "Underwater depth keyframe value");
+                const auto interpolation = unsigned_number(
+                    tokens[i++], line_number, "Underwater depth keyframe interpolation");
+                if (interpolation > 2) {
+                  parse_fail(line_number, "invalid Underwater depth keyframe interpolation");
+                }
+                value.interpolation = static_cast<domain::KeyframeInterpolation>(interpolation);
+                underwater.depth_keyframes.push_back(value);
+              }
+            }
             try { underwater.validate(); } catch (const std::exception& error) { parse_fail(line_number, error.what()); }
           } else {
             parse_fail(line_number, "invalid or duplicate CLIP properties");
