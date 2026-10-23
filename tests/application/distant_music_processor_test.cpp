@@ -85,6 +85,19 @@ int main() {
   telephone.process_interleaved(telephone_samples, 4, 0);
   for (const float sample : telephone_samples) assert(std::isfinite(sample));
   telephone.reset();
+  telephone_settings.mix_keyframes = {
+      {0.0, 0.0, domain::KeyframeInterpolation::Hold},
+      {1.0, 1.0, domain::KeyframeInterpolation::Hold},
+  };
+  application::TelephoneProcessor automated_telephone{telephone_settings, rate, 1};
+  float dry_sample[1] = {1.0F};
+  automated_telephone.process_interleaved(dry_sample, 1, 0);
+  assert(dry_sample[0] == 1.0F);
+  automated_telephone.reset();
+  float wet_sample[1] = {1.0F};
+  automated_telephone.process_interleaved(wet_sample, 1, rate);
+  assert(std::abs(wet_sample[0] - 1.0F) > 0.01F);
+  telephone_settings.mix_keyframes.clear();
   auto telephone_chain = application::AudioEffectChain::from_telephone(telephone_settings, rate, 2);
   assert(telephone_chain.size() == 1);
   settings.enabled = true;
