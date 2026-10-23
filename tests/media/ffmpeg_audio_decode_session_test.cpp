@@ -156,7 +156,8 @@ void planar_normalization() {
   // Independent raw-FFmpeg observation (test only): the fixture's native
   // decoded format is planar float, so conversion is actually required.
   AVFormatContext* raw_context = nullptr;
-  assert(avformat_open_input(&raw_context, fixture_path().string().c_str(), nullptr, nullptr) == 0);
+  const auto path_text = fixture_path().generic_string();
+  assert(avformat_open_input(&raw_context, path_text.c_str(), nullptr, nullptr) == 0);
   assert(avformat_find_stream_info(raw_context, nullptr) >= 0);
   AVStream* stream = raw_context->streams[1];
   const AVCodec* decoder = avcodec_find_decoder(stream->codecpar->codec_id);

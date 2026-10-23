@@ -75,7 +75,8 @@ struct MuxEvidence {
 
 MuxEvidence inspect_mux(const std::filesystem::path& path) {
   AVFormatContext* format = nullptr;
-  assert(avformat_open_input(&format, path.string().c_str(), nullptr, nullptr) == 0);
+  const auto path_text = path.generic_string();
+  assert(avformat_open_input(&format, path_text.c_str(), nullptr, nullptr) == 0);
   assert(avformat_find_stream_info(format, nullptr) >= 0);
   int video_index = -1;
   int audio_index = -1;

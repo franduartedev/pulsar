@@ -20,7 +20,7 @@ using application::MediaProbeError;
 using application::MediaProbeErrorCode;
 
 [[nodiscard]] bool is_explicit_protocol_like_input(const std::filesystem::path& path) {
-  const std::string text = path.string();
+  const std::string text = path.generic_string();
   return text.find("://") != std::string::npos || text.rfind("file:", 0) == 0;
 }
 
@@ -134,7 +134,7 @@ std::string codec_name(const AVCodecParameters& codec_parameters) {
 
 FormatContextPtr open_input_with_stream_info(const std::filesystem::path& path) {
   AVFormatContext* raw_context = nullptr;
-  const std::string path_text = path.string();
+  const std::string path_text = path.generic_string();
   const int open_result = avformat_open_input(&raw_context, path_text.c_str(), nullptr, nullptr);
   if (open_result < 0) {
     throw MediaProbeError{MediaProbeErrorCode::UnsupportedMedia,

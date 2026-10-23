@@ -222,7 +222,7 @@ void write_non_zero_start_h264_fixture(const std::filesystem::path& path) {
 
 NonZeroStartFixtureInfo inspect_non_zero_start_fixture(const std::filesystem::path& path) {
   AVFormatContext* raw_context = nullptr;
-  const std::string path_text = path.string();
+  const std::string path_text = path.generic_string();
   if (avformat_open_input(&raw_context, path_text.c_str(), nullptr, nullptr) < 0) {
     throw std::runtime_error{"could not open generated non-zero start-time fixture"};
   }

@@ -5,12 +5,21 @@
 
 namespace pulsar::test_support {
 
+[[nodiscard]] inline std::string utf8_path(const std::filesystem::path& path) {
+#if defined(_WIN32)
+  const auto value = path.generic_u8string();
+  return {reinterpret_cast<const char*>(value.data()), value.size()};
+#else
+  return path.generic_string();
+#endif
+}
+
 // Quotes a path for the shell that std::system() uses on this platform:
 // POSIX single quotes, or cmd.exe double quotes on Windows.
 [[nodiscard]] inline std::string shell_quote(const std::filesystem::path& path) {
 #if defined(_WIN32)
   std::string quoted{"\""};
-  for (const char character : path.string()) {
+  for (const char character : utf8_path(path)) {
     if (character == '"') {
       quoted += "\\\"";
     } else {
@@ -21,7 +30,7 @@ namespace pulsar::test_support {
   return quoted;
 #else
   std::string quoted{"'"};
-  for (const char character : path.string()) {
+  for (const char character : utf8_path(path)) {
     if (character == '\'') {
       quoted += "'\\''";
     } else {

@@ -4,6 +4,7 @@
 #include <pulsar/application/project/project_codec.hpp>
 #include <pulsar/project_file/runtime_resources.hpp>
 
+#include <algorithm>
 #include <atomic>
 #include <cerrno>
 #include <chrono>
@@ -161,26 +162,34 @@ application::ProjectSaveResult FileProjectRepository::save(
   bool created = false;
   for (int attempt = 0; attempt < 32 && !created; ++attempt) {
     temporary = temp_path_for(destination, attempt);
-    std::error_code error;
-    if (std::filesystem::exists(temporary, error)) continue;
-    std::ofstream output{temporary, std::ios::binary | std::ios::trunc};
-    if (!output) continue;
-    output.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
-    output.flush();
-    if (!output) {
-      std::filesystem::remove(temporary, error);
+    const HANDLE handle = CreateFileW(temporary.c_str(), GENERIC_WRITE, FILE_SHARE_READ,
+                                      nullptr, CREATE_NEW,
+                                      FILE_ATTRIBUTE_NORMAL | FILE_FLAG_WRITE_THROUGH, nullptr);
+    if (handle == INVALID_HANDLE_VALUE) {
+      const auto error = GetLastError();
+      if (error == ERROR_FILE_EXISTS || error == ERROR_ALREADY_EXISTS) continue;
+      throw application::ProjectRepositoryError{"cannot create project temporary file"};
+    }
+
+    bool ok = true;
+    std::size_t written = 0;
+    while (written < bytes.size()) {
+      const auto remaining = bytes.size() - written;
+      const auto chunk = static_cast<DWORD>(std::min<std::size_t>(remaining, 1U << 20));
+      DWORD count = 0;
+      if (!WriteFile(handle, bytes.data() + written, chunk, &count, nullptr) || count == 0) {
+        ok = false;
+        break;
+      }
+      written += count;
+    }
+    if (ok && !FlushFileBuffers(handle)) ok = false;
+    if (!CloseHandle(handle)) ok = false;
+    if (!ok) {
+      std::error_code error;
+      (void)std::filesystem::remove(temporary, error);
       throw application::ProjectRepositoryError{"cannot write project temporary file"};
     }
-    output.close();
-    const HANDLE handle = CreateFileW(temporary.c_str(), GENERIC_READ | GENERIC_WRITE,
-                                      FILE_SHARE_READ, nullptr, OPEN_EXISTING,
-                                      FILE_ATTRIBUTE_NORMAL, nullptr);
-    if (handle == INVALID_HANDLE_VALUE || !FlushFileBuffers(handle)) {
-      if (handle != INVALID_HANDLE_VALUE) CloseHandle(handle);
-      std::filesystem::remove(temporary, error);
-      throw application::ProjectRepositoryError{"cannot flush project temporary file"};
-    }
-    CloseHandle(handle);
     created = true;
   }
   if (!created) {
