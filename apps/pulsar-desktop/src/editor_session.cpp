@@ -629,6 +629,15 @@ void EditorSession::set_clip_distant_music(domain::ClipId clip, domain::DistantM
   synchronize_document_state();
 }
 
+void EditorSession::relink_asset(domain::MediaId media, const std::filesystem::path& source_locator,
+                                 const application::MediaProbe& probe) {
+  if (!document_.find_asset(media).has_value()) {
+    throw std::invalid_argument{"unknown media asset"};
+  }
+  processor_.relink_asset(media, source_locator, probe);
+  synchronize_document_state();
+}
+
 void EditorSession::set_clip_visual_transform(domain::ClipId clip, domain::VisualTransform transform) {
   if (document_.timeline().find_clip(clip) == nullptr) {
     throw std::invalid_argument{"unknown clip"};

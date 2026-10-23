@@ -244,6 +244,15 @@ domain::MediaId CommandProcessor::import_asset(const std::filesystem::path& sour
   return id;
 }
 
+void CommandProcessor::relink_asset(domain::MediaId media_id,
+                                    const std::filesystem::path& source_locator,
+                                    const MediaProbe& probe) {
+  if (!document_.find_asset(media_id).has_value()) {
+    throw std::invalid_argument{"media asset does not exist in document"};
+  }
+  execute(ReplaceAssetCommand{document_.build_asset(source_locator, probe, media_id)});
+}
+
 bool CommandProcessor::can_undo() const noexcept { return !undo_stack_.empty(); }
 
 bool CommandProcessor::can_redo() const noexcept { return !redo_stack_.empty(); }
@@ -486,6 +495,8 @@ void CommandProcessor::apply(ProjectDocument& document, const Command& command, 
           }
         } else if constexpr (std::is_same_v<CommandType, RemoveAssetCommand>) {
           document.remove_asset_value(concrete_command.media_id);
+        } else if constexpr (std::is_same_v<CommandType, ReplaceAssetCommand>) {
+          document.replace_asset_value(concrete_command.asset);
         } else if constexpr (std::is_same_v<CommandType, AddTitleCommand>) {
           if (mode == ApplyMode::NewEdit) {
             if (concrete_command.title.id() != document.allocator_.next_title()) {
@@ -580,6 +591,12 @@ Command CommandProcessor::build_inverse(const ProjectDocument& document, const C
           return AddTransitionCommand{concrete_command.transition};
         } else if constexpr (std::is_same_v<CommandType, ImportAssetCommand>) {
           return RemoveAssetCommand{concrete_command.asset.id()};
+        } else if constexpr (std::is_same_v<CommandType, ReplaceAssetCommand>) {
+          const auto existing = document.find_asset(concrete_command.asset.id());
+          if (!existing.has_value()) {
+            throw std::invalid_argument{"media asset does not exist in document"};
+          }
+          return ReplaceAssetCommand{*existing};
         } else {
           throw std::invalid_argument{"inverse-only command cannot start a new history edit"};
         }

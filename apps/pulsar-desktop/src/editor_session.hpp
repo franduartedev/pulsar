@@ -253,6 +253,8 @@ public:
   // Linear audio fades of a clip with sound (zero = none). One undo step.
   void set_clip_fades(domain::ClipId clip, domain::MediaTime fade_in, domain::MediaTime fade_out);
   void set_clip_distant_music(domain::ClipId clip, domain::DistantMusicSettings settings);
+  void relink_asset(domain::MediaId media, const std::filesystem::path& source_locator,
+                    const application::MediaProbe& probe);
   // Visual transform of a clip (position/scale/rotation/opacity). One undo step.
   void set_clip_visual_transform(domain::ClipId clip, domain::VisualTransform transform);
   void reset_clip_visual_transform(domain::ClipId clip);

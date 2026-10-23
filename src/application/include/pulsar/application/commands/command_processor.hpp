@@ -67,6 +67,8 @@ public:
                                            domain::MediaTime split_timeline_position);
   [[nodiscard]] domain::MediaId import_asset(const std::filesystem::path& source_locator,
                                               const MediaProbe& probe);
+  void relink_asset(domain::MediaId media_id, const std::filesystem::path& source_locator,
+                    const MediaProbe& probe);
 
   [[nodiscard]] bool can_undo() const noexcept;
   [[nodiscard]] bool can_redo() const noexcept;

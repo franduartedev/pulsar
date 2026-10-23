@@ -119,6 +119,22 @@ void distant_music_gain_keyframes_roundtrip_as_project_version_eight() {
   assert(ProjectCodec::encode(restored.snapshot()) == bytes);
 }
 
+void relinking_asset_is_undoable_and_preserves_clip_identity() {
+  auto document = make_document();
+  CommandProcessor processor{document};
+  processor.relink_asset(domain::MediaId{1}, "relinked/clip.mp4", FakeProbe{});
+  const auto replacement = document.find_asset(domain::MediaId{1});
+  assert(replacement.has_value());
+  assert(replacement->source_locator() == std::filesystem::path{"relinked/clip.mp4"});
+  assert(document.timeline().find_clip(domain::ClipId{1}) != nullptr);
+  assert(processor.undo());
+  assert(document.find_asset(domain::MediaId{1})->source_locator() ==
+         std::filesystem::path{"media dir/clip \"one\"\n.mp4"});
+  assert(processor.redo());
+  assert(document.find_asset(domain::MediaId{1})->source_locator() ==
+         std::filesystem::path{"relinked/clip.mp4"});
+}
+
 void visual_stack_versions_and_validation() {
   using domain::TrackId;
   using domain::TrackKind;
@@ -629,6 +645,7 @@ int main() {
   codec_roundtrip_and_canonical_output();
   distant_music_roundtrips_as_project_version_seven();
   distant_music_gain_keyframes_roundtrip_as_project_version_eight();
+  relinking_asset_is_undoable_and_preserves_clip_identity();
   builtin_locator_roundtrip();
   golden_fixture_decodes();
   strict_decode_rejects_malformed_input();

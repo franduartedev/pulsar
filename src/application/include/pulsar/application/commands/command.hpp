@@ -114,6 +114,10 @@ struct RemoveAssetCommand {
   domain::MediaId media_id;
 };
 
+struct ReplaceAssetCommand {
+  MediaAsset asset;
+};
+
 struct AddTitleCommand {
   domain::Title title;
 };
@@ -137,7 +141,8 @@ using Command = std::variant<AddTrackCommand, RemoveTrackCommand, RestoreEmptyVi
                              SetClipAudioGainCommand, SetClipMutedCommand, SetClipFadesCommand,
                              SetClipDistantMusicCommand,
                              SetClipVisualTransformCommand, RestoreClipCommand,
-                             RestoreSplitCommand, ImportAssetCommand, RemoveAssetCommand,
+                              RestoreSplitCommand, ImportAssetCommand, RemoveAssetCommand,
+                              ReplaceAssetCommand,
                               AddTitleCommand, RemoveTitleCommand, ReplaceTitleCommand,
                               AddTransitionCommand, RemoveTransitionCommand>;
 

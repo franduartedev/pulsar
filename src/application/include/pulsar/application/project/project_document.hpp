@@ -86,6 +86,7 @@ private:
   [[nodiscard]] MediaAsset build_asset(const std::filesystem::path& source_locator,
                                        const MediaProbe& probe, domain::MediaId id) const;
   void add_asset_value(const MediaAsset& asset);
+  void replace_asset_value(const MediaAsset& asset);
   void remove_asset_value(domain::MediaId id);
   void add_title_value(const domain::Title& title);
   void remove_title_value(domain::TitleId id);

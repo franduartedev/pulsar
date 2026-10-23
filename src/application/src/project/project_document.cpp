@@ -357,6 +357,18 @@ void ProjectDocument::add_asset_value(const MediaAsset& asset) {
   ++asset_revision_;
 }
 
+void ProjectDocument::replace_asset_value(const MediaAsset& asset) {
+  const auto found = std::find_if(assets_.begin(), assets_.end(),
+                                  [id = asset.id()](const MediaAsset& item) {
+                                    return item.id() == id;
+                                  });
+  if (found == assets_.end()) {
+    throw std::invalid_argument{"media asset does not exist in document"};
+  }
+  *found = asset;
+  ++asset_revision_;
+}
+
 void ProjectDocument::remove_asset_value(domain::MediaId id) {
   for (const auto& track : timeline_.tracks()) {
     for (const auto& clip : track.clips()) {
