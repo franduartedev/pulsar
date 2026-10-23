@@ -1545,6 +1545,19 @@ int DesktopController::selectedDistantMusicKeyframeCount() const {
       ? active_session_->document().timeline().find_clip(*active_session_->selected_clip()) : nullptr;
   return clip ? static_cast<int>(clip->distant_music().gain_keyframes.size()) : 0;
 }
+QVariantList DesktopController::selectedDistantMusicGainKeyframes() const {
+  QVariantList result;
+  const auto* clip = active_session_ && active_session_->selected_clip()
+      ? active_session_->document().timeline().find_clip(*active_session_->selected_clip()) : nullptr;
+  if (clip == nullptr) return result;
+  for (const auto& keyframe : clip->distant_music().gain_keyframes) {
+    result.push_back(QVariantMap{{QStringLiteral("time"), keyframe.time_seconds},
+                                 {QStringLiteral("value"), keyframe.value},
+                                 {QStringLiteral("interpolation"),
+                                  static_cast<int>(keyframe.interpolation)}});
+  }
+  return result;
+}
 void DesktopController::setSelectedClipFades(double fade_in_seconds, double fade_out_seconds) {
   if (!active_session_ || !active_session_->selected_clip() || !std::isfinite(fade_in_seconds) || !std::isfinite(fade_out_seconds)) return;
   try {

@@ -106,6 +106,7 @@ class DesktopController final : public QObject {
   Q_PROPERTY(double selectedDistantMusicReverb READ selectedDistantMusicReverb NOTIFY timelineChanged)
   Q_PROPERTY(int selectedDistantMusicCurve READ selectedDistantMusicCurve NOTIFY timelineChanged)
   Q_PROPERTY(int selectedDistantMusicKeyframeCount READ selectedDistantMusicKeyframeCount NOTIFY timelineChanged)
+  Q_PROPERTY(QVariantList selectedDistantMusicGainKeyframes READ selectedDistantMusicGainKeyframes NOTIFY timelineChanged)
   Q_PROPERTY(double selectedClipPosX READ selectedClipPosX NOTIFY timelineChanged)
   Q_PROPERTY(double selectedClipPosY READ selectedClipPosY NOTIFY timelineChanged)
   Q_PROPERTY(double selectedClipScale READ selectedClipScale NOTIFY timelineChanged)
@@ -204,6 +205,7 @@ public:
   [[nodiscard]] double selectedDistantMusicReverb() const;
   [[nodiscard]] int selectedDistantMusicCurve() const;
   [[nodiscard]] int selectedDistantMusicKeyframeCount() const;
+  [[nodiscard]] QVariantList selectedDistantMusicGainKeyframes() const;
   [[nodiscard]] double selectedClipPosX() const;
   [[nodiscard]] double selectedClipPosY() const;
   [[nodiscard]] double selectedClipScale() const;
