@@ -1632,6 +1632,34 @@ void DesktopController::setSelectedDistantMusicGainKeyframes(const QVariantList&
     setError(QStringLiteral("Los keyframes deben estar ordenados y dentro del rango permitido."));
   }
 }
+void DesktopController::setSelectedDistantMusicGainKeyframe(int index, double time_seconds,
+                                                              double value, int interpolation) {
+  if (!active_session_ || !active_session_->selected_clip()) return;
+  const auto* selected = active_session_->document().timeline().find_clip(*active_session_->selected_clip());
+  if (selected == nullptr || index < 0 || static_cast<std::size_t>(index) >=
+      selected->distant_music().gain_keyframes.size() || interpolation < 0 || interpolation > 2) return;
+  auto settings = selected->distant_music();
+  settings.gain_keyframes[static_cast<std::size_t>(index)] = {
+      time_seconds, value, static_cast<pulsar::domain::KeyframeInterpolation>(interpolation)};
+  try {
+    active_session_->set_clip_distant_music(*active_session_->selected_clip(), settings);
+    clearError();
+    publishTimeline();
+  } catch (const std::exception&) {
+    setError(QStringLiteral("El keyframe debe mantener el orden y los límites permitidos."));
+  }
+}
+void DesktopController::removeSelectedDistantMusicGainKeyframe(int index) {
+  if (!active_session_ || !active_session_->selected_clip()) return;
+  const auto* selected = active_session_->document().timeline().find_clip(*active_session_->selected_clip());
+  if (selected == nullptr || index < 0 || static_cast<std::size_t>(index) >=
+      selected->distant_music().gain_keyframes.size()) return;
+  auto settings = selected->distant_music();
+  settings.gain_keyframes.erase(settings.gain_keyframes.begin() + index);
+  active_session_->set_clip_distant_music(*active_session_->selected_clip(), settings);
+  clearError();
+  publishTimeline();
+}
 double DesktopController::selectedClipPosX() const {
   if (!active_session_ || !active_session_->selected_clip()) return 0.0;
   const auto* clip = active_session_->document().timeline().find_clip(*active_session_->selected_clip());

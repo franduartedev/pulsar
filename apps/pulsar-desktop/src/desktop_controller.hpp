@@ -292,6 +292,9 @@ public:
                                             double end_cutoff, double reverb, int curve, bool enabled);
   // Each item is {time: seconds, value: dB, interpolation: 0 hold, 1 linear, 2 smooth}.
   Q_INVOKABLE void setSelectedDistantMusicGainKeyframes(const QVariantList& keyframes);
+  Q_INVOKABLE void setSelectedDistantMusicGainKeyframe(int index, double time_seconds,
+                                                       double value, int interpolation);
+  Q_INVOKABLE void removeSelectedDistantMusicGainKeyframe(int index);
   Q_INVOKABLE void setSelectedClipTransform(double pos_x, double pos_y, double scale,
                                              double rotation_degrees, double opacity);
   Q_INVOKABLE void resetSelectedClipTransform();
