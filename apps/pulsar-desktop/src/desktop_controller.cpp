@@ -39,12 +39,14 @@
 #include <QVariantMap>
 
 #include <algorithm>
+#include <fstream>
 #include <chrono>
 #include <cmath>
 #include <cstring>
 #include <exception>
 #include <iomanip>
 #include <iostream>
+#include <iterator>
 #include <limits>
 #include <sstream>
 #include <stdexcept>
@@ -2215,6 +2217,48 @@ bool DesktopController::saveProject(const QString& path) {
   }
 }
 bool DesktopController::openProject(const QString& path) { return openProjectImpl(path, std::nullopt); }
+
+bool DesktopController::importSubtitles(const QString& path) {
+  if (!active_session_ || path.trimmed().isEmpty()) return false;
+  std::ifstream input{std::filesystem::path{path.toStdString()}, std::ios::binary};
+  if (!input) {
+    setError(QStringLiteral("No se pudo abrir el archivo SRT."));
+    return false;
+  }
+  const std::string bytes{std::istreambuf_iterator<char>{input}, {}};
+  try {
+    active_session_->replace_subtitles(pulsar::application::parse_srt(bytes));
+    clearError();
+    setStatus(QStringLiteral("Subtítulos importados"));
+    emit timelineChanged();
+    emit projectDirtyChanged();
+    return true;
+  } catch (const std::exception& error) {
+    logCause("subtitle import failed", error);
+    setError(QStringLiteral("SRT inválido: %1").arg(QString::fromUtf8(error.what())));
+    return false;
+  }
+}
+
+bool DesktopController::exportSubtitles(const QString& path) {
+  if (!active_session_ || path.trimmed().isEmpty()) return false;
+  std::ofstream output{std::filesystem::path{path.toStdString()}, std::ios::binary | std::ios::trunc};
+  if (!output) {
+    setError(QStringLiteral("No se pudo crear el archivo SRT."));
+    return false;
+  }
+  try {
+    output << pulsar::application::encode_srt(active_session_->subtitles());
+    if (!output) throw std::runtime_error{"failed to write subtitle file"};
+    clearError();
+    setStatus(QStringLiteral("Subtítulos exportados"));
+    return true;
+  } catch (const std::exception& error) {
+    logCause("subtitle export failed", error);
+    setError(QStringLiteral("No se pudieron exportar los subtítulos."));
+    return false;
+  }
+}
 
 bool DesktopController::openProjectImpl(const QString& path, std::optional<pulsar::application::ProjectRestoreState> restored) {
   const bool recovered = restored.has_value();

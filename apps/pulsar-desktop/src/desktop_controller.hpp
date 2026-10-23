@@ -364,6 +364,8 @@ public:
   Q_INVOKABLE bool saveProject(const QString& path);
   // Returns false (and keeps the current project untouched) if the file cannot be opened.
   Q_INVOKABLE bool openProject(const QString& path);
+  Q_INVOKABLE bool importSubtitles(const QString& path);
+  Q_INVOKABLE bool exportSubtitles(const QString& path);
   // Library actions on imported media. Video assets go to VIDEO 1 as one
   // undoable edit; overlap is refused without changing the project.
   Q_INVOKABLE void selectAsset(const QString& media_id);

@@ -725,6 +725,11 @@ void EditorSession::set_track_audio_state(domain::TrackId track, domain::AudioTr
   synchronize_document_state();
 }
 
+void EditorSession::replace_subtitles(std::vector<application::SubtitleCue> subtitles) {
+  processor_.replace_subtitles(std::move(subtitles));
+  synchronize_document_state();
+}
+
 void EditorSession::duplicate_selected() {
   if (selected_title_.has_value()) {
     const auto* title = document_.find_title(*selected_title_);
