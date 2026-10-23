@@ -94,6 +94,11 @@ struct SetClipDistantMusicCommand {
   domain::DistantMusicSettings settings;
 };
 
+struct SetClipTelephoneCommand {
+  domain::ClipId clip_id;
+  domain::TelephoneSettings settings;
+};
+
 struct SetClipVisualTransformCommand {
   domain::ClipId clip_id;
   domain::VisualTransform transform;
@@ -150,6 +155,7 @@ using Command = std::variant<AddTrackCommand, RemoveTrackCommand, RestoreEmptyVi
                              TrimClipStartCommand, TrimClipEndCommand, SplitClipCommand,
                              SetClipAudioGainCommand, SetClipMutedCommand, SetClipFadesCommand,
                              SetClipDistantMusicCommand,
+                             SetClipTelephoneCommand,
                              SetClipVisualTransformCommand, RestoreClipCommand,
                               RestoreSplitCommand, ImportAssetCommand, RemoveAssetCommand,
                               ReplaceAssetCommand,

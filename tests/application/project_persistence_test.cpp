@@ -140,6 +140,26 @@ void subtitles_roundtrip_and_undo_as_project_version_nine() {
   assert(ProjectCodec::encode(restored.snapshot()) == bytes);
 }
 
+void telephone_roundtrips_as_project_version_ten() {
+  auto document = make_document();
+  CommandProcessor processor{document};
+  domain::TelephoneSettings settings;
+  settings.enabled = true;
+  settings.mix = 0.8;
+  settings.drive = 0.25;
+  processor.set_clip_telephone(domain::ClipId{1}, settings);
+  assert(document.timeline().find_clip(domain::ClipId{1})->telephone() == settings);
+  assert(processor.undo());
+  assert(!document.timeline().find_clip(domain::ClipId{1})->telephone().enabled);
+  assert(processor.redo());
+  const auto bytes = ProjectCodec::encode(document.snapshot());
+  assert(bytes.find("PULSAR_PROJECT 10") == 0);
+  assert(bytes.find("CLIP_TELEPHONE 1") != std::string::npos);
+  const auto restored = ProjectDocument::restore(ProjectCodec::decode(bytes));
+  assert(restored.timeline().find_clip(domain::ClipId{1})->telephone() == settings);
+  assert(ProjectCodec::encode(restored.snapshot()) == bytes);
+}
+
 void relinking_asset_is_undoable_and_preserves_clip_identity() {
   auto document = make_document();
   CommandProcessor processor{document};
@@ -681,6 +701,7 @@ int main() {
   distant_music_roundtrips_as_project_version_seven();
   distant_music_gain_keyframes_roundtrip_as_project_version_eight();
   subtitles_roundtrip_and_undo_as_project_version_nine();
+  telephone_roundtrips_as_project_version_ten();
   relinking_asset_is_undoable_and_preserves_clip_identity();
   canvas_preset_is_undoable_and_persisted();
   builtin_locator_roundtrip();

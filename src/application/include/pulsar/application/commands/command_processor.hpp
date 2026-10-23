@@ -54,6 +54,7 @@ public:
   // Linear audio fades at the clip start / end (zero = none); one undo step. No-op when unchanged.
   void set_clip_fades(domain::ClipId clip_id, domain::MediaTime fade_in, domain::MediaTime fade_out);
   void set_clip_distant_music(domain::ClipId clip_id, domain::DistantMusicSettings settings);
+  void set_clip_telephone(domain::ClipId clip_id, domain::TelephoneSettings settings);
   // Visual transform (position/scale/rotation/opacity); one undo step. No-op when unchanged.
   void set_clip_visual_transform(domain::ClipId clip_id, domain::VisualTransform transform);
   // Direct-manipulation transaction. Preview updates mutate through the command

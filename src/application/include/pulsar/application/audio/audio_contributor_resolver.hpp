@@ -35,6 +35,7 @@ struct AudioContributor {
   double track_gain_db{0.0};
   bool track_muted{false};
   domain::DistantMusicSettings distant_music{};
+  domain::TelephoneSettings telephone{};
 };
 
 struct UnavailableAudioContributor {

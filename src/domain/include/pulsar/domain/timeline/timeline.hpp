@@ -34,6 +34,7 @@ public:
   void set_clip_muted(ClipId clip_id, bool muted);
   void set_clip_fades(ClipId clip_id, MediaTime fade_in, MediaTime fade_out);
   void set_clip_distant_music(ClipId clip_id, DistantMusicSettings settings);
+  void set_clip_telephone(ClipId clip_id, TelephoneSettings settings);
   void set_clip_visual_transform(ClipId clip_id, VisualTransform transform);
   void set_track_audio_state(TrackId track_id, AudioTrackState state);
 

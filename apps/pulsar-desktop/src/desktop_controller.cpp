@@ -1610,6 +1610,21 @@ int DesktopController::selectedDistantMusicKeyframeCount() const {
       ? active_session_->document().timeline().find_clip(*active_session_->selected_clip()) : nullptr;
   return clip ? static_cast<int>(clip->distant_music().gain_keyframes.size()) : 0;
 }
+bool DesktopController::selectedTelephoneEnabled() const {
+  const auto* clip = active_session_ && active_session_->selected_clip()
+      ? active_session_->document().timeline().find_clip(*active_session_->selected_clip()) : nullptr;
+  return clip && clip->telephone().enabled;
+}
+double DesktopController::selectedTelephoneMix() const {
+  const auto* clip = active_session_ && active_session_->selected_clip()
+      ? active_session_->document().timeline().find_clip(*active_session_->selected_clip()) : nullptr;
+  return clip ? clip->telephone().mix : 1.0;
+}
+double DesktopController::selectedTelephoneDrive() const {
+  const auto* clip = active_session_ && active_session_->selected_clip()
+      ? active_session_->document().timeline().find_clip(*active_session_->selected_clip()) : nullptr;
+  return clip ? clip->telephone().drive : 0.12;
+}
 QVariantList DesktopController::selectedDistantMusicGainKeyframes() const {
   QVariantList result;
   const auto* clip = active_session_ && active_session_->selected_clip()
@@ -1640,6 +1655,26 @@ void DesktopController::setSelectedClipFades(double fade_in_seconds, double fade
 
 void DesktopController::applySelectedDistantMusicPreset() {
   setSelectedDistantMusic(-30.0, 4.0, 900.0, 18'000.0, 0.18, 1, true);
+}
+
+void DesktopController::applySelectedTelephonePreset() {
+  setSelectedTelephone(1.0, 0.12, true);
+}
+
+void DesktopController::setSelectedTelephone(double mix, double drive, bool enabled) {
+  if (!active_session_ || !active_session_->selected_clip() || !std::isfinite(mix) ||
+      !std::isfinite(drive)) return;
+  pulsar::domain::TelephoneSettings settings;
+  settings.enabled = enabled;
+  settings.mix = mix;
+  settings.drive = drive;
+  try {
+    active_session_->set_clip_telephone(*active_session_->selected_clip(), settings);
+    clearError();
+    publishTimeline();
+  } catch (const std::exception&) {
+    setError(QStringLiteral("Los parámetros de Telephone no son válidos."));
+  }
 }
 
 void DesktopController::applySelectedCinematicRecipe(const QString& recipe) {

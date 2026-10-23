@@ -634,6 +634,11 @@ void EditorSession::set_clip_distant_music(domain::ClipId clip, domain::DistantM
   synchronize_document_state();
 }
 
+void EditorSession::set_clip_telephone(domain::ClipId clip, domain::TelephoneSettings settings) {
+  processor_.set_clip_telephone(clip, std::move(settings));
+  synchronize_document_state();
+}
+
 void EditorSession::relink_asset(domain::MediaId media, const std::filesystem::path& source_locator,
                                  const application::MediaProbe& probe) {
   if (!document_.find_asset(media).has_value()) {

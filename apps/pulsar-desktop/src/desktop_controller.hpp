@@ -110,6 +110,9 @@ class DesktopController final : public QObject {
   Q_PROPERTY(double selectedDistantMusicReverb READ selectedDistantMusicReverb NOTIFY timelineChanged)
   Q_PROPERTY(int selectedDistantMusicCurve READ selectedDistantMusicCurve NOTIFY timelineChanged)
   Q_PROPERTY(int selectedDistantMusicKeyframeCount READ selectedDistantMusicKeyframeCount NOTIFY timelineChanged)
+  Q_PROPERTY(bool selectedTelephoneEnabled READ selectedTelephoneEnabled NOTIFY timelineChanged)
+  Q_PROPERTY(double selectedTelephoneMix READ selectedTelephoneMix NOTIFY timelineChanged)
+  Q_PROPERTY(double selectedTelephoneDrive READ selectedTelephoneDrive NOTIFY timelineChanged)
   Q_PROPERTY(QVariantList selectedDistantMusicGainKeyframes READ selectedDistantMusicGainKeyframes NOTIFY timelineChanged)
   Q_PROPERTY(double selectedClipPosX READ selectedClipPosX NOTIFY timelineChanged)
   Q_PROPERTY(double selectedClipPosY READ selectedClipPosY NOTIFY timelineChanged)
@@ -214,6 +217,9 @@ public:
   [[nodiscard]] double selectedDistantMusicReverb() const;
   [[nodiscard]] int selectedDistantMusicCurve() const;
   [[nodiscard]] int selectedDistantMusicKeyframeCount() const;
+  [[nodiscard]] bool selectedTelephoneEnabled() const;
+  [[nodiscard]] double selectedTelephoneMix() const;
+  [[nodiscard]] double selectedTelephoneDrive() const;
   [[nodiscard]] QVariantList selectedDistantMusicGainKeyframes() const;
   [[nodiscard]] double selectedClipPosX() const;
   [[nodiscard]] double selectedClipPosY() const;
@@ -298,6 +304,8 @@ public:
   Q_INVOKABLE void toggleSelectedClipMute();
   Q_INVOKABLE void setSelectedClipFades(double fade_in_seconds, double fade_out_seconds);
   Q_INVOKABLE void applySelectedDistantMusicPreset();
+  Q_INVOKABLE void setSelectedTelephone(double mix, double drive, bool enabled);
+  Q_INVOKABLE void applySelectedTelephonePreset();
   Q_INVOKABLE void applySelectedCinematicRecipe(const QString& recipe);
   Q_INVOKABLE void setSelectedDistantMusic(double gain_db, double duration, double start_cutoff,
                                             double end_cutoff, double reverb, int curve, bool enabled);
