@@ -82,7 +82,7 @@ chmod +x PULSAR-0.2.0-beta.1-x86_64.AppImage
 - **Interfaz solo en español**; el selector de archivos de *Abrir proyecto* es el del toolkit (claro y en inglés).
 - **La vista previa puede ir lenta** con composición transformada o multicapa (solo CPU, sin GPU ni proxies). La exportación es la referencia. No probado con 4K / HEVC / material largo.
 - Sin títulos animados, máscaras, herramientas de color ni control de velocidad; el fundido cruzado es por ahora la única transición.
-- Los Audio FX son por clip; todavía no existe un rack de efectos para buses/master ni reordenamiento definido por el usuario.
+- Los Audio FX son por clip; todavía no existe un rack de efectos para buses/master. La cadena integrada por clip sí puede reordenarse y queda guardada en el proyecto.
 - Sin reenlace de medios faltantes, lista de proyectos recientes ni selección múltiple.
 - La exportación es solo MP4 / H.264 / AAC; sin presets verticales (9:16): el lienzo sigue al primer clip.
 - Imágenes: solo PNG, JPEG y WebP. Un proyecto solo de audio no se puede exportar.

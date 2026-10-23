@@ -83,7 +83,7 @@ chmod +x PULSAR-0.2.0-beta.1-x86_64.AppImage
 - **Spanish-only interface**; the *Abrir proyecto* file picker is the toolkit's own (light, English).
 - **Preview can be slow** with transformed or multi-layer composition (CPU only, no GPU or proxies). Export is authoritative. Not tested with 4K / HEVC / long footage.
 - No animated titles, masks, colour tools or speed control; cross dissolve is currently the only transition.
-- Audio FX are currently clip-level; there is no bus/master FX rack or user-defined effect ordering yet.
+- Audio FX are currently clip-level; there is no bus/master FX rack yet. The built-in clip FX chain can be reordered and that order is persisted.
 - No relink UI for missing media, recent-projects list or multi-selection.
 - Export is MP4 / H.264 / AAC only; no vertical (9:16) canvas presets (the canvas follows the first clip).
 - Images: PNG, JPEG and WebP only. An audio-only project cannot be exported.
