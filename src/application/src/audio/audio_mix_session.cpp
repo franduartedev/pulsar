@@ -463,7 +463,8 @@ AudioMixRenderResult AudioMixSession::render(domain::MediaTime timeline_position
       AudioBlock{format_.sample_rate, format_.channel_count, frame_count,
                  std::vector<float>(checked_sample_count(frame_count, format_.channel_count), 0.0F),
                  domain::Rational{1, format_.sample_rate}, std::nullopt},
-      timeline_position, {}, 0, 0, 0, AudioMixClockRecommendation::Software};
+      timeline_position, {}, 0, 0, 0, AudioLevel{},
+      AudioMixClockRecommendation::Software};
   result.resolved_contributors = active_contributors_.size();
   for (const auto& missing : active_unavailable_) {
     result.issues.push_back({missing.track_id, missing.clip_id, missing.media_id,
