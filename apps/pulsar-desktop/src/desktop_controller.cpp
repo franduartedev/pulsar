@@ -1724,12 +1724,28 @@ void DesktopController::moveSelectedAudioFx(const QString& effect_id, int delta)
   };
   const auto type = type_for_id();
   if (!type.has_value()) return;
+  const auto is_enabled = [clip](pulsar::domain::AudioEffectType effect) {
+    switch (effect) {
+    case pulsar::domain::AudioEffectType::DistantMusic: return clip->distant_music().enabled;
+    case pulsar::domain::AudioEffectType::Telephone: return clip->telephone().enabled;
+    case pulsar::domain::AudioEffectType::Underwater: return clip->underwater().enabled;
+    }
+    return false;
+  };
+  std::vector<pulsar::domain::AudioEffectType> enabled_order;
+  for (const auto effect : order) {
+    if (is_enabled(effect)) enabled_order.push_back(effect);
+  }
+  const auto visible_iterator = std::find(enabled_order.begin(), enabled_order.end(), *type);
+  if (visible_iterator == enabled_order.end()) return;
+  const auto visible_index = static_cast<int>(std::distance(enabled_order.begin(), visible_iterator));
+  const auto target_index = visible_index + delta;
+  if (target_index < 0 || target_index >= static_cast<int>(enabled_order.size())) return;
+  const auto target_type = enabled_order[static_cast<std::size_t>(target_index)];
   const auto iterator = std::find(order.begin(), order.end(), *type);
-  if (iterator == order.end()) return;
-  const auto current = static_cast<int>(std::distance(order.begin(), iterator));
-  const auto target = current + delta;
-  if (target < 0 || target >= static_cast<int>(order.size())) return;
-  std::iter_swap(iterator, order.begin() + target);
+  const auto target_iterator = std::find(order.begin(), order.end(), target_type);
+  if (iterator == order.end() || target_iterator == order.end()) return;
+  std::iter_swap(iterator, target_iterator);
   try {
     active_session_->set_clip_audio_effect_order(*active_session_->selected_clip(), std::move(order));
     clearError();
