@@ -1678,14 +1678,18 @@ void DesktopController::setSelectedTelephone(double mix, double drive, bool enab
 }
 
 void DesktopController::applySelectedCinematicRecipe(const QString& recipe) {
-  if (recipe == QStringLiteral("reveal")) {
-    setSelectedDistantMusic(-36.0, 5.0, 420.0, 18'000.0, 0.24, 0, true);
-  } else if (recipe == QStringLiteral("suspense")) {
-    setSelectedDistantMusic(-48.0, 7.0, 180.0, 12'000.0, 0.42, 1, true);
-  } else if (recipe == QStringLiteral("memory")) {
-    setSelectedDistantMusic(-28.0, 3.0, 650.0, 9'500.0, 0.58, 2, true);
-  } else {
+  if (!active_session_ || !active_session_->selected_clip()) return;
+  const auto* selected = pulsar::application::find_audio_recipe(recipe.toStdString());
+  if (selected == nullptr) {
     setError(QStringLiteral("Receta cinematográfica desconocida."));
+    return;
+  }
+  try {
+    active_session_->apply_audio_recipe(*active_session_->selected_clip(), *selected);
+    clearError();
+    publishTimeline();
+  } catch (const std::exception&) {
+    setError(QStringLiteral("No se pudo aplicar la receta de audio."));
   }
 }
 

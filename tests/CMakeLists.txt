@@ -367,6 +367,14 @@ pulsar_apply_project_options(pulsar_pulse_map_tests)
 pulsar_apply_compiler_warnings(pulsar_pulse_map_tests)
 add_test(NAME pulsar.application.pulse_map COMMAND pulsar_pulse_map_tests)
 
+add_executable(pulsar_audio_recipe_tests
+  application/audio_recipe_test.cpp
+)
+target_link_libraries(pulsar_audio_recipe_tests PRIVATE pulsar::application pulsar::domain)
+pulsar_apply_project_options(pulsar_audio_recipe_tests)
+pulsar_apply_compiler_warnings(pulsar_audio_recipe_tests)
+add_test(NAME pulsar.application.audio_recipe COMMAND pulsar_audio_recipe_tests)
+
 add_executable(pulsar_scene_cards_tests
   application/scene_cards_test.cpp
 )

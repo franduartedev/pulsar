@@ -3,6 +3,7 @@
 #include "duration_sample_ring.hpp"
 
 #include <pulsar/application/commands/command_processor.hpp>
+#include <pulsar/application/audio/audio_recipe.hpp>
 #include <pulsar/application/audio/audio_output.hpp>
 #include <pulsar/application/playback/audio_playback_session.hpp>
 #include <pulsar/application/playback/timeline_playback_coordinator.hpp>
@@ -254,6 +255,7 @@ public:
   void set_clip_fades(domain::ClipId clip, domain::MediaTime fade_in, domain::MediaTime fade_out);
   void set_clip_distant_music(domain::ClipId clip, domain::DistantMusicSettings settings);
   void set_clip_telephone(domain::ClipId clip, domain::TelephoneSettings settings);
+  void apply_audio_recipe(domain::ClipId clip, const application::AudioRecipe& recipe);
   void relink_asset(domain::MediaId media, const std::filesystem::path& source_locator,
                     const application::MediaProbe& probe);
   // Visual transform of a clip (position/scale/rotation/opacity). One undo step.
