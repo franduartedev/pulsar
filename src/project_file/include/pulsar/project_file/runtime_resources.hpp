@@ -1,8 +1,6 @@
 #pragma once
 
-#include <cstdlib>
 #include <filesystem>
-#include <system_error>
 
 namespace pulsar::project_file {
 
@@ -14,29 +12,6 @@ namespace pulsar::project_file {
 //   3. <exe dir>/../share/pulsar/assets        (installed under a prefix)
 //   4. <cwd>/assets
 // Returns the first directory that contains sounds/index.json, or an empty path.
-// Linux-only today: the executable is located through /proc/self/exe (see the
-// Windows readiness notes in docs/release/0.1.0-beta.md).
-[[nodiscard]] inline std::filesystem::path assets_directory() {
-  namespace fs = std::filesystem;
-  std::error_code error;
-  const auto usable = [&error](const fs::path& directory) {
-    return !directory.empty() && fs::is_regular_file(directory / "sounds" / "index.json", error);
-  };
-  if (const char* override_dir = std::getenv("PULSAR_ASSETS_DIR");
-      override_dir != nullptr && usable(fs::path{override_dir})) {
-    return fs::path{override_dir};
-  }
-  const auto executable = fs::read_symlink("/proc/self/exe", error);
-  if (!error) {
-    const auto dir = executable.parent_path();
-    for (const auto& candidate : {dir / "assets", dir.parent_path() / "assets",
-                                  dir.parent_path() / "share" / "pulsar" / "assets"}) {
-      if (usable(candidate)) return candidate;
-    }
-  }
-  const auto cwd = fs::current_path(error);
-  if (!error && usable(cwd / "assets")) return cwd / "assets";
-  return {};
-}
+[[nodiscard]] std::filesystem::path assets_directory();
 
 } // namespace pulsar::project_file

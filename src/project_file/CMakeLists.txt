@@ -1,6 +1,7 @@
 add_library(pulsar_project_file
   src/file_project_repository.cpp
   src/filesystem_export_output_publisher.cpp
+  src/runtime_resources.cpp
 )
 
 add_library(pulsar::project_file ALIAS pulsar_project_file)
