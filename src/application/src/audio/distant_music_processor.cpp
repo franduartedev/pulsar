@@ -20,28 +20,29 @@ float curve_value(domain::DistantMusicCurve curve, float progress) noexcept {
 }
 
 float keyframed_gain_db(const std::vector<domain::ScalarKeyframe>& keyframes,
-                        float time_seconds) noexcept {
+                        float time_seconds, std::size_t& cursor) noexcept {
   if (keyframes.empty()) return 0.0F;
   if (time_seconds <= keyframes.front().time_seconds) {
+    cursor = 0;
     return static_cast<float>(keyframes.front().value);
   }
-  for (std::size_t index = 1; index < keyframes.size(); ++index) {
-    const auto& left = keyframes[index - 1];
-    const auto& right = keyframes[index];
-    if (time_seconds > right.time_seconds) continue;
-    if (right.interpolation == domain::KeyframeInterpolation::Hold) {
-      return static_cast<float>(left.value);
-    }
-    const float span = static_cast<float>(right.time_seconds - left.time_seconds);
-    const float progress = std::clamp(
-        (time_seconds - static_cast<float>(left.time_seconds)) / span, 0.0F, 1.0F);
-    const float shaped = right.interpolation == domain::KeyframeInterpolation::Smooth
-                             ? progress * progress * (3.0F - 2.0F * progress)
-                             : progress;
-    return static_cast<float>(left.value) +
-           (static_cast<float>(right.value) - static_cast<float>(left.value)) * shaped;
+  while (cursor + 1 < keyframes.size() && time_seconds > keyframes[cursor + 1].time_seconds) {
+    ++cursor;
   }
-  return static_cast<float>(keyframes.back().value);
+  if (cursor + 1 == keyframes.size()) return static_cast<float>(keyframes.back().value);
+  const auto& left = keyframes[cursor];
+  const auto& right = keyframes[cursor + 1];
+  if (right.interpolation == domain::KeyframeInterpolation::Hold) {
+    return static_cast<float>(left.value);
+  }
+  const float span = static_cast<float>(right.time_seconds - left.time_seconds);
+  const float progress = std::clamp(
+      (time_seconds - static_cast<float>(left.time_seconds)) / span, 0.0F, 1.0F);
+  const float shaped = right.interpolation == domain::KeyframeInterpolation::Smooth
+                           ? progress * progress * (3.0F - 2.0F * progress)
+                           : progress;
+  return static_cast<float>(left.value) +
+         (static_cast<float>(right.value) - static_cast<float>(left.value)) * shaped;
 }
 
 } // namespace
@@ -71,6 +72,7 @@ void DistantMusicProcessor::process_interleaved(float* samples, std::size_t fram
   const float initial_gain = std::pow(10.0F, static_cast<float>(settings_.initial_gain_db / 20.0));
   const float tau = 1.0F / static_cast<float>(sample_rate_);
   const float two_pi = 6.2831853071795864769F;
+  std::size_t keyframe_cursor = 0;
 
   for (std::size_t frame = 0; frame < frame_count; ++frame) {
     const auto absolute = first_frame + static_cast<std::int64_t>(frame);
@@ -82,7 +84,8 @@ void DistantMusicProcessor::process_interleaved(float* samples, std::size_t fram
                            : std::pow(10.0F, keyframed_gain_db(
                                                    settings_.gain_keyframes,
                                                    static_cast<float>(absolute) /
-                                                       static_cast<float>(sample_rate_)) /
+                                                       static_cast<float>(sample_rate_),
+                                                   keyframe_cursor) /
                                                        20.0F);
     const float cutoff = static_cast<float>(settings_.start_cutoff_hz +
         (settings_.end_cutoff_hz - settings_.start_cutoff_hz) * shaped);
