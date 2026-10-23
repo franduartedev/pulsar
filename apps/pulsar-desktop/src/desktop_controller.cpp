@@ -1679,6 +1679,25 @@ QVariantList DesktopController::cinematicRecipes() const {
   }
   return result;
 }
+QVariantList DesktopController::selectedAudioFxChain() const {
+  QVariantList result;
+  const auto* clip = active_session_ && active_session_->selected_clip()
+      ? active_session_->document().timeline().find_clip(*active_session_->selected_clip()) : nullptr;
+  if (clip == nullptr) return result;
+  if (clip->distant_music().enabled) {
+    result.push_back(QVariantMap{{QStringLiteral("id"), QStringLiteral("distant_music")},
+                                 {QStringLiteral("name"), QStringLiteral("Distant Music")}});
+  }
+  if (clip->telephone().enabled) {
+    result.push_back(QVariantMap{{QStringLiteral("id"), QStringLiteral("telephone")},
+                                 {QStringLiteral("name"), QStringLiteral("Telephone")}});
+  }
+  if (clip->underwater().enabled) {
+    result.push_back(QVariantMap{{QStringLiteral("id"), QStringLiteral("underwater")},
+                                 {QStringLiteral("name"), QStringLiteral("Underwater")}});
+  }
+  return result;
+}
 void DesktopController::setSelectedClipFades(double fade_in_seconds, double fade_out_seconds) {
   if (!active_session_ || !active_session_->selected_clip() || !std::isfinite(fade_in_seconds) || !std::isfinite(fade_out_seconds)) return;
   try {

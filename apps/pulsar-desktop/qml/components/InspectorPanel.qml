@@ -604,6 +604,14 @@ Panel {
                 width: parent.width; spacing: Theme.spaceS
                 Text { width: parent.width; text: "PULSAR Audio FX"; color: Theme.textSecondary; font.pixelSize: Theme.fontSizeM; font.bold: true }
                 Text { width: parent.width; wrapMode: Text.WordWrap; text: "Distant Music: música que se acerca con volumen y agudos progresivos."; color: Theme.textMuted; font.pixelSize: Theme.fontSizeS }
+                FieldRow { visible: inspector.clipSelected && controller.selectedClipHasAudio; label: "Cadena"; Row { spacing: 4
+                        Repeater { model: controller.selectedAudioFxChain
+                            delegate: Rectangle { width: chainLabel.implicitWidth + 16; height: Theme.controlHeightSmall; radius: Theme.radiusS; color: Theme.bgInput; border.width: 1; border.color: Theme.borderStrong
+                                Text { id: chainLabel; anchors.centerIn: parent; text: modelData.name; color: Theme.textSecondary; font.pixelSize: Theme.fontSizeXS }
+                            }
+                        }
+                        Text { visible: controller.selectedAudioFxChain.length === 0; text: "Sin efectos"; color: Theme.textMuted; font.pixelSize: Theme.fontSizeXS; verticalAlignment: Text.AlignVCenter; height: Theme.controlHeightSmall }
+                    } }
                 PButton { width: parent.width; height: Theme.controlHeightSmall; primary: true; text: "Aplicar preset Distant Music"; enabled: inspector.clipSelected && controller.selectedClipHasAudio; onClicked: controller.applySelectedDistantMusicPreset() }
                 FieldRow { visible: inspector.clipSelected && controller.selectedClipHasAudio; label: "Recetas"; Row { spacing: 4
                         Repeater { model: controller.cinematicRecipes

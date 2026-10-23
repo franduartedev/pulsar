@@ -121,6 +121,7 @@ class DesktopController final : public QObject {
   Q_PROPERTY(QVariantList selectedUnderwaterDepthKeyframes READ selectedUnderwaterDepthKeyframes NOTIFY timelineChanged)
   Q_PROPERTY(QVariantList selectedDistantMusicGainKeyframes READ selectedDistantMusicGainKeyframes NOTIFY timelineChanged)
   Q_PROPERTY(QVariantList cinematicRecipes READ cinematicRecipes CONSTANT)
+  Q_PROPERTY(QVariantList selectedAudioFxChain READ selectedAudioFxChain NOTIFY timelineChanged)
   Q_PROPERTY(double selectedClipPosX READ selectedClipPosX NOTIFY timelineChanged)
   Q_PROPERTY(double selectedClipPosY READ selectedClipPosY NOTIFY timelineChanged)
   Q_PROPERTY(double selectedClipScale READ selectedClipScale NOTIFY timelineChanged)
@@ -235,6 +236,7 @@ public:
   [[nodiscard]] QVariantList selectedUnderwaterDepthKeyframes() const;
   [[nodiscard]] QVariantList selectedDistantMusicGainKeyframes() const;
   [[nodiscard]] QVariantList cinematicRecipes() const;
+  [[nodiscard]] QVariantList selectedAudioFxChain() const;
   [[nodiscard]] double selectedClipPosX() const;
   [[nodiscard]] double selectedClipPosY() const;
   [[nodiscard]] double selectedClipScale() const;
