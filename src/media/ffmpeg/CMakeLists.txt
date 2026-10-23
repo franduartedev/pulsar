@@ -14,7 +14,8 @@ if(PkgConfig_FOUND)
 endif()
 
 if(FFMPEG_FOUND)
-  set(PULSAR_FFMPEG_TARGET PkgConfig::FFMPEG)
+  add_library(pulsar_ffmpeg_dependencies INTERFACE)
+  target_link_libraries(pulsar_ffmpeg_dependencies INTERFACE PkgConfig::FFMPEG)
 else()
   # Windows/MSVC installations commonly expose FFmpeg through vcpkg or a
   # vendor SDK without a pkg-config file. Keep the Linux path above, but make
@@ -36,8 +37,9 @@ else()
     "${FFMPEG_SWSCALE_LIBRARY}"
     "${FFMPEG_SWRESAMPLE_LIBRARY}"
   )
-  set(PULSAR_FFMPEG_TARGET pulsar_ffmpeg_dependencies)
 endif()
+
+add_library(pulsar::ffmpeg_dependencies ALIAS pulsar_ffmpeg_dependencies)
 
 add_library(pulsar_media_ffmpeg
   src/ffmpeg_audio_decode_session.cpp
@@ -66,7 +68,7 @@ target_link_libraries(pulsar_media_ffmpeg
   PUBLIC
     pulsar::application
   PRIVATE
-    ${PULSAR_FFMPEG_TARGET}
+    pulsar::ffmpeg_dependencies
 )
 
 pulsar_apply_project_options(pulsar_media_ffmpeg)

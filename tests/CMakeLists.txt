@@ -507,6 +507,7 @@ add_executable(pulsar_ffmpeg_export_media_writer_tests
 target_link_libraries(pulsar_ffmpeg_export_media_writer_tests
   PRIVATE
     pulsar::media_ffmpeg
+    pulsar::ffmpeg_dependencies
     pulsar::application
     pulsar::domain
 )
@@ -552,6 +553,7 @@ target_compile_definitions(pulsar_ffmpeg_export_e2e_tests
 target_link_libraries(pulsar_ffmpeg_export_e2e_tests
   PRIVATE
     pulsar::media_ffmpeg
+    pulsar::ffmpeg_dependencies
     pulsar::project_file
     pulsar::application
     pulsar::domain
@@ -620,6 +622,7 @@ target_compile_definitions(pulsar_ffmpeg_audio_decode_session_tests
 target_link_libraries(pulsar_ffmpeg_audio_decode_session_tests
   PRIVATE
     pulsar::media_ffmpeg
+    pulsar::ffmpeg_dependencies
     pulsar::application
     pulsar::domain
 )
@@ -655,6 +658,7 @@ target_compile_definitions(pulsar_ffmpeg_video_decode_session_tests
 target_link_libraries(pulsar_ffmpeg_video_decode_session_tests
   PRIVATE
     pulsar::media_ffmpeg
+    pulsar::ffmpeg_dependencies
     pulsar::domain
 )
 
