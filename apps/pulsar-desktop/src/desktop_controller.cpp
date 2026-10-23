@@ -1684,19 +1684,59 @@ QVariantList DesktopController::selectedAudioFxChain() const {
   const auto* clip = active_session_ && active_session_->selected_clip()
       ? active_session_->document().timeline().find_clip(*active_session_->selected_clip()) : nullptr;
   if (clip == nullptr) return result;
-  if (clip->distant_music().enabled) {
-    result.push_back(QVariantMap{{QStringLiteral("id"), QStringLiteral("distant_music")},
-                                 {QStringLiteral("name"), QStringLiteral("Distant Music")}});
-  }
-  if (clip->telephone().enabled) {
-    result.push_back(QVariantMap{{QStringLiteral("id"), QStringLiteral("telephone")},
-                                 {QStringLiteral("name"), QStringLiteral("Telephone")}});
-  }
-  if (clip->underwater().enabled) {
-    result.push_back(QVariantMap{{QStringLiteral("id"), QStringLiteral("underwater")},
-                                 {QStringLiteral("name"), QStringLiteral("Underwater")}});
+  for (const auto type : clip->audio_effect_order()) {
+    QString id;
+    QString name;
+    bool enabled = false;
+    switch (type) {
+    case pulsar::domain::AudioEffectType::DistantMusic:
+      id = QStringLiteral("distant_music");
+      name = QStringLiteral("Distant Music");
+      enabled = clip->distant_music().enabled;
+      break;
+    case pulsar::domain::AudioEffectType::Telephone:
+      id = QStringLiteral("telephone");
+      name = QStringLiteral("Telephone");
+      enabled = clip->telephone().enabled;
+      break;
+    case pulsar::domain::AudioEffectType::Underwater:
+      id = QStringLiteral("underwater");
+      name = QStringLiteral("Underwater");
+      enabled = clip->underwater().enabled;
+      break;
+    }
+    if (enabled) result.push_back(QVariantMap{{QStringLiteral("id"), id},
+                                               {QStringLiteral("name"), name}});
   }
   return result;
+}
+
+void DesktopController::moveSelectedAudioFx(const QString& effect_id, int delta) {
+  if (!active_session_ || !active_session_->selected_clip() || (delta != -1 && delta != 1)) return;
+  const auto* clip = active_session_->document().timeline().find_clip(*active_session_->selected_clip());
+  if (clip == nullptr) return;
+  auto order = clip->audio_effect_order();
+  const auto type_for_id = [&effect_id]() -> std::optional<pulsar::domain::AudioEffectType> {
+    if (effect_id == QStringLiteral("distant_music")) return pulsar::domain::AudioEffectType::DistantMusic;
+    if (effect_id == QStringLiteral("telephone")) return pulsar::domain::AudioEffectType::Telephone;
+    if (effect_id == QStringLiteral("underwater")) return pulsar::domain::AudioEffectType::Underwater;
+    return std::nullopt;
+  };
+  const auto type = type_for_id();
+  if (!type.has_value()) return;
+  const auto iterator = std::find(order.begin(), order.end(), *type);
+  if (iterator == order.end()) return;
+  const auto current = static_cast<int>(std::distance(order.begin(), iterator));
+  const auto target = current + delta;
+  if (target < 0 || target >= static_cast<int>(order.size())) return;
+  std::iter_swap(iterator, order.begin() + target);
+  try {
+    active_session_->set_clip_audio_effect_order(*active_session_->selected_clip(), std::move(order));
+    clearError();
+    publishTimeline();
+  } catch (const std::exception& error) {
+    setError(QString::fromUtf8(error.what()));
+  }
 }
 void DesktopController::setSelectedClipFades(double fade_in_seconds, double fade_out_seconds) {
   if (!active_session_ || !active_session_->selected_clip() || !std::isfinite(fade_in_seconds) || !std::isfinite(fade_out_seconds)) return;

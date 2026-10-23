@@ -3,6 +3,7 @@
 #include <pulsar/application/project/project_snapshot.hpp>
 #include <pulsar/domain/time/time_range.hpp>
 #include <pulsar/domain/timeline/underwater.hpp>
+#include <pulsar/domain/timeline/audio_effect.hpp>
 
 #include <cstddef>
 #include <filesystem>
@@ -38,6 +39,7 @@ struct AudioContributor {
   domain::DistantMusicSettings distant_music{};
   domain::TelephoneSettings telephone{};
   domain::UnderwaterSettings underwater{};
+  std::vector<domain::AudioEffectType> audio_effect_order;
 };
 
 struct UnavailableAudioContributor {

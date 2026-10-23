@@ -247,11 +247,13 @@ void AudioMixSession::configure(ProjectSnapshot snapshot) {
       if (replacement != contributors_.end()) {
         const bool effect_changed = source->contributor.distant_music != replacement->distant_music ||
                                      source->contributor.telephone != replacement->telephone ||
-                                     source->contributor.underwater != replacement->underwater;
+                                     source->contributor.underwater != replacement->underwater ||
+                                     source->contributor.audio_effect_order != replacement->audio_effect_order;
         source->contributor = *replacement;
         if (effect_changed) {
           source->effects = std::make_unique<AudioEffectChain>(AudioEffectChain::from_clip_effects(
               replacement->distant_music, replacement->telephone, replacement->underwater,
+              replacement->audio_effect_order,
               format_.sample_rate,
               format_.channel_count));
         }
@@ -363,7 +365,8 @@ AudioMixSession::SourceState* AudioMixSession::open_source(
                                              origin);
   if (contributor.distant_music.enabled || contributor.telephone.enabled || contributor.underwater.enabled) {
     state->effects = std::make_unique<AudioEffectChain>(AudioEffectChain::from_clip_effects(
-        contributor.distant_music, contributor.telephone, contributor.underwater, format_.sample_rate,
+        contributor.distant_music, contributor.telephone, contributor.underwater,
+        contributor.audio_effect_order, format_.sample_rate,
         format_.channel_count));
   }
   auto* result = state.get();

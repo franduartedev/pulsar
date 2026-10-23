@@ -131,7 +131,8 @@ OfflineAudioRenderer::ContributorState& OfflineAudioRenderer::state_for(
                                        contributor.timeline_range.duration(), 48'000);
     if (contributor.distant_music.enabled || contributor.telephone.enabled || contributor.underwater.enabled) {
       state->effects = std::make_unique<AudioEffectChain>(AudioEffectChain::from_clip_effects(
-          contributor.distant_music, contributor.telephone, contributor.underwater, 48'000, 2));
+          contributor.distant_music, contributor.telephone, contributor.underwater,
+          contributor.audio_effect_order, 48'000, 2));
     }
     state->first_clip_frame = domain::frame_at(contributor.timeline_range.start(),
                                                domain::FrameRate{48'000, 1}, domain::RoundingMode::Ceil).value();

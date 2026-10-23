@@ -205,6 +205,27 @@ void underwater_keyframes_roundtrip_as_project_version_twelve() {
   assert(ProjectCodec::encode(restored.snapshot()) == bytes);
 }
 
+void audio_effect_order_roundtrips_as_project_version_thirteen() {
+  auto document = make_document();
+  CommandProcessor processor{document};
+  const std::vector<domain::AudioEffectType> order{
+      domain::AudioEffectType::Underwater,
+      domain::AudioEffectType::DistantMusic,
+      domain::AudioEffectType::Telephone};
+  processor.set_clip_audio_effect_order(domain::ClipId{1}, order);
+  assert(document.timeline().find_clip(domain::ClipId{1})->audio_effect_order() == order);
+  assert(processor.undo());
+  assert(document.timeline().find_clip(domain::ClipId{1})->audio_effect_order() ==
+         domain::canonical_audio_effect_order());
+  assert(processor.redo());
+  const auto bytes = ProjectCodec::encode(document.snapshot());
+  assert(bytes.find("PULSAR_PROJECT 13") == 0);
+  assert(bytes.find("CLIP_FX_ORDER 2 0 1") != std::string::npos);
+  const auto restored = ProjectDocument::restore(ProjectCodec::decode(bytes));
+  assert(restored.timeline().find_clip(domain::ClipId{1})->audio_effect_order() == order);
+  assert(ProjectCodec::encode(restored.snapshot()) == bytes);
+}
+
 void relinking_asset_is_undoable_and_preserves_clip_identity() {
   auto document = make_document();
   CommandProcessor processor{document};
@@ -749,6 +770,7 @@ int main() {
   telephone_roundtrips_as_project_version_ten();
   underwater_roundtrips_as_project_version_eleven();
   underwater_keyframes_roundtrip_as_project_version_twelve();
+  audio_effect_order_roundtrips_as_project_version_thirteen();
   relinking_asset_is_undoable_and_preserves_clip_identity();
   canvas_preset_is_undoable_and_persisted();
   builtin_locator_roundtrip();

@@ -606,8 +606,12 @@ Panel {
                 Text { width: parent.width; wrapMode: Text.WordWrap; text: "Distant Music: música que se acerca con volumen y agudos progresivos."; color: Theme.textMuted; font.pixelSize: Theme.fontSizeS }
                 FieldRow { visible: inspector.clipSelected && controller.selectedClipHasAudio; label: "Cadena"; Row { spacing: 4
                         Repeater { model: controller.selectedAudioFxChain
-                            delegate: Rectangle { width: chainLabel.implicitWidth + 16; height: Theme.controlHeightSmall; radius: Theme.radiusS; color: Theme.bgInput; border.width: 1; border.color: Theme.borderStrong
-                                Text { id: chainLabel; anchors.centerIn: parent; text: modelData.name; color: Theme.textSecondary; font.pixelSize: Theme.fontSizeXS }
+                            delegate: Row { spacing: 2
+                                Rectangle { width: chainLabel.implicitWidth + 16; height: Theme.controlHeightSmall; radius: Theme.radiusS; color: Theme.bgInput; border.width: 1; border.color: Theme.borderStrong
+                                    Text { id: chainLabel; anchors.centerIn: parent; text: modelData.name; color: Theme.textSecondary; font.pixelSize: Theme.fontSizeXS }
+                                }
+                                PButton { width: 18; height: Theme.controlHeightSmall; text: "↑"; onClicked: controller.moveSelectedAudioFx(modelData.id, -1) }
+                                PButton { width: 18; height: Theme.controlHeightSmall; text: "↓"; onClicked: controller.moveSelectedAudioFx(modelData.id, 1) }
                             }
                         }
                         Text { visible: controller.selectedAudioFxChain.length === 0; text: "Sin efectos"; color: Theme.textMuted; font.pixelSize: Theme.fontSizeXS; verticalAlignment: Text.AlignVCenter; height: Theme.controlHeightSmall }

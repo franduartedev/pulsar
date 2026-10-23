@@ -90,7 +90,7 @@ void Timeline::move_clip(ClipId clip_id, TrackId destination_track_id, MediaTime
                         original_clip->source_range(), timeline_start,
                         original_clip->audio_gain_db(), original_clip->muted(),
                         original_clip->fade_in(), original_clip->fade_out(),
-                        original_clip->visual_transform(), original_clip->distant_music(), original_clip->telephone(), original_clip->underwater()};
+                        original_clip->visual_transform(), original_clip->distant_music(), original_clip->telephone(), original_clip->underwater(), original_clip->audio_effect_order()};
 
   Track replacement_source = tracks_[source_index];
   replacement_source.remove_clip(clip_id);
@@ -210,6 +210,17 @@ void Timeline::set_clip_underwater(domain::ClipId clip_id, UnderwaterSettings se
     if (tracks_[i].find_clip(clip_id) == nullptr) continue;
     Track replacement = tracks_[i];
     replacement.set_clip_underwater(clip_id, std::move(settings));
+    tracks_[i] = std::move(replacement);
+    return;
+  }
+  throw std::invalid_argument{"clip id does not exist in timeline"};
+}
+
+void Timeline::set_clip_audio_effect_order(ClipId clip_id, std::vector<AudioEffectType> order) {
+  for (std::size_t i = 0; i < tracks_.size(); ++i) {
+    if (tracks_[i].find_clip(clip_id) == nullptr) continue;
+    Track replacement = tracks_[i];
+    replacement.set_clip_audio_effect_order(clip_id, std::move(order));
     tracks_[i] = std::move(replacement);
     return;
   }

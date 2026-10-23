@@ -214,6 +214,7 @@ std::string ProjectCodec::encode(const ProjectSnapshot& snapshot) {
   bool has_telephone = false;
   bool has_underwater = false;
   bool has_underwater_keyframes = false;
+  bool has_audio_effect_order = false;
   for (const auto& track : snapshot.timeline.tracks()) {
     if (track.audio_state() != domain::AudioTrackState{}) has_audio_track_state = true;
     for (const auto& clip : track.clips()) {
@@ -226,6 +227,9 @@ std::string ProjectCodec::encode(const ProjectSnapshot& snapshot) {
       if (clip.underwater().enabled) has_underwater = true;
       if (clip.underwater().enabled && !clip.underwater().depth_keyframes.empty()) {
         has_underwater_keyframes = true;
+      }
+      if (clip.audio_effect_order() != domain::canonical_audio_effect_order()) {
+        has_audio_effect_order = true;
       }
     }
   }
@@ -257,7 +261,7 @@ std::string ProjectCodec::encode(const ProjectSnapshot& snapshot) {
     }
   }
   // Version 4 adds clip fades; every file that does not need a newer feature keeps its old version.
-  output << (has_underwater_keyframes ? "PULSAR_PROJECT 12\n" : has_underwater ? "PULSAR_PROJECT 11\n" : has_telephone ? "PULSAR_PROJECT 10\n" : has_subtitles ? "PULSAR_PROJECT 9\n" : has_distant_music_keyframes ? "PULSAR_PROJECT 8\n" : has_distant_music ? "PULSAR_PROJECT 7\n" : needs_v6 ? "PULSAR_PROJECT 6\n" : needs_v5 ? "PULSAR_PROJECT 5\n" : needs_v4 ? "PULSAR_PROJECT 4\n" : has_titles ? "PULSAR_PROJECT 3\n" : "PULSAR_PROJECT 2\n");
+  output << (has_audio_effect_order ? "PULSAR_PROJECT 13\n" : has_underwater_keyframes ? "PULSAR_PROJECT 12\n" : has_underwater ? "PULSAR_PROJECT 11\n" : has_telephone ? "PULSAR_PROJECT 10\n" : has_subtitles ? "PULSAR_PROJECT 9\n" : has_distant_music_keyframes ? "PULSAR_PROJECT 8\n" : has_distant_music ? "PULSAR_PROJECT 7\n" : needs_v6 ? "PULSAR_PROJECT 6\n" : needs_v5 ? "PULSAR_PROJECT 5\n" : needs_v4 ? "PULSAR_PROJECT 4\n" : has_titles ? "PULSAR_PROJECT 3\n" : "PULSAR_PROJECT 2\n");
   output << "TIMELINE " << snapshot.timeline.id().value() << "\n";
   const auto tracks = sorted_tracks(snapshot.timeline);
   for (const auto* track : tracks) {
@@ -394,6 +398,10 @@ std::string ProjectCodec::encode(const ProjectSnapshot& snapshot) {
           }
         }
       }
+      if (clip.audio_effect_order() != domain::canonical_audio_effect_order()) {
+        output << " CLIP_FX_ORDER";
+        for (const auto type : clip.audio_effect_order()) output << ' ' << static_cast<int>(type);
+      }
       output << "\n";
     }
   }
@@ -461,6 +469,7 @@ ProjectRestoreState ProjectCodec::decode(std::string_view bytes) {
   bool version10 = false;
   bool version11 = false;
   bool version12 = false;
+  bool version13 = false;
   bool allocator = false;
   bool ended = false;
   enum class Section { Header, Timeline, Tracks, VideoTrack, VisualTracks, Assets, Clips, Transitions, Titles, Subtitles, Allocator, End };
@@ -495,16 +504,17 @@ ProjectRestoreState ProjectCodec::decode(std::string_view bytes) {
 
     try {
       if (tokens[0].text == "PULSAR_PROJECT") {
-        if (header || tokens.size() != 2 || (tokens[1].text != "1" && tokens[1].text != "2" && tokens[1].text != "3" && tokens[1].text != "4" && tokens[1].text != "5" && tokens[1].text != "6" && tokens[1].text != "7" && tokens[1].text != "8" && tokens[1].text != "9" && tokens[1].text != "10" && tokens[1].text != "11" && tokens[1].text != "12")) {
+        if (header || tokens.size() != 2 || (tokens[1].text != "1" && tokens[1].text != "2" && tokens[1].text != "3" && tokens[1].text != "4" && tokens[1].text != "5" && tokens[1].text != "6" && tokens[1].text != "7" && tokens[1].text != "8" && tokens[1].text != "9" && tokens[1].text != "10" && tokens[1].text != "11" && tokens[1].text != "12" && tokens[1].text != "13")) {
           parse_fail(line_number, "invalid header/version");
         }
         header = true;
-        version7 = tokens[1].text == "7" || tokens[1].text == "8" || tokens[1].text == "9" || tokens[1].text == "10" || tokens[1].text == "11" || tokens[1].text == "12";
-        version8 = tokens[1].text == "8" || tokens[1].text == "9" || tokens[1].text == "10" || tokens[1].text == "11" || tokens[1].text == "12";
-        version9 = tokens[1].text == "9" || tokens[1].text == "10" || tokens[1].text == "11" || tokens[1].text == "12";
-        version10 = tokens[1].text == "10" || tokens[1].text == "11" || tokens[1].text == "12";
-        version11 = tokens[1].text == "11" || tokens[1].text == "12";
-        version12 = tokens[1].text == "12";
+        version13 = tokens[1].text == "13";
+        version7 = tokens[1].text == "7" || tokens[1].text == "8" || tokens[1].text == "9" || tokens[1].text == "10" || tokens[1].text == "11" || tokens[1].text == "12" || version13;
+        version8 = tokens[1].text == "8" || tokens[1].text == "9" || tokens[1].text == "10" || tokens[1].text == "11" || tokens[1].text == "12" || version13;
+        version9 = tokens[1].text == "9" || tokens[1].text == "10" || tokens[1].text == "11" || tokens[1].text == "12" || version13;
+        version10 = tokens[1].text == "10" || tokens[1].text == "11" || tokens[1].text == "12" || version13;
+        version11 = tokens[1].text == "11" || tokens[1].text == "12" || version13;
+        version12 = tokens[1].text == "12" || version13;
         version6 = version7 || tokens[1].text == "6";
         section = Section::Timeline;
       } else if (!header) {
@@ -690,6 +700,8 @@ ProjectRestoreState ProjectCodec::decode(std::string_view bytes) {
         bool saw_telephone = false;
         domain::UnderwaterSettings underwater;
         bool saw_underwater = false;
+        std::vector<domain::AudioEffectType> audio_effect_order;
+        bool saw_audio_effect_order = false;
         while (i < tokens.size()) {
           if (!tokens[i].quoted && tokens[i].text == "CLIP_AUDIO" && !saw_audio) {
             saw_audio = true;
@@ -792,6 +804,20 @@ ProjectRestoreState ProjectCodec::decode(std::string_view bytes) {
               }
             }
             try { underwater.validate(); } catch (const std::exception& error) { parse_fail(line_number, error.what()); }
+          } else if (version13 && !tokens[i].quoted && tokens[i].text == "CLIP_FX_ORDER" && !saw_audio_effect_order) {
+            saw_audio_effect_order = true;
+            if (i + 3 >= tokens.size()) parse_fail(line_number, "invalid CLIP_FX_ORDER");
+            ++i;
+            for (std::size_t effect = 0; effect < 3; ++effect) {
+              const auto type = unsigned_number(tokens[i++], line_number, "audio effect type");
+              if (type > 2) parse_fail(line_number, "invalid audio effect type");
+              audio_effect_order.push_back(static_cast<domain::AudioEffectType>(type));
+            }
+            try {
+              domain::validate_audio_effect_order(audio_effect_order);
+            } catch (const std::exception& error) {
+              parse_fail(line_number, error.what());
+            }
           } else {
             parse_fail(line_number, "invalid or duplicate CLIP properties");
           }
@@ -807,7 +833,8 @@ ProjectRestoreState ProjectCodec::decode(std::string_view bytes) {
         try {
           track->clips.emplace_back(clip_id, media_id,
                                     domain::TimeRange{source_start, source_end}, timeline_start,
-                                    audio_gain_db, muted, fade_in, fade_out, visual_transform, distant_music, telephone, underwater);
+                                    audio_gain_db, muted, fade_in, fade_out, visual_transform, distant_music,
+                                    telephone, underwater, std::move(audio_effect_order));
         } catch (const std::exception& error) {
           parse_fail(line_number, error.what());
         }

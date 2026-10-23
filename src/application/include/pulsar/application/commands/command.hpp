@@ -105,6 +105,11 @@ struct SetClipUnderwaterCommand {
   domain::UnderwaterSettings settings;
 };
 
+struct SetClipAudioEffectOrderCommand {
+  domain::ClipId clip_id;
+  std::vector<domain::AudioEffectType> order;
+};
+
 struct SetClipVisualTransformCommand {
   domain::ClipId clip_id;
   domain::VisualTransform transform;
@@ -163,6 +168,7 @@ using Command = std::variant<AddTrackCommand, RemoveTrackCommand, RestoreEmptyVi
                              SetClipDistantMusicCommand,
                              SetClipTelephoneCommand,
                              SetClipUnderwaterCommand,
+                             SetClipAudioEffectOrderCommand,
                              SetClipVisualTransformCommand, RestoreClipCommand,
                               RestoreSplitCommand, ImportAssetCommand, RemoveAssetCommand,
                               ReplaceAssetCommand,

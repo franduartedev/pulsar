@@ -90,12 +90,12 @@ int main() {
   settings.enabled = true;
   telephone_settings.enabled = true;
   auto clip_chain = application::AudioEffectChain::from_clip_effects(
-      settings, telephone_settings, {}, rate, 2);
+      settings, telephone_settings, {}, {}, rate, 2);
   assert(clip_chain.size() == 2);
   settings.enabled = false;
   telephone_settings.enabled = false;
   assert(application::AudioEffectChain::from_clip_effects(
-             settings, telephone_settings, {}, rate, 2).empty());
+             settings, telephone_settings, {}, {}, rate, 2).empty());
   telephone_settings.mix = 2.0;
   bool telephone_rejected = false;
   try { application::TelephoneProcessor invalid_telephone{telephone_settings, rate, 2}; }

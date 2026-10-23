@@ -34,6 +34,7 @@ public:
   static AudioEffectChain from_clip_effects(const domain::DistantMusicSettings& distant_music,
                                             const domain::TelephoneSettings& telephone,
                                             const domain::UnderwaterSettings& underwater,
+                                            const std::vector<domain::AudioEffectType>& order,
                                             int sample_rate, int channel_count);
 
   [[nodiscard]] bool empty() const noexcept { return effects_.empty(); }

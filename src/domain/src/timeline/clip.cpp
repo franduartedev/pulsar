@@ -2,17 +2,20 @@
 
 #include <cmath>
 #include <stdexcept>
+#include <utility>
 
 namespace pulsar::domain {
 
 Clip::Clip(ClipId id, MediaId media_id, TimeRange source_range, MediaTime timeline_start,
            double audio_gain_db, bool muted, MediaTime fade_in, MediaTime fade_out,
            VisualTransform visual_transform, DistantMusicSettings distant_music,
-           TelephoneSettings telephone, UnderwaterSettings underwater)
+           TelephoneSettings telephone, UnderwaterSettings underwater,
+           std::vector<AudioEffectType> audio_effect_order)
     : id_{id}, media_id_{media_id}, source_range_{source_range},
       timeline_start_{timeline_start}, audio_gain_db_{audio_gain_db}, muted_{muted},
       fade_in_{fade_in}, fade_out_{fade_out}, visual_transform_{visual_transform},
-      distant_music_{distant_music}, telephone_{telephone}, underwater_{underwater} {
+      distant_music_{distant_music}, telephone_{telephone}, underwater_{underwater},
+      audio_effect_order_{std::move(audio_effect_order)} {
   if (source_range_.duration() <= MediaTime::zero()) {
     throw std::invalid_argument{"clip source range duration must be positive"};
   }
@@ -35,6 +38,8 @@ Clip::Clip(ClipId id, MediaId media_id, TimeRange source_range, MediaTime timeli
   distant_music_.validate();
   telephone_.validate();
   underwater_.validate();
+  if (audio_effect_order_.empty()) audio_effect_order_ = canonical_audio_effect_order();
+  validate_audio_effect_order(audio_effect_order_);
 }
 
 void validate_visual_transform(const VisualTransform& value) {

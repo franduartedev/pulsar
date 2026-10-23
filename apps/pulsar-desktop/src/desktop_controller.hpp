@@ -237,6 +237,7 @@ public:
   [[nodiscard]] QVariantList selectedDistantMusicGainKeyframes() const;
   [[nodiscard]] QVariantList cinematicRecipes() const;
   [[nodiscard]] QVariantList selectedAudioFxChain() const;
+  Q_INVOKABLE void moveSelectedAudioFx(const QString& effect_id, int delta);
   [[nodiscard]] double selectedClipPosX() const;
   [[nodiscard]] double selectedClipPosY() const;
   [[nodiscard]] double selectedClipScale() const;

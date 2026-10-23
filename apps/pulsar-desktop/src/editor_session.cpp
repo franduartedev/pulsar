@@ -644,6 +644,12 @@ void EditorSession::set_clip_underwater(domain::ClipId clip, domain::UnderwaterS
   synchronize_document_state();
 }
 
+void EditorSession::set_clip_audio_effect_order(
+    domain::ClipId clip, std::vector<domain::AudioEffectType> order) {
+  processor_.set_clip_audio_effect_order(clip, std::move(order));
+  synchronize_document_state();
+}
+
 void EditorSession::reset_audio_effects(domain::ClipId clip) {
   if (document_.timeline().find_clip(clip) == nullptr) throw std::invalid_argument{"unknown clip"};
   processor_.run_as_one_edit([&] {

@@ -7,6 +7,7 @@
 #include <pulsar/domain/timeline/distant_music.hpp>
 #include <pulsar/domain/timeline/telephone.hpp>
 #include <pulsar/domain/timeline/underwater.hpp>
+#include <pulsar/domain/timeline/audio_effect.hpp>
 
 #include <cstdint>
 
@@ -24,7 +25,8 @@ public:
        double audio_gain_db = 0.0, bool muted = false, MediaTime fade_in = MediaTime::zero(),
        MediaTime fade_out = MediaTime::zero(), VisualTransform visual_transform = {},
        DistantMusicSettings distant_music = {}, TelephoneSettings telephone = {},
-       UnderwaterSettings underwater = {});
+       UnderwaterSettings underwater = {},
+       std::vector<AudioEffectType> audio_effect_order = {});
 
   [[nodiscard]] constexpr ClipId id() const noexcept {
     return id_;
@@ -50,6 +52,9 @@ public:
   [[nodiscard]] const DistantMusicSettings& distant_music() const noexcept { return distant_music_; }
   [[nodiscard]] const TelephoneSettings& telephone() const noexcept { return telephone_; }
   [[nodiscard]] const UnderwaterSettings& underwater() const noexcept { return underwater_; }
+  [[nodiscard]] const std::vector<AudioEffectType>& audio_effect_order() const noexcept {
+    return audio_effect_order_;
+  }
 
   [[nodiscard]] MediaTime duration() const;
   [[nodiscard]] TimeRange timeline_range() const;
@@ -67,6 +72,7 @@ private:
   DistantMusicSettings distant_music_;
   TelephoneSettings telephone_;
   UnderwaterSettings underwater_;
+  std::vector<AudioEffectType> audio_effect_order_;
 };
 
 } // namespace pulsar::domain

@@ -24,13 +24,28 @@ AudioEffectChain AudioEffectChain::from_telephone(const domain::TelephoneSetting
 AudioEffectChain AudioEffectChain::from_clip_effects(
     const domain::DistantMusicSettings& distant_music,
     const domain::TelephoneSettings& telephone, const domain::UnderwaterSettings& underwater,
-    int sample_rate, int channel_count) {
-  AudioEffectChain chain = from_distant_music(distant_music, sample_rate, channel_count);
-  if (telephone.enabled) {
-    chain.add(std::make_unique<TelephoneProcessor>(telephone, sample_rate, channel_count));
-  }
-  if (underwater.enabled) {
-    chain.add(std::make_unique<UnderwaterProcessor>(underwater, sample_rate, channel_count));
+    const std::vector<domain::AudioEffectType>& order, int sample_rate, int channel_count) {
+  const auto canonical = domain::canonical_audio_effect_order();
+  const auto& effective_order = order.empty() ? canonical : order;
+  AudioEffectChain chain;
+  for (const auto type : effective_order) {
+    switch (type) {
+    case domain::AudioEffectType::DistantMusic:
+      if (distant_music.enabled) {
+        chain.add(std::make_unique<DistantMusicProcessor>(distant_music, sample_rate, channel_count));
+      }
+      break;
+    case domain::AudioEffectType::Telephone:
+      if (telephone.enabled) {
+        chain.add(std::make_unique<TelephoneProcessor>(telephone, sample_rate, channel_count));
+      }
+      break;
+    case domain::AudioEffectType::Underwater:
+      if (underwater.enabled) {
+        chain.add(std::make_unique<UnderwaterProcessor>(underwater, sample_rate, channel_count));
+      }
+      break;
+    }
   }
   return chain;
 }
