@@ -1638,6 +1638,14 @@ QVariantList DesktopController::selectedDistantMusicGainKeyframes() const {
   }
   return result;
 }
+QVariantList DesktopController::cinematicRecipes() const {
+  QVariantList result;
+  for (const auto& recipe : pulsar::application::builtin_audio_recipes()) {
+    result.push_back(QVariantMap{{QStringLiteral("id"), QString::fromUtf8(recipe.id.data(), static_cast<int>(recipe.id.size()))},
+                                 {QStringLiteral("name"), QString::fromUtf8(recipe.name.data(), static_cast<int>(recipe.name.size()))}});
+  }
+  return result;
+}
 void DesktopController::setSelectedClipFades(double fade_in_seconds, double fade_out_seconds) {
   if (!active_session_ || !active_session_->selected_clip() || !std::isfinite(fade_in_seconds) || !std::isfinite(fade_out_seconds)) return;
   try {

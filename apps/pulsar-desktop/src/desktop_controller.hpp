@@ -115,6 +115,7 @@ class DesktopController final : public QObject {
   Q_PROPERTY(double selectedTelephoneMix READ selectedTelephoneMix NOTIFY timelineChanged)
   Q_PROPERTY(double selectedTelephoneDrive READ selectedTelephoneDrive NOTIFY timelineChanged)
   Q_PROPERTY(QVariantList selectedDistantMusicGainKeyframes READ selectedDistantMusicGainKeyframes NOTIFY timelineChanged)
+  Q_PROPERTY(QVariantList cinematicRecipes READ cinematicRecipes CONSTANT)
   Q_PROPERTY(double selectedClipPosX READ selectedClipPosX NOTIFY timelineChanged)
   Q_PROPERTY(double selectedClipPosY READ selectedClipPosY NOTIFY timelineChanged)
   Q_PROPERTY(double selectedClipScale READ selectedClipScale NOTIFY timelineChanged)
@@ -223,6 +224,7 @@ public:
   [[nodiscard]] double selectedTelephoneMix() const;
   [[nodiscard]] double selectedTelephoneDrive() const;
   [[nodiscard]] QVariantList selectedDistantMusicGainKeyframes() const;
+  [[nodiscard]] QVariantList cinematicRecipes() const;
   [[nodiscard]] double selectedClipPosX() const;
   [[nodiscard]] double selectedClipPosY() const;
   [[nodiscard]] double selectedClipScale() const;
