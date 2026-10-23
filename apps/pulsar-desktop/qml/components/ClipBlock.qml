@@ -247,10 +247,10 @@ Rectangle {
         }
     }
 
-    // Only states that are not the default: mute, offline.
+    // Only states that are not the default: mute, offline, or automated audio.
     Row {
         id: chips
-        visible: block.width > 90 && (block.muted || block.missing || speakerMouse.containsMouse)
+        visible: block.width > 90 && (block.muted || block.missing || block.gainKeyframes.length > 0 || speakerMouse.containsMouse)
         anchors.right: speaker.visible ? speaker.left : parent.right; anchors.rightMargin: speaker.visible ? 2 : 6
         anchors.top: parent.top; anchors.topMargin: 2
         spacing: 4
@@ -258,6 +258,8 @@ Rectangle {
             Text { id: offlineText; anchors.centerIn: parent; text: "Sin conexión"; color: Theme.textOnAccent; font.pixelSize: 10; font.bold: true } }
         Rectangle { visible: block.muted && !speakerMouse.containsMouse; height: 14; width: muteText.implicitWidth + 10; radius: 3; color: Theme.warning
             Text { id: muteText; anchors.centerIn: parent; text: "Silenciado"; color: Theme.textOnWarning; font.pixelSize: 10; font.bold: true } }
+        Rectangle { visible: block.gainKeyframes.length > 0 && !speakerMouse.containsMouse; height: 14; width: automationText.implicitWidth + 10; radius: 3; color: Theme.focus
+            Text { id: automationText; anchors.centerIn: parent; text: "Autom."; color: Theme.textOnAccent; font.pixelSize: 10; font.bold: true } }
         // Hover hint for the speaker (inside the clip: a floating tooltip would be clipped).
         Rectangle { visible: speakerMouse.containsMouse; height: 14; width: hintText.implicitWidth + 10; radius: 3; color: Theme.chipOverlay
             Text { id: hintText; anchors.centerIn: parent; text: block.muted ? "Activar audio (M)" : "Silenciar audio (M)"; color: Theme.textPrimary; font.pixelSize: 10; font.bold: true } }
