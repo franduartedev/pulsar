@@ -1540,6 +1540,11 @@ int DesktopController::selectedDistantMusicCurve() const {
       ? active_session_->document().timeline().find_clip(*active_session_->selected_clip()) : nullptr;
   return clip ? static_cast<int>(clip->distant_music().curve) : 1;
 }
+int DesktopController::selectedDistantMusicKeyframeCount() const {
+  const auto* clip = active_session_ && active_session_->selected_clip()
+      ? active_session_->document().timeline().find_clip(*active_session_->selected_clip()) : nullptr;
+  return clip ? static_cast<int>(clip->distant_music().gain_keyframes.size()) : 0;
+}
 void DesktopController::setSelectedClipFades(double fade_in_seconds, double fade_out_seconds) {
   if (!active_session_ || !active_session_->selected_clip() || !std::isfinite(fade_in_seconds) || !std::isfinite(fade_out_seconds)) return;
   try {
@@ -1564,7 +1569,9 @@ void DesktopController::setSelectedDistantMusic(double gain_db, double duration,
                                                  double reverb, int curve, bool enabled) {
   if (!active_session_ || !active_session_->selected_clip()) return;
   if (curve < 0 || curve > 2) { setError(QStringLiteral("Curva de Audio FX inválida.")); return; }
-  pulsar::domain::DistantMusicSettings settings;
+  const auto* selected = active_session_->document().timeline().find_clip(*active_session_->selected_clip());
+  if (selected == nullptr) return;
+  pulsar::domain::DistantMusicSettings settings = selected->distant_music();
   settings.enabled = enabled;
   settings.initial_gain_db = gain_db;
   settings.duration_seconds = duration;
@@ -1578,6 +1585,38 @@ void DesktopController::setSelectedDistantMusic(double gain_db, double duration,
     publishTimeline();
   } catch (const std::exception&) {
     setError(QStringLiteral("Los parámetros de Distant Music no son válidos."));
+  }
+}
+void DesktopController::setSelectedDistantMusicGainKeyframes(const QVariantList& keyframes) {
+  if (!active_session_ || !active_session_->selected_clip()) return;
+  if (keyframes.size() > 128) {
+    setError(QStringLiteral("Hay demasiados keyframes para este efecto."));
+    return;
+  }
+  const auto* selected = active_session_->document().timeline().find_clip(*active_session_->selected_clip());
+  if (selected == nullptr) return;
+  auto settings = selected->distant_music();
+  settings.gain_keyframes.clear();
+  for (const auto& item : keyframes) {
+    const auto map = item.toMap();
+    bool time_ok = false;
+    bool value_ok = false;
+    const double time = map.value(QStringLiteral("time")).toDouble(&time_ok);
+    const double value = map.value(QStringLiteral("value")).toDouble(&value_ok);
+    const int interpolation = map.value(QStringLiteral("interpolation"), 1).toInt();
+    if (!time_ok || !value_ok || interpolation < 0 || interpolation > 2) {
+      setError(QStringLiteral("Keyframe inválido: usá tiempo, valor e interpolación válidos."));
+      return;
+    }
+    settings.gain_keyframes.push_back({time, value,
+        static_cast<pulsar::domain::KeyframeInterpolation>(interpolation)});
+  }
+  try {
+    active_session_->set_clip_distant_music(*active_session_->selected_clip(), settings);
+    clearError();
+    publishTimeline();
+  } catch (const std::exception&) {
+    setError(QStringLiteral("Los keyframes deben estar ordenados y dentro del rango permitido."));
   }
 }
 double DesktopController::selectedClipPosX() const {

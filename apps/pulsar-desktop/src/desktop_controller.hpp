@@ -105,6 +105,7 @@ class DesktopController final : public QObject {
   Q_PROPERTY(double selectedDistantMusicEndCutoff READ selectedDistantMusicEndCutoff NOTIFY timelineChanged)
   Q_PROPERTY(double selectedDistantMusicReverb READ selectedDistantMusicReverb NOTIFY timelineChanged)
   Q_PROPERTY(int selectedDistantMusicCurve READ selectedDistantMusicCurve NOTIFY timelineChanged)
+  Q_PROPERTY(int selectedDistantMusicKeyframeCount READ selectedDistantMusicKeyframeCount NOTIFY timelineChanged)
   Q_PROPERTY(double selectedClipPosX READ selectedClipPosX NOTIFY timelineChanged)
   Q_PROPERTY(double selectedClipPosY READ selectedClipPosY NOTIFY timelineChanged)
   Q_PROPERTY(double selectedClipScale READ selectedClipScale NOTIFY timelineChanged)
@@ -202,6 +203,7 @@ public:
   [[nodiscard]] double selectedDistantMusicEndCutoff() const;
   [[nodiscard]] double selectedDistantMusicReverb() const;
   [[nodiscard]] int selectedDistantMusicCurve() const;
+  [[nodiscard]] int selectedDistantMusicKeyframeCount() const;
   [[nodiscard]] double selectedClipPosX() const;
   [[nodiscard]] double selectedClipPosY() const;
   [[nodiscard]] double selectedClipScale() const;
@@ -282,6 +284,8 @@ public:
   Q_INVOKABLE void applySelectedDistantMusicPreset();
   Q_INVOKABLE void setSelectedDistantMusic(double gain_db, double duration, double start_cutoff,
                                             double end_cutoff, double reverb, int curve, bool enabled);
+  // Each item is {time: seconds, value: dB, interpolation: 0 hold, 1 linear, 2 smooth}.
+  Q_INVOKABLE void setSelectedDistantMusicGainKeyframes(const QVariantList& keyframes);
   Q_INVOKABLE void setSelectedClipTransform(double pos_x, double pos_y, double scale,
                                              double rotation_degrees, double opacity);
   Q_INVOKABLE void resetSelectedClipTransform();
