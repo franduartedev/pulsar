@@ -593,7 +593,9 @@ ProjectRestoreState ProjectCodec::decode(std::string_view bytes) {
             domain::FrameRate{static_cast<std::int64_t>(numerator), static_cast<std::int64_t>(denominator)},
             tokens.size() == 6};
       } else if (tokens[0].text == "ASSET") {
-        if (!video_track || (section != Section::Assets) || tokens.size() < 4) parse_fail(line_number, "invalid ASSET");
+        if (!video_track) parse_fail(line_number, "invalid ASSET: video track missing");
+        if (section != Section::Assets) parse_fail(line_number, "invalid ASSET: assets section expected");
+        if (tokens.size() < 4) parse_fail(line_number, "invalid ASSET: too few fields");
         if (tokens.size() >= 3 && tokens[2].text == "AUDIO_ONLY") {
           std::size_t i = 1;
           const auto id = domain::MediaId{unsigned_number(tokens[i++], line_number, "media id")};
@@ -628,7 +630,7 @@ ProjectRestoreState ProjectCodec::decode(std::string_view bytes) {
           section = Section::Assets;
           continue;
         }
-        if (tokens.size() < 14) parse_fail(line_number, "invalid ASSET");
+        if (tokens.size() < 14) parse_fail(line_number, "invalid ASSET: too few video fields");
         std::size_t i = 1;
         const auto id = domain::MediaId{unsigned_number(tokens[i++], line_number, "media id")};
         const int stream = int_number(tokens[i++], line_number, "stream index");
