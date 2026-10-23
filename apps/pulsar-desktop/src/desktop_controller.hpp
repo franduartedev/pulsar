@@ -76,6 +76,8 @@ class DesktopController final : public QObject {
   Q_PROPERTY(QString activeProjectPath READ activeProjectPath NOTIFY activeProjectPathChanged)
   Q_PROPERTY(bool previewLate READ previewLate NOTIFY technicalStatusChanged)
   Q_PROPERTY(QString debugMetrics READ debugMetrics NOTIFY diagnosticsChanged)
+  Q_PROPERTY(double previewPeakDb READ previewPeakDb NOTIFY diagnosticsChanged)
+  Q_PROPERTY(double previewRmsDb READ previewRmsDb NOTIFY diagnosticsChanged)
   Q_PROPERTY(bool recoveryAvailable READ recoveryAvailable NOTIFY recoveryChanged)
   Q_PROPERTY(QString recoveryDescription READ recoveryDescription NOTIFY recoveryChanged)
   Q_PROPERTY(QAbstractItemModel* timelineClips READ timelineClips NOTIFY timelineChanged)
@@ -167,6 +169,8 @@ public:
   }
   [[nodiscard]] bool previewLate() const { return preview_late_; }
   [[nodiscard]] QString debugMetrics() const { return debug_metrics_; }
+  [[nodiscard]] double previewPeakDb() const;
+  [[nodiscard]] double previewRmsDb() const;
   // On-demand desktop performance snapshot for D3 evidence. Calculates
   // percentiles from copied ring samples; call only for explicit reporting,
   // never on a hot path. Not a Q_PROPERTY, emits no signals.

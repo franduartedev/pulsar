@@ -3109,7 +3109,7 @@ void DesktopController::updateDiagnostics(){
   const auto submitted = audio.output.device_frames_submitted;
   const auto processed = audio.output.device_frames_processed;
   const auto in_flight = submitted >= processed ? submitted - processed : 0;
-  debug_metrics_=QString("program_frames=%1 visual_misses=%2 conversion_ms=%3 waveform_queries=%4 waveform_segments=%5 audio_underruns=%6 audio_buffered=%7 audio_in_flight=%8 audio_render_p50_us=%9 audio_render_p95_us=%10 audio_render_max_us=%11 audio_source_opens=%12 audio_live_sources=%13 audio_clock_transitions=%14 audio_ts_obs=%15 audio_ts_silence=%16 audio_ts_trim=%17")
+  debug_metrics_=QString("program_frames=%1 visual_misses=%2 conversion_ms=%3 waveform_queries=%4 waveform_segments=%5 audio_underruns=%6 audio_buffered=%7 audio_in_flight=%8 audio_render_p50_us=%9 audio_render_p95_us=%10 audio_render_max_us=%11 audio_source_opens=%12 audio_live_sources=%13 audio_clock_transitions=%14 audio_ts_obs=%15 audio_ts_silence=%16 audio_ts_trim=%17 audio_peak_db=%18 audio_rms_db=%19")
       .arg(displayed_frames_).arg(visual_misses_)
       .arg(std::chrono::duration_cast<std::chrono::milliseconds>(last_conversion_time_).count())
       .arg(waveform_query_count_).arg(waveform_segment_count_)
@@ -3118,8 +3118,23 @@ void DesktopController::updateDiagnostics(){
       .arg(audio.mixer.source_opens).arg(audio.mixer.live_sources).arg(audio.clock_transitions)
       .arg(audio.mixer.timestamp_observations)
       .arg(audio.mixer.timestamp_inserted_silence_frames)
-      .arg(audio.mixer.timestamp_trimmed_frames);
+      .arg(audio.mixer.timestamp_trimmed_frames)
+      .arg(previewPeakDb(), 0, 'f', 1).arg(previewRmsDb(), 0, 'f', 1);
   emit diagnosticsChanged();
+}
+double DesktopController::previewPeakDb() const {
+  const auto audio = active_session_ != nullptr ? active_session_->audio_metrics()
+                                                 : pulsar::application::AudioMixPlaybackMetrics{};
+  return audio.last_level.peak > 0.0F
+             ? std::max(-120.0, 20.0 * std::log10(static_cast<double>(audio.last_level.peak)))
+             : -120.0;
+}
+double DesktopController::previewRmsDb() const {
+  const auto audio = active_session_ != nullptr ? active_session_->audio_metrics()
+                                                 : pulsar::application::AudioMixPlaybackMetrics{};
+  return audio.last_level.rms > 0.0F
+             ? std::max(-120.0, 20.0 * std::log10(static_cast<double>(audio.last_level.rms)))
+             : -120.0;
 }
 QString DesktopController::performanceSnapshot() const {
   auto summarize = [](const DurationSampleRing& ring) {

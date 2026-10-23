@@ -51,6 +51,14 @@ Item {
             elide: Text.ElideRight
             width: Math.min(implicitWidth, Math.max(120, bar.width * 0.45))
         }
+        Text {
+            visible: controller.hasMedia
+            anchors.verticalCenter: parent.verticalCenter
+            text: "P " + Math.round(controller.previewPeakDb) + " dB   R " + Math.round(controller.previewRmsDb) + " dB"
+            color: controller.previewPeakDb > -1.0 ? Theme.warning : Theme.textMuted
+            font.family: Theme.mono
+            font.pixelSize: Theme.fontSizeXS
+        }
     }
     Rectangle {
         visible: controller.exportRunning
