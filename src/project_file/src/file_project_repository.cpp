@@ -43,6 +43,12 @@ std::filesystem::path temp_path_for(const std::filesystem::path& destination, in
                    std::to_string(sequence) + "-" + std::to_string(attempt));
 }
 
+bool readable_regular_file(const std::filesystem::path& path, std::error_code& error) {
+  if (!std::filesystem::is_regular_file(path, error) || error) return false;
+  std::ifstream input{path, std::ios::binary};
+  return static_cast<bool>(input);
+}
+
 std::string read_all(const std::filesystem::path& path) {
   std::ifstream input{path, std::ios::binary | std::ios::ate};
   if (!input) throw application::ProjectRepositoryError{"cannot open project file for reading"};
@@ -76,10 +82,9 @@ void refresh_availability(application::ProjectRestoreState& state,
       const auto filename = logical.substr(std::string{"pulsar-sound:"}.size()) + ".wav";
       const auto root = assets_directory();
       const auto candidate = root / "sounds" / filename;
-      readable = !root.empty() && std::filesystem::is_regular_file(candidate, error);
+      readable = !root.empty() && readable_regular_file(candidate, error);
     } else {
-      const bool regular = std::filesystem::is_regular_file(check_path, error);
-      readable = !error && regular;
+      readable = readable_regular_file(check_path, error);
     }
     const auto availability = readable ? application::MediaAvailability::Available
                                        : application::MediaAvailability::Unavailable;
