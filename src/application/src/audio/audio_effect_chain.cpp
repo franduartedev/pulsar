@@ -14,6 +14,13 @@ AudioEffectChain AudioEffectChain::from_distant_music(
                                                                    channel_count)};
 }
 
+AudioEffectChain AudioEffectChain::from_telephone(const domain::TelephoneSettings& settings,
+                                                  int sample_rate, int channel_count) {
+  if (!settings.enabled) return {};
+  return AudioEffectChain{std::make_unique<TelephoneProcessor>(settings, sample_rate,
+                                                                channel_count)};
+}
+
 void AudioEffectChain::reset() noexcept {
   for (auto& effect : effects_) effect->reset();
 }

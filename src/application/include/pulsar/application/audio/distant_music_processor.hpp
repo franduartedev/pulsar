@@ -1,22 +1,12 @@
 #pragma once
 
-#include <pulsar/application/media/audio_block.hpp>
+#include <pulsar/application/audio/audio_effect_processor.hpp>
 #include <pulsar/domain/timeline/distant_music.hpp>
 
 #include <cstdint>
 #include <cstddef>
 
 namespace pulsar::application {
-
-class AudioEffectProcessor {
-public:
-  virtual ~AudioEffectProcessor() = default;
-
-  virtual void reset() noexcept = 0;
-  virtual void process(AudioBlock& block, std::int64_t first_frame) noexcept = 0;
-  virtual void process_interleaved(float* samples, std::size_t frame_count,
-                                   std::int64_t first_frame) noexcept = 0;
-};
 
 // Stateful block processor shared by preview and offline rendering. The caller
 // resets it whenever playback seeks or a new contributor becomes active.

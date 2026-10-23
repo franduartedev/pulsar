@@ -1,6 +1,7 @@
 #pragma once
 
 #include <pulsar/application/audio/distant_music_processor.hpp>
+#include <pulsar/application/audio/telephone_processor.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -25,6 +26,8 @@ public:
 
   static AudioEffectChain from_distant_music(const domain::DistantMusicSettings& settings,
                                              int sample_rate, int channel_count);
+  static AudioEffectChain from_telephone(const domain::TelephoneSettings& settings,
+                                         int sample_rate, int channel_count);
 
   [[nodiscard]] bool empty() const noexcept { return effects_.empty(); }
   [[nodiscard]] std::size_t size() const noexcept { return effects_.size(); }

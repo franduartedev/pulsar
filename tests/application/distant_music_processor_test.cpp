@@ -1,8 +1,10 @@
 #include <pulsar/application/audio/distant_music_processor.hpp>
 #include <pulsar/application/audio/audio_effect_chain.hpp>
 #include <pulsar/application/audio/output_stage.hpp>
+#include <pulsar/application/audio/telephone_processor.hpp>
 
 #include <cassert>
+#include <cmath>
 #include <stdexcept>
 #include <utility>
 #include <vector>
@@ -71,5 +73,22 @@ int main() {
     rejected = true;
   }
   assert(rejected);
+
+  domain::TelephoneSettings telephone_settings;
+  telephone_settings.enabled = true;
+  telephone_settings.mix = 1.0;
+  telephone_settings.drive = 0.2;
+  application::TelephoneProcessor telephone{telephone_settings, rate, 2};
+  float telephone_samples[8] = {1.0F, -1.0F, 0.5F, -0.5F, 0.25F, -0.25F, 0.1F, -0.1F};
+  telephone.process_interleaved(telephone_samples, 4, 0);
+  for (const float sample : telephone_samples) assert(std::isfinite(sample));
+  telephone.reset();
+  auto telephone_chain = application::AudioEffectChain::from_telephone(telephone_settings, rate, 2);
+  assert(telephone_chain.size() == 1);
+  telephone_settings.mix = 2.0;
+  bool telephone_rejected = false;
+  try { application::TelephoneProcessor invalid_telephone{telephone_settings, rate, 2}; }
+  catch (const std::invalid_argument&) { telephone_rejected = true; }
+  assert(telephone_rejected);
   return 0;
 }
