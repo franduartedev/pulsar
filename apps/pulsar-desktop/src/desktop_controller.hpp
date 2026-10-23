@@ -248,6 +248,7 @@ public:
   // one by one, a bad file never costs the others. Duplicates (same file) are skipped.
   Q_INVOKABLE void openPaths(const QStringList& paths);
   Q_INVOKABLE void relinkAsset(const QString& media_id, const QString& path);
+  Q_INVOKABLE void setCanvasPreset(const QString& preset);
   Q_INVOKABLE void openUrls(const QList<QUrl>& urls);
   Q_INVOKABLE void cancelImport();
   Q_INVOKABLE void importRequested();

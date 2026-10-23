@@ -56,6 +56,12 @@ Rectangle {
         PButton { flat: true; text: "Guardar"; enabled: controller.projectDirty; onClicked: header.saveProjectRequested() }
         PButton { visible: header.width >= 1120; flat: true; text: "Guardar como…"; onClicked: header.saveProjectAsRequested() }
         PButton { visible: header.width >= 1040; flat: true; text: "Importar"; onClicked: header.importMediaRequested() }
+        Row { visible: header.width >= 1180; spacing: 2
+            Text { anchors.verticalCenter: parent.verticalCenter; text: "Lienzo"; color: Theme.textMuted; font.pixelSize: Theme.fontSizeXS }
+            PButton { flat: true; text: "16:9"; onClicked: controller.setCanvasPreset("landscape") }
+            PButton { flat: true; text: "9:16"; onClicked: controller.setCanvasPreset("portrait") }
+            PButton { flat: true; text: "1:1"; onClicked: controller.setCanvasPreset("square") }
+        }
         Item { width: Theme.spaceM; height: 1 }
         PButton { text: "Cancelar"; visible: controller.exportRunning; onClicked: controller.cancelExport() }
         PButton {

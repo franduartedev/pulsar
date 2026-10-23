@@ -548,6 +548,11 @@ void EditorSession::set_clip_audio_gain(domain::ClipId clip_id, double gain_db) 
   synchronize_document_state();
 }
 
+void EditorSession::set_project_canvas(application::ProjectCanvas canvas) {
+  processor_.set_project_canvas(std::move(canvas));
+  synchronize_document_state();
+}
+
 void EditorSession::set_clip_muted(domain::ClipId clip_id, bool muted) {
   processor_.set_clip_muted(clip_id, muted);
   synchronize_document_state();

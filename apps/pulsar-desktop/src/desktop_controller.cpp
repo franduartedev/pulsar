@@ -465,6 +465,25 @@ void DesktopController::relinkAsset(const QString& media_id, const QString& path
                  .arg(QString::fromUtf8(error.what())));
   }
 }
+void DesktopController::setCanvasPreset(const QString& preset) {
+  if (!active_session_ || !active_session_->document().canvas()) return;
+  const auto current = *active_session_->document().canvas();
+  int width = current.width;
+  int height = current.height;
+  if (preset == QStringLiteral("landscape")) { width = 1920; height = 1080; }
+  else if (preset == QStringLiteral("portrait")) { width = 1080; height = 1920; }
+  else if (preset == QStringLiteral("square")) { width = 1080; height = 1080; }
+  else { setError(QStringLiteral("Preset de lienzo desconocido.")); return; }
+  try {
+    active_session_->set_project_canvas(pulsar::application::ProjectCanvas{
+        width, height, current.frame_rate, false});
+    clearError();
+    publishTimeline();
+    emit mediaChanged();
+  } catch (const std::exception&) {
+    setError(QStringLiteral("No se pudo cambiar el formato del lienzo."));
+  }
+}
 void DesktopController::cancelImport() {
   if (import_total_ == 0 && !busy_) return;
   resetImportQueue();

@@ -266,6 +266,7 @@ public:
   void remove_selected_clip_transition();
   [[nodiscard]] bool selected_clip_has_transition() const;
   void set_track_audio_state(domain::TrackId track, domain::AudioTrackState state);
+  void set_project_canvas(application::ProjectCanvas canvas);
   // "Duplicar": a copy of the selected clip (or title) right after the original, on the same
   // track, with the same source range, gain, mute and fades. One undo step; the copy becomes the
   // selection. Throws DuplicateException{NoSpace} (nothing changes) when the room is taken.

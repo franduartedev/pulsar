@@ -135,6 +135,20 @@ void relinking_asset_is_undoable_and_preserves_clip_identity() {
          std::filesystem::path{"relinked/clip.mp4"});
 }
 
+void canvas_preset_is_undoable_and_persisted() {
+  auto document = make_document();
+  CommandProcessor processor{document};
+  const auto original = *document.canvas();
+  processor.set_project_canvas(application::ProjectCanvas{1080, 1920, original.frame_rate, false});
+  assert(document.canvas()->width == 1080 && document.canvas()->height == 1920);
+  assert(processor.undo());
+  assert(*document.canvas() == original);
+  assert(processor.redo());
+  const auto bytes = ProjectCodec::encode(document.snapshot());
+  assert(bytes.find("CANVAS 1080 1920") != std::string::npos);
+  assert(ProjectCodec::encode(ProjectDocument::restore(ProjectCodec::decode(bytes)).snapshot()) == bytes);
+}
+
 void visual_stack_versions_and_validation() {
   using domain::TrackId;
   using domain::TrackKind;
@@ -646,6 +660,7 @@ int main() {
   distant_music_roundtrips_as_project_version_seven();
   distant_music_gain_keyframes_roundtrip_as_project_version_eight();
   relinking_asset_is_undoable_and_preserves_clip_identity();
+  canvas_preset_is_undoable_and_persisted();
   builtin_locator_roundtrip();
   golden_fixture_decodes();
   strict_decode_rejects_malformed_input();

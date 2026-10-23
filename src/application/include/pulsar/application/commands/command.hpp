@@ -1,6 +1,7 @@
 #pragma once
 
 #include <pulsar/application/project/media_asset.hpp>
+#include <pulsar/application/project/project_snapshot.hpp>
 #include <pulsar/domain/ids/ids.hpp>
 #include <pulsar/domain/time/media_time.hpp>
 #include <pulsar/domain/timeline/clip.hpp>
@@ -35,6 +36,10 @@ struct ReorderVisualTrackCommand {
 struct SetTrackAudioStateCommand {
   domain::TrackId track_id;
   domain::AudioTrackState state;
+};
+
+struct SetProjectCanvasCommand {
+  std::optional<ProjectCanvas> canvas;
 };
 
 struct AddClipCommand {
@@ -136,6 +141,7 @@ struct RemoveTransitionCommand { domain::Transition transition; };
 
 using Command = std::variant<AddTrackCommand, RemoveTrackCommand, RestoreEmptyVisualTrackCommand,
                              ReorderVisualTrackCommand, SetTrackAudioStateCommand,
+                             SetProjectCanvasCommand,
                              AddClipCommand, RemoveClipCommand, MoveClipCommand,
                              TrimClipStartCommand, TrimClipEndCommand, SplitClipCommand,
                              SetClipAudioGainCommand, SetClipMutedCommand, SetClipFadesCommand,

@@ -9,6 +9,13 @@
 namespace pulsar::application {
 namespace {
 
+void validate_project_canvas(const ProjectCanvas& canvas) {
+  if (canvas.width <= 0 || canvas.height <= 0 || canvas.width > 32768 ||
+      canvas.height > 32768 || static_cast<std::int64_t>(canvas.width) * canvas.height > 64'000'000) {
+    throw std::invalid_argument{"invalid project canvas dimensions"};
+  }
+}
+
 struct ClipLocation {
   domain::TrackId track_id;
   domain::Clip clip;
@@ -52,6 +59,11 @@ void CommandProcessor::set_track_audio_state(domain::TrackId track_id,
   const auto* track = document_.timeline().find_track(track_id);
   if (track != nullptr && track->audio_state() == state) return;
   execute(SetTrackAudioStateCommand{track_id, state});
+}
+
+void CommandProcessor::set_project_canvas(ProjectCanvas canvas) {
+  validate_project_canvas(canvas);
+  execute(SetProjectCanvasCommand{std::move(canvas)});
 }
 
 void CommandProcessor::execute(Command command) {
@@ -402,6 +414,9 @@ void CommandProcessor::apply(ProjectDocument& document, const Command& command, 
                       concrete_command.track_id);
         } else if constexpr (std::is_same_v<CommandType, SetTrackAudioStateCommand>) {
           timeline.set_track_audio_state(concrete_command.track_id, concrete_command.state);
+        } else if constexpr (std::is_same_v<CommandType, SetProjectCanvasCommand>) {
+          if (concrete_command.canvas.has_value()) validate_project_canvas(*concrete_command.canvas);
+          document.canvas_ = concrete_command.canvas;
         } else if constexpr (std::is_same_v<CommandType, AddClipCommand>) {
           bool promote_still_canvas = false;
           if (document.canvas_ && document.canvas_->provisional_still &&
@@ -546,6 +561,8 @@ Command CommandProcessor::build_inverse(const ProjectDocument& document, const C
           const auto* track = document.timeline().find_track(concrete_command.track_id);
           if (track == nullptr) throw std::invalid_argument{"track id does not exist in timeline"};
           return SetTrackAudioStateCommand{concrete_command.track_id, track->audio_state()};
+        } else if constexpr (std::is_same_v<CommandType, SetProjectCanvasCommand>) {
+          return SetProjectCanvasCommand{document.canvas_};
         } else if constexpr (std::is_same_v<CommandType, AddClipCommand>) {
           return RemoveClipCommand{concrete_command.clip.id()};
         } else if constexpr (std::is_same_v<CommandType, RemoveClipCommand>) {
