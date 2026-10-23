@@ -191,6 +191,18 @@ Rectangle {
             function onGainKeyframesChanged() { gainEnvelope.requestPaint() }
             function onDurationSecondsChanged() { gainEnvelope.requestPaint() }
         }
+        function pointX(time) {
+            return Math.max(0, Math.min(width, Number(time) / block.durationSeconds * width))
+        }
+        function pointY(value) {
+            var level = Math.max(0, Math.min(1, (Number(value) + 60) / 60))
+            return height - 4 - level * Math.max(4, height - 8)
+        }
+        function shapedProgress(progress, interpolation) {
+            if (Number(interpolation) === 0) return 0 // Hold
+            if (Number(interpolation) === 2) return progress * progress * (3 - 2 * progress) // Smooth
+            return progress // Linear
+        }
         onPaint: {
             var ctx = getContext("2d")
             ctx.reset()
@@ -199,19 +211,25 @@ Rectangle {
             ctx.strokeStyle = Theme.focus
             ctx.lineWidth = 1.5
             ctx.beginPath()
-            for (var i = 0; i < keys.length; ++i) {
-                var key = keys[i]
-                var x = Math.max(0, Math.min(width, Number(key.time) / block.durationSeconds * width))
-                var level = Math.max(0, Math.min(1, (Number(key.value) + 60) / 60))
-                var y = height - 4 - level * Math.max(4, height - 8)
-                if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y)
+            ctx.moveTo(pointX(keys[0].time), pointY(keys[0].value))
+            for (var i = 0; i + 1 < keys.length; ++i) {
+                var left = keys[i]
+                var right = keys[i + 1]
+                var samples = 12
+                for (var sample = 1; sample <= samples; ++sample) {
+                    var progress = sample / samples
+                    var shaped = shapedProgress(progress, right.interpolation)
+                    var value = Number(left.value) + (Number(right.value) - Number(left.value)) * shaped
+                    var time = Number(left.time) + (Number(right.time) - Number(left.time)) * progress
+                    ctx.lineTo(pointX(time), pointY(value))
+                }
             }
             ctx.stroke()
             ctx.fillStyle = Theme.focus
             for (var j = 0; j < keys.length; ++j) {
                 var point = keys[j]
-                var px = Math.max(0, Math.min(width, Number(point.time) / block.durationSeconds * width))
-                var py = height - 4 - Math.max(0, Math.min(1, (Number(point.value) + 60) / 60)) * Math.max(4, height - 8)
+                var px = pointX(point.time)
+                var py = pointY(point.value)
                 ctx.beginPath(); ctx.arc(px, py, 2.5, 0, 2 * Math.PI); ctx.fill()
             }
         }
