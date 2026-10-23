@@ -248,6 +248,8 @@ Rectangle {
                 var level = Math.max(0, Math.min(1, (height - 4 - mouse.y) / Math.max(4, height - 8)))
                 var value = -60 + level * 60
                 var next = controller.selectedDistantMusicGainKeyframes.slice()
+                for (var existing = 0; existing < next.length; ++existing)
+                    if (Math.abs(Number(next[existing].time) - time) < 0.01) return
                 next.push({time: time, value: value, interpolation: 1})
                 next.sort(function(a, b) { return Number(a.time) - Number(b.time) })
                 controller.setSelectedDistantMusicGainKeyframes(next)
