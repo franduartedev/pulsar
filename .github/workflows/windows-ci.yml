@@ -54,6 +54,19 @@ jobs:
           "PULSAR_VCPKG_TOOLCHAIN=$vcpkgRoot/scripts/buildsystems/vcpkg.cmake" >> $env:GITHUB_ENV
           "PULSAR_VCPKG_ROOT=$vcpkgRoot" >> $env:GITHUB_ENV
 
+      # Test-only dependency: the vcpkg ffmpeg port ships libraries without the
+      # CLI or libx264, so integration tests use a separately installed CLI.
+      # It is never linked into the product.
+      - name: Install FFmpeg CLI for tests
+        shell: pwsh
+        run: |
+          choco install ffmpeg --no-progress --yes
+          $ffmpeg = Join-Path $env:ProgramData 'chocolatey\bin\ffmpeg.exe'
+          if (-not (Test-Path $ffmpeg)) {
+            $ffmpeg = (Get-Command ffmpeg -ErrorAction Stop).Source
+          }
+          "PULSAR_TEST_FFMPEG_CLI=$ffmpeg" >> $env:GITHUB_ENV
+
       - name: Configure
         shell: pwsh
         run: >-
@@ -61,6 +74,7 @@ jobs:
           -DCMAKE_BUILD_TYPE=Release
           -DCMAKE_TOOLCHAIN_FILE="$env:PULSAR_VCPKG_TOOLCHAIN"
           -DPULSAR_BUILD_DESKTOP=ON
+          -DPULSAR_TEST_FFMPEG_CLI="$env:PULSAR_TEST_FFMPEG_CLI"
 
       - name: Build
         run: cmake --build build --parallel

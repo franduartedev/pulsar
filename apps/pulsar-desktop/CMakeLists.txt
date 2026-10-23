@@ -1,3 +1,6 @@
+# Embedded as a C string literal; normalize Windows backslashes.
+file(TO_CMAKE_PATH "${CMAKE_SOURCE_DIR}" PULSAR_SOURCE_DIR)
+
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Qml Quick)
 if(PULSAR_BUILD_QT_AUDIO)
   find_package(Qt6 REQUIRED COMPONENTS Multimedia)
@@ -173,7 +176,7 @@ target_link_libraries(pulsar_desktop_export_tests
 )
 target_compile_definitions(pulsar_desktop_export_tests
   PRIVATE
-    PULSAR_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+    PULSAR_SOURCE_DIR="${PULSAR_SOURCE_DIR}"
     PULSAR_HAS_QT_AUDIO=1
 )
 pulsar_apply_project_options(pulsar_desktop_export_tests)
@@ -228,7 +231,7 @@ target_link_libraries(pulsar_desktop_ingest_tests
 )
 target_compile_definitions(pulsar_desktop_ingest_tests
   PRIVATE
-    PULSAR_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+    PULSAR_SOURCE_DIR="${PULSAR_SOURCE_DIR}"
     PULSAR_HAS_QT_AUDIO=1
 )
 pulsar_apply_project_options(pulsar_desktop_ingest_tests)
@@ -277,7 +280,7 @@ foreach(pair "safety|pulsar.desktop.safety" "shutdown|pulsar.desktop.shutdown" "
   target_link_libraries(${target} PRIVATE
     Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick Qt6::Multimedia
     pulsar::media_ffmpeg pulsar::media_qt_audio pulsar::application pulsar::domain pulsar::project_file)
-  target_compile_definitions(${target} PRIVATE PULSAR_SOURCE_DIR="${CMAKE_SOURCE_DIR}" PULSAR_HAS_QT_AUDIO=1)
+  target_compile_definitions(${target} PRIVATE PULSAR_SOURCE_DIR="${PULSAR_SOURCE_DIR}" PULSAR_HAS_QT_AUDIO=1)
   pulsar_apply_project_options(${target})
   pulsar_apply_compiler_warnings(${target})
   add_dependencies(${target} pulsar_desktop)
