@@ -1577,6 +1577,18 @@ void DesktopController::applySelectedDistantMusicPreset() {
   setSelectedDistantMusic(-30.0, 4.0, 900.0, 18'000.0, 0.18, 1, true);
 }
 
+void DesktopController::applySelectedCinematicRecipe(const QString& recipe) {
+  if (recipe == QStringLiteral("reveal")) {
+    setSelectedDistantMusic(-36.0, 5.0, 420.0, 18'000.0, 0.24, 0, true);
+  } else if (recipe == QStringLiteral("suspense")) {
+    setSelectedDistantMusic(-48.0, 7.0, 180.0, 12'000.0, 0.42, 1, true);
+  } else if (recipe == QStringLiteral("memory")) {
+    setSelectedDistantMusic(-28.0, 3.0, 650.0, 9'500.0, 0.58, 2, true);
+  } else {
+    setError(QStringLiteral("Receta cinematográfica desconocida."));
+  }
+}
+
 void DesktopController::setSelectedDistantMusic(double gain_db, double duration,
                                                  double start_cutoff, double end_cutoff,
                                                  double reverb, int curve, bool enabled) {

@@ -288,6 +288,7 @@ public:
   Q_INVOKABLE void toggleSelectedClipMute();
   Q_INVOKABLE void setSelectedClipFades(double fade_in_seconds, double fade_out_seconds);
   Q_INVOKABLE void applySelectedDistantMusicPreset();
+  Q_INVOKABLE void applySelectedCinematicRecipe(const QString& recipe);
   Q_INVOKABLE void setSelectedDistantMusic(double gain_db, double duration, double start_cutoff,
                                             double end_cutoff, double reverb, int curve, bool enabled);
   // Each item is {time: seconds, value: dB, interpolation: 0 hold, 1 linear, 2 smooth}.
