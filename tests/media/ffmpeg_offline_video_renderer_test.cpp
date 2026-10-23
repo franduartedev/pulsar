@@ -14,17 +14,11 @@
 #include <stdexcept>
 #include <vector>
 
+#include "../support/shell_command.hpp"
+
 namespace {
 
-std::string shell_quote(const std::filesystem::path& path) {
-  std::string quoted{"'"};
-  for (const char character : path.string()) {
-    if (character == '\'') quoted += "'\\''";
-    else quoted += character;
-  }
-  quoted += "'";
-  return quoted;
-}
+using pulsar::test_support::shell_quote;
 
 class OriginProbe final : public pulsar::application::MediaProbe {
 public:

@@ -18,6 +18,8 @@
 #include <string_view>
 #include <vector>
 
+#include "../support/shell_command.hpp"
+
 namespace {
 
 using pulsar::domain::MediaTime;
@@ -137,9 +139,7 @@ bool latency_ring_tests() {
   return true;
 }
 
-std::string shell_quote(const std::filesystem::path& path) {
-  return "'" + path.string() + "'";
-}
+using pulsar::test_support::shell_quote;
 
 bool worker_completion_counter_plumbing_tests() {
   // A freshly constructed real worker reports zeroed completion plumbing.
@@ -148,7 +148,7 @@ bool worker_completion_counter_plumbing_tests() {
   std::filesystem::create_directories(root);
   const auto media = root / "tiny.mp4";
   const std::string command =
-      std::string(PULSAR_TEST_FFMPEG_CLI) +
+      shell_quote(PULSAR_TEST_FFMPEG_CLI) +
       " -y -hide_banner -loglevel error -f lavfi -i testsrc=duration=2:size=64x64:rate=10"
       " -pix_fmt yuv420p -c:v mpeg4 " +
       shell_quote(media);

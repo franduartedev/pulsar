@@ -34,6 +34,8 @@ extern "C" {
 #include <variant>
 #include <vector>
 
+#include "../support/shell_command.hpp"
+
 namespace {
 
 using pulsar::application::MediaProbeError;
@@ -183,18 +185,8 @@ void write_ppm_fixture(const std::filesystem::path& path) {
   }
 }
 
-std::string shell_quote(const std::filesystem::path& path) {
-  std::string quoted{"'"};
-  for (const char character : path.string()) {
-    if (character == '\'') {
-      quoted += "'\\''";
-    } else {
-      quoted += character;
-    }
-  }
-  quoted += "'";
-  return quoted;
-}
+using pulsar::test_support::null_device;
+using pulsar::test_support::shell_quote;
 
 std::filesystem::path fixture_root() {
   const auto run_id = std::chrono::steady_clock::now().time_since_epoch().count();
@@ -207,7 +199,7 @@ std::filesystem::path fixture_root() {
 void write_non_zero_start_h264_fixture(const std::filesystem::path& path) {
   const std::string encoder_check_command =
       shell_quote(PULSAR_TEST_FFMPEG_CLI) +
-      " -hide_banner -loglevel error -h encoder=libx264 >/dev/null 2>&1";
+      " -hide_banner -loglevel error -h encoder=libx264 >" + null_device() + " 2>&1";
   if (std::system(encoder_check_command.c_str()) != 0) {
     throw std::runtime_error{
         "ffmpeg CLI is available, but the required libx264 encoder is not"};
