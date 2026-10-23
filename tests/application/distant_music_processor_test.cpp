@@ -65,6 +65,7 @@ int main() {
   automated.process_interleaved(automated_samples, 1, 0);
   assert(automated_samples[0] < 0.02F);
   automated.reset();
+  automated_samples[0] = automated_samples[1] = 1.0F;
   automated.process_interleaved(automated_samples, 1, rate);
   assert(automated_samples[0] > 0.5F);
 

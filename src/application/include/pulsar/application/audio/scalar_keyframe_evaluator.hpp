@@ -19,7 +19,7 @@ inline float evaluate_scalar_keyframes(const std::vector<domain::ScalarKeyframe>
     return static_cast<float>(keyframes.front().value);
   }
   while (cursor + 1 < keyframes.size() &&
-         time_seconds > keyframes[cursor + 1].time_seconds) {
+         time_seconds >= keyframes[cursor + 1].time_seconds) {
     ++cursor;
   }
   if (cursor + 1 == keyframes.size()) return static_cast<float>(keyframes.back().value);
@@ -28,9 +28,12 @@ inline float evaluate_scalar_keyframes(const std::vector<domain::ScalarKeyframe>
   if (right.interpolation == domain::KeyframeInterpolation::Hold) {
     return static_cast<float>(left.value);
   }
-  const float span = static_cast<float>(right.time_seconds - left.time_seconds);
+  const double span = right.time_seconds - left.time_seconds;
+  // Duplicate timestamps (or unsorted input) would divide by zero; the later
+  // keyframe wins at that instant.
+  if (!(span > 0.0)) return static_cast<float>(right.value);
   const float progress = std::clamp(
-      (time_seconds - static_cast<float>(left.time_seconds)) / span, 0.0F, 1.0F);
+      static_cast<float>((time_seconds - left.time_seconds) / span), 0.0F, 1.0F);
   const float shaped = right.interpolation == domain::KeyframeInterpolation::Smooth
                            ? progress * progress * (3.0F - 2.0F * progress)
                            : progress;
