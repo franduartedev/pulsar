@@ -21,6 +21,13 @@ struct AudioLevel {
   float peak{0.0F};
   float rms{0.0F};
   std::size_t clipped_samples{0};
+  float pre_stage_peak{0.0F};
+  std::size_t limited_samples{0};
+};
+
+struct AudioOutputStageStats {
+  float input_peak{0.0F};
+  std::size_t limited_samples{0};
 };
 
 [[nodiscard]] inline float soft_output_stage(float x) noexcept {
@@ -31,6 +38,24 @@ struct AudioLevel {
   const float u = (magnitude - kOutputKnee) / room;          // 0 at the knee
   const float shaped = kOutputKnee + room * (u / (1.0F + u));  // slope 1 at the knee, asymptote 1
   return x < 0.0F ? -shaped : shaped;
+}
+
+[[nodiscard]] inline AudioOutputStageStats apply_soft_output_stage(
+    float* samples, std::size_t sample_count) noexcept {
+  AudioOutputStageStats stats;
+  if (samples == nullptr) return stats;
+  for (std::size_t index = 0; index < sample_count; ++index) {
+    const float input = samples[index];
+    if (!std::isfinite(input)) {
+      samples[index] = 0.0F;
+      continue;
+    }
+    const float magnitude = std::fabs(input);
+    stats.input_peak = std::max(stats.input_peak, magnitude);
+    if (magnitude > kOutputKnee) ++stats.limited_samples;
+    samples[index] = soft_output_stage(input);
+  }
+  return stats;
 }
 
 [[nodiscard]] inline AudioLevel measure_audio_level(const float* samples,

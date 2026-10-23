@@ -683,10 +683,11 @@ AudioMixRenderResult AudioMixSession::render(domain::MediaTime timeline_position
   // Master output stage after summation (shared with the exporter): untouched below the knee,
   // a soft bend above it. There is no hidden per-track normalization, AGC or
   // contributor-count attenuation.
-  for (float& sample : result.block.samples_mutable()) {
-    sample = soft_output_stage(sample);
-  }
+  const auto stage_stats = apply_soft_output_stage(result.block.samples_mutable().data(),
+                                                    result.block.samples().size());
   result.level = measure_audio_level(result.block.samples().data(), result.block.samples().size());
+  result.level.pre_stage_peak = stage_stats.input_peak;
+  result.level.limited_samples = stage_stats.limited_samples;
   result.clock = result.usable_contributors == 0 ? AudioMixClockRecommendation::Software
                                                   : AudioMixClockRecommendation::Device;
   prune_sources(active_contributors_);

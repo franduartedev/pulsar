@@ -55,7 +55,15 @@ Item {
             visible: controller.hasMedia
             anchors.verticalCenter: parent.verticalCenter
             text: "P " + Math.round(controller.previewPeakDb) + " dB   R " + Math.round(controller.previewRmsDb) + " dB"
-            color: controller.previewPeakDb > -1.0 ? Theme.warning : Theme.textMuted
+            color: controller.previewLimitedSamples > 0 ? Theme.warning : Theme.textMuted
+            font.family: Theme.mono
+            font.pixelSize: Theme.fontSizeXS
+        }
+        Text {
+            visible: controller.hasMedia && controller.previewLimitedSamples > 0
+            anchors.verticalCenter: parent.verticalCenter
+            text: "LIMIT " + controller.previewLimitedSamples
+            color: Theme.warning
             font.family: Theme.mono
             font.pixelSize: Theme.fontSizeXS
         }

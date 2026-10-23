@@ -416,9 +416,10 @@ std::optional<OfflineAudioBlock> OfflineAudioRenderer::render_next_block() {
       right += value[1];
     }
     // Same master stage as the preview mixer.
-    samples[offset * 2] = soft_output_stage(static_cast<float>(left));
-    samples[offset * 2 + 1] = soft_output_stage(static_cast<float>(right));
+    samples[offset * 2] = static_cast<float>(left);
+    samples[offset * 2 + 1] = static_cast<float>(right);
   }
+  (void)apply_soft_output_stage(samples.data(), samples.size());
   next_sample_index_ += static_cast<std::int64_t>(frame_count);
   metrics_.output_samples += frame_count;
   return OfflineAudioBlock{first, frame_count, 48'000, 2, std::move(samples)};

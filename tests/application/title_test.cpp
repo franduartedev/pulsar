@@ -359,6 +359,13 @@ void output_stage_properties() {
   assert(soft_output_stage(1.0F) > kOutputKnee && soft_output_stage(1.0F) < 1.0F);
   assert(soft_output_stage(1e9F) <= 1.0F && soft_output_stage(-1e9F) >= -1.0F);
   assert(soft_output_stage(std::nanf("")) == 0.0F && soft_output_stage(INFINITY) == 0.0F);
+  float staged[] = {0.5F, 1.0F, -1.5F, 0.0F};
+  const auto stats = application::apply_soft_output_stage(staged, 4);
+  assert(stats.input_peak == 1.5F);
+  assert(stats.limited_samples == 2);
+  assert(staged[0] == 0.5F);
+  assert(staged[1] == soft_output_stage(1.0F));
+  assert(staged[2] == soft_output_stage(-1.5F));
   // Continuous at the knee with slope ~1.
   const float just_above = soft_output_stage(kOutputKnee + 1e-4F);
   assert(std::fabs((just_above - kOutputKnee) - 1e-4F) < 2e-6F);
