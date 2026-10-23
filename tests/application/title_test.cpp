@@ -192,6 +192,16 @@ void compositor_blend_cache_and_failure() {
   // Another frame of the same title: cached, no new raster; a different title: new raster.
   assert(compositor.composite(canvas, titles, ms(1500)) && rasterizer->calls == 1);
   assert(compositor.composite(canvas, titles, secs(2)) && rasterizer->calls == 2);
+  // Editorial title and a subtitle can coexist on the same frame; both active overlays draw.
+  const std::vector<Title> stacked{Title{TitleId{3}, "Editorial", TimeRange{secs(1), secs(2)}},
+                                   Title{TitleId{4}, "Subtitle", TimeRange{secs(1), secs(2)}}};
+  std::vector<std::uint8_t> stacked_pixels(16 * 16 * 4, 0);
+  for (std::size_t i = 3; i < stacked_pixels.size(); i += 4) stacked_pixels[i] = 255;
+  auto stacked_rasterizer = std::make_shared<FlatRasterizer>();
+  composition::TitleCompositor stacked_compositor{stacked_rasterizer};
+  assert(stacked_compositor.composite(composition::RgbaCanvas{16, 16, 64, stacked_pixels.data()}, stacked, secs(1)));
+  assert(stacked_rasterizer->calls == 2);
+  assert(stacked_pixels[(4 * 16 + 4) * 4] > 128);
   assert(!compositor.composite(canvas, titles, secs(3)));                              // end is exclusive
   // Rasterising again for another canvas size.
   std::vector<std::uint8_t> big(32 * 32 * 4, 0);

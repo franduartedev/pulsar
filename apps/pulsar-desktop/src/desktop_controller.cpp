@@ -90,6 +90,25 @@ std::filesystem::path desktop_runtime_media_path(const std::filesystem::path& pr
              : pulsar::desktop::resolve_runtime_media_path(project_file, authored);
 }
 
+std::vector<pulsar::domain::Title> subtitle_overlays(
+    const std::vector<pulsar::application::SubtitleCue>& cues) {
+  std::vector<pulsar::domain::Title> result;
+  result.reserve(cues.size());
+  for (const auto& cue : cues) {
+    std::string text = cue.text;
+    if (text.size() > pulsar::domain::Title::maximum_text_bytes) {
+      text.resize(pulsar::domain::Title::maximum_text_bytes - 3);
+      text += "...";
+    }
+    result.emplace_back(
+        pulsar::domain::TitleId{std::numeric_limits<std::uint64_t>::max() - cue.sequence},
+        std::move(text), pulsar::domain::TimeRange{cue.start, cue.end}, 55, 0xFFFFFFFFu,
+        pulsar::domain::TitleHAlign::Center, pulsar::domain::TitleVAlign::Bottom, true,
+        pulsar::domain::TitleBackground::Dark, 92);
+  }
+  return result;
+}
+
 std::filesystem::path normalized_comparison_path(const std::filesystem::path& path) {
   std::error_code error;
   auto normalized = std::filesystem::weakly_canonical(path, error);
@@ -2870,8 +2889,10 @@ std::optional<std::pair<int, int>> DesktopController::projectCanvasSize() const 
 }
 
 void DesktopController::composeTitlesOnPreview(pulsar::media::ffmpeg::FFmpegPreviewFrame& frame, MediaTime time) {
-  if (!active_session_ || active_session_->titles().empty() ||
-      pulsar::application::composition::active_title(active_session_->titles(), time) == nullptr) return;
+  if (!active_session_) return;
+  auto overlays = subtitle_overlays(active_session_->subtitles());
+  overlays.insert(overlays.end(), active_session_->titles().begin(), active_session_->titles().end());
+  if (overlays.empty()) return;
   const auto canvas = projectCanvasSize();
   if (!canvas) return;
   if (frame.width != canvas->first || frame.height != canvas->second) {
@@ -2893,7 +2914,7 @@ void DesktopController::composeTitlesOnPreview(pulsar::media::ffmpeg::FFmpegPrev
     frame.pixels = std::move(pixels);
   }
   title_compositor_.composite(pulsar::application::composition::RgbaCanvas{frame.width, frame.height, frame.stride_bytes, frame.pixels.data()},
-                              active_session_->titles(), time);
+                              overlays, time);
 }
 
 // A title over a gap in VIDEO 1 (or before the first clip): black canvas + title. Rebuilt only
@@ -3014,6 +3035,8 @@ void DesktopController::exportLoop(pulsar::application::ProjectSnapshot snapshot
     auto profile = pulsar::application::exporting::ExportProfile::beta_v01();
     if (preset == QStringLiteral("1080p")) profile = profile.with_max_output(1920, 1080);
     else if (preset == QStringLiteral("720p")) profile = profile.with_max_output(1280, 720);
+    auto subtitle_titles = subtitle_overlays(snapshot.subtitles);
+    snapshot.titles.insert(snapshot.titles.end(), subtitle_titles.begin(), subtitle_titles.end());
     // Export-quality scaler + a compositor of its own (same rasteriser as the preview).
     pulsar::media::ffmpeg::FFmpegOfflineFrameScaler scaler;
     pulsar::application::composition::TitleCompositor export_titles{title_rasterizer_};

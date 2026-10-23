@@ -42,30 +42,33 @@ TitleCompositor::TitleCompositor(std::shared_ptr<TitleRasterizer> rasterizer, st
 bool TitleCompositor::composite(RgbaCanvas canvas, const std::vector<domain::Title>& titles,
                                 domain::MediaTime time) {
   if (!rasterizer_ || canvas.pixels == nullptr || canvas.width <= 0 || canvas.height <= 0) return false;
-  const domain::Title* title = active_title(titles, time);
-  if (title == nullptr) return false;
-  const std::string key = std::to_string(title->id().value()) + "@" + std::to_string(canvas.width) + "x" +
-                          std::to_string(canvas.height) + "|" + title->look_key();
-  auto found = std::find_if(cache_.begin(), cache_.end(), [&](const Entry& e) { return e.key == key; });
-  if (found == cache_.end()) {
-    Entry entry{key, std::nullopt};
-    try {
-      entry.raster = rasterizer_->rasterize(*title, canvas.width, canvas.height);
-    } catch (...) {
-      entry.raster.reset();  // a title that cannot be drawn must never break playback or export
+  bool drawn = false;
+  for (const auto& title : titles) {
+    if (!title.active_at(time)) continue;
+    const std::string key = std::to_string(title.id().value()) + "@" + std::to_string(canvas.width) + "x" +
+                            std::to_string(canvas.height) + "|" + title.look_key();
+    auto found = std::find_if(cache_.begin(), cache_.end(), [&](const Entry& e) { return e.key == key; });
+    if (found == cache_.end()) {
+      Entry entry{key, std::nullopt};
+      try {
+        entry.raster = rasterizer_->rasterize(title, canvas.width, canvas.height);
+      } catch (...) {
+        entry.raster.reset();
+      }
+      ++raster_count_;
+      cache_.push_front(std::move(entry));
+      while (cache_.size() > max_entries_) cache_.pop_back();
+      found = cache_.begin();
+    } else if (found != cache_.begin()) {
+      cache_.splice(cache_.begin(), cache_, found);
+      found = cache_.begin();
     }
-    ++raster_count_;
-    cache_.push_front(std::move(entry));
-    while (cache_.size() > max_entries_) cache_.pop_back();
-    found = cache_.begin();
-  } else if (found != cache_.begin()) {
-    cache_.splice(cache_.begin(), cache_, found);
-    found = cache_.begin();
+    if (!found->raster.has_value()) continue;
+    blend_premultiplied_over(canvas, *found->raster);
+    ++blend_count_;
+    drawn = true;
   }
-  if (!found->raster.has_value()) return false;
-  blend_premultiplied_over(canvas, *found->raster);
-  ++blend_count_;
-  return true;
+  return drawn;
 }
 
 FitGeometry fit_geometry(int source_width, int source_height, int output_width, int output_height) {
