@@ -7,7 +7,8 @@ int main() {
                              "2\n00:00:03,000 --> 00:00:04,125\nLínea uno\nLínea dos\n\n";
   const auto cues = pulsar::application::parse_srt(source);
   assert(cues.size() == 2);
-  assert(cues[0].start == pulsar::domain::MediaTime{1250, {1, 1000}});
+  const pulsar::domain::MediaTime expected_start{1250, {1, 1000}};
+  assert(cues[0].start == expected_start);
   assert(cues[1].text == "Línea uno\nLínea dos");
   assert(pulsar::application::encode_srt(cues) == source);
   bool rejected = false;
