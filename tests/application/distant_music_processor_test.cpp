@@ -1,5 +1,6 @@
 #include <pulsar/application/audio/distant_music_processor.hpp>
 #include <pulsar/application/audio/audio_effect_chain.hpp>
+#include <pulsar/application/audio/output_stage.hpp>
 
 #include <cassert>
 #include <stdexcept>
@@ -46,6 +47,10 @@ int main() {
   settings.enabled = false;
   auto empty_chain = application::AudioEffectChain::from_distant_music(settings, rate, 2);
   assert(empty_chain.empty());
+
+  const float measured_samples[] = {0.5F, -1.0F, 0.25F, 0.0F};
+  const auto level = application::measure_audio_level(measured_samples, 4);
+  assert(level.peak == 1.0F && level.clipped_samples == 1);
 
   settings.reverb_amount = 2.0;
   bool rejected = false;

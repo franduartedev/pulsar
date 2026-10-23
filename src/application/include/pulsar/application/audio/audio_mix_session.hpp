@@ -1,6 +1,7 @@
 #pragma once
 
 #include <pulsar/application/audio/audio_contributor_resolver.hpp>
+#include <pulsar/application/audio/output_stage.hpp>
 #include <pulsar/application/media/audio_block.hpp>
 #include <pulsar/application/playback/audio_playback_session.hpp>
 #include <pulsar/application/project/project_snapshot.hpp>
@@ -53,6 +54,7 @@ struct AudioMixRenderResult {
   // Unmuted usable contributors whose PCM passed through gain into the sum.
   // This is deliberately not a clock-availability proxy.
   std::size_t mixed_contributors{0};
+  AudioLevel level{};
   AudioMixClockRecommendation clock{AudioMixClockRecommendation::Software};
 };
 

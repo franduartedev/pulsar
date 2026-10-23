@@ -677,6 +677,7 @@ AudioMixRenderResult AudioMixSession::render(domain::MediaTime timeline_position
   for (float& sample : result.block.samples_mutable()) {
     sample = soft_output_stage(sample);
   }
+  result.level = measure_audio_level(result.block.samples().data(), result.block.samples().size());
   result.clock = result.usable_contributors == 0 ? AudioMixClockRecommendation::Software
                                                   : AudioMixClockRecommendation::Device;
   prune_sources(active_contributors_);
