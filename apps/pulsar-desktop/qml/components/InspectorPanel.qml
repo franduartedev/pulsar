@@ -660,6 +660,18 @@ Panel {
                     }
                     FieldRow { label: "Mezcla"; PSlider { width: 150; value: controller.selectedTelephoneMix; onMoved: controller.setSelectedTelephone(value, controller.selectedTelephoneDrive, true) } Text { text: Math.round(controller.selectedTelephoneMix * 100) + "%"; color: Theme.textMuted; font.pixelSize: Theme.fontSizeXS } }
                     FieldRow { label: "Drive"; PSlider { width: 150; value: controller.selectedTelephoneDrive; onMoved: controller.setSelectedTelephone(controller.selectedTelephoneMix, value, true) } Text { text: Math.round(controller.selectedTelephoneDrive * 100) + "%"; color: Theme.textMuted; font.pixelSize: Theme.fontSizeXS } }
+                    Row { width: parent.width; spacing: Theme.spaceS
+                        PButton { width: (parent.width - Theme.spaceS) / 2; height: Theme.controlHeightSmall; text: "Automatizar mezcla"; onClicked: controller.setSelectedTelephoneMixKeyframes([{time: 0, value: 0, interpolation: 0}, {time: 1.5, value: 1, interpolation: 2}]) }
+                        Text { text: controller.selectedTelephoneMixKeyframeCount + " keyframes"; color: Theme.textMuted; font.pixelSize: Theme.fontSizeXS; verticalAlignment: Text.AlignVCenter; height: Theme.controlHeightSmall }
+                    }
+                    Repeater { model: controller.selectedTelephoneMixKeyframes
+                        delegate: Row { width: parent.width; spacing: Theme.spaceXS
+                            Text { text: "t"; color: Theme.textMuted; width: 12; verticalAlignment: Text.AlignVCenter; height: Theme.controlHeightSmall }
+                            TextInput { width: 52; text: Number(modelData.time).toFixed(2); color: Theme.textPrimary; validator: DoubleValidator { bottom: 0; top: 60; decimals: 2 }; onEditingFinished: controller.setSelectedTelephoneMixKeyframe(index, Number(text), modelData.value, modelData.interpolation) }
+                            TextInput { width: 52; text: Math.round(Number(modelData.value) * 100) + "%"; color: Theme.textPrimary; validator: DoubleValidator { bottom: 0; top: 100; decimals: 1 }; onEditingFinished: controller.setSelectedTelephoneMixKeyframe(index, modelData.time, Number(text) / 100, modelData.interpolation) }
+                            PButton { width: 24; height: Theme.controlHeightSmall; text: "×"; onClicked: controller.removeSelectedTelephoneMixKeyframe(index) }
+                        }
+                    }
                 }
                 InspectorSection {
                     visible: inspector.clipSelected && controller.selectedClipHasAudio

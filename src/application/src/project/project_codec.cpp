@@ -215,6 +215,7 @@ std::string ProjectCodec::encode(const ProjectSnapshot& snapshot) {
   bool has_underwater = false;
   bool has_underwater_keyframes = false;
   bool has_audio_effect_order = false;
+  bool has_telephone_keyframes = false;
   for (const auto& track : snapshot.timeline.tracks()) {
     if (track.audio_state() != domain::AudioTrackState{}) has_audio_track_state = true;
     for (const auto& clip : track.clips()) {
@@ -224,6 +225,9 @@ std::string ProjectCodec::encode(const ProjectSnapshot& snapshot) {
         has_distant_music_keyframes = true;
       }
       if (clip.telephone().enabled) has_telephone = true;
+      if (clip.telephone().enabled && !clip.telephone().mix_keyframes.empty()) {
+        has_telephone_keyframes = true;
+      }
       if (clip.underwater().enabled) has_underwater = true;
       if (clip.underwater().enabled && !clip.underwater().depth_keyframes.empty()) {
         has_underwater_keyframes = true;
@@ -261,7 +265,7 @@ std::string ProjectCodec::encode(const ProjectSnapshot& snapshot) {
     }
   }
   // Version 4 adds clip fades; every file that does not need a newer feature keeps its old version.
-  output << (has_audio_effect_order ? "PULSAR_PROJECT 13\n" : has_underwater_keyframes ? "PULSAR_PROJECT 12\n" : has_underwater ? "PULSAR_PROJECT 11\n" : has_telephone ? "PULSAR_PROJECT 10\n" : has_subtitles ? "PULSAR_PROJECT 9\n" : has_distant_music_keyframes ? "PULSAR_PROJECT 8\n" : has_distant_music ? "PULSAR_PROJECT 7\n" : needs_v6 ? "PULSAR_PROJECT 6\n" : needs_v5 ? "PULSAR_PROJECT 5\n" : needs_v4 ? "PULSAR_PROJECT 4\n" : has_titles ? "PULSAR_PROJECT 3\n" : "PULSAR_PROJECT 2\n");
+  output << (has_telephone_keyframes ? "PULSAR_PROJECT 14\n" : has_audio_effect_order ? "PULSAR_PROJECT 13\n" : has_underwater_keyframes ? "PULSAR_PROJECT 12\n" : has_underwater ? "PULSAR_PROJECT 11\n" : has_telephone ? "PULSAR_PROJECT 10\n" : has_subtitles ? "PULSAR_PROJECT 9\n" : has_distant_music_keyframes ? "PULSAR_PROJECT 8\n" : has_distant_music ? "PULSAR_PROJECT 7\n" : needs_v6 ? "PULSAR_PROJECT 6\n" : needs_v5 ? "PULSAR_PROJECT 5\n" : needs_v4 ? "PULSAR_PROJECT 4\n" : has_titles ? "PULSAR_PROJECT 3\n" : "PULSAR_PROJECT 2\n");
   output << "TIMELINE " << snapshot.timeline.id().value() << "\n";
   const auto tracks = sorted_tracks(snapshot.timeline);
   for (const auto* track : tracks) {
@@ -386,6 +390,13 @@ std::string ProjectCodec::encode(const ProjectSnapshot& snapshot) {
       if (clip.telephone().enabled) {
         const auto& fx = clip.telephone();
         output << " CLIP_TELEPHONE 1 " << std::setprecision(17) << fx.mix << ' ' << fx.drive;
+        if (!fx.mix_keyframes.empty()) {
+          output << ' ' << fx.mix_keyframes.size();
+          for (const auto& keyframe : fx.mix_keyframes) {
+            output << ' ' << keyframe.time_seconds << ' ' << keyframe.value << ' '
+                   << static_cast<int>(keyframe.interpolation);
+          }
+        }
       }
       if (clip.underwater().enabled) {
         const auto& fx = clip.underwater();
@@ -470,6 +481,7 @@ ProjectRestoreState ProjectCodec::decode(std::string_view bytes) {
   bool version11 = false;
   bool version12 = false;
   bool version13 = false;
+  bool version14 = false;
   bool allocator = false;
   bool ended = false;
   enum class Section { Header, Timeline, Tracks, VideoTrack, VisualTracks, Assets, Clips, Transitions, Titles, Subtitles, Allocator, End };
@@ -504,17 +516,18 @@ ProjectRestoreState ProjectCodec::decode(std::string_view bytes) {
 
     try {
       if (tokens[0].text == "PULSAR_PROJECT") {
-        if (header || tokens.size() != 2 || (tokens[1].text != "1" && tokens[1].text != "2" && tokens[1].text != "3" && tokens[1].text != "4" && tokens[1].text != "5" && tokens[1].text != "6" && tokens[1].text != "7" && tokens[1].text != "8" && tokens[1].text != "9" && tokens[1].text != "10" && tokens[1].text != "11" && tokens[1].text != "12" && tokens[1].text != "13")) {
+        if (header || tokens.size() != 2 || (tokens[1].text != "1" && tokens[1].text != "2" && tokens[1].text != "3" && tokens[1].text != "4" && tokens[1].text != "5" && tokens[1].text != "6" && tokens[1].text != "7" && tokens[1].text != "8" && tokens[1].text != "9" && tokens[1].text != "10" && tokens[1].text != "11" && tokens[1].text != "12" && tokens[1].text != "13" && tokens[1].text != "14")) {
           parse_fail(line_number, "invalid header/version");
         }
         header = true;
-        version13 = tokens[1].text == "13";
-        version7 = tokens[1].text == "7" || tokens[1].text == "8" || tokens[1].text == "9" || tokens[1].text == "10" || tokens[1].text == "11" || tokens[1].text == "12" || version13;
-        version8 = tokens[1].text == "8" || tokens[1].text == "9" || tokens[1].text == "10" || tokens[1].text == "11" || tokens[1].text == "12" || version13;
-        version9 = tokens[1].text == "9" || tokens[1].text == "10" || tokens[1].text == "11" || tokens[1].text == "12" || version13;
-        version10 = tokens[1].text == "10" || tokens[1].text == "11" || tokens[1].text == "12" || version13;
-        version11 = tokens[1].text == "11" || tokens[1].text == "12" || version13;
-        version12 = tokens[1].text == "12" || version13;
+        version14 = tokens[1].text == "14";
+        version13 = tokens[1].text == "13" || version14;
+        version7 = tokens[1].text == "7" || tokens[1].text == "8" || tokens[1].text == "9" || tokens[1].text == "10" || tokens[1].text == "11" || tokens[1].text == "12" || tokens[1].text == "13" || version14;
+        version8 = tokens[1].text == "8" || tokens[1].text == "9" || tokens[1].text == "10" || tokens[1].text == "11" || tokens[1].text == "12" || tokens[1].text == "13" || version14;
+        version9 = tokens[1].text == "9" || tokens[1].text == "10" || tokens[1].text == "11" || tokens[1].text == "12" || tokens[1].text == "13" || version14;
+        version10 = tokens[1].text == "10" || tokens[1].text == "11" || tokens[1].text == "12" || tokens[1].text == "13" || version14;
+        version11 = tokens[1].text == "11" || tokens[1].text == "12" || tokens[1].text == "13" || version14;
+        version12 = tokens[1].text == "12" || tokens[1].text == "13" || version14;
         version6 = version7 || tokens[1].text == "6";
         section = Section::Timeline;
       } else if (!header) {
@@ -771,6 +784,23 @@ ProjectRestoreState ProjectCodec::decode(std::string_view bytes) {
             telephone.enabled = enabled != 0;
             telephone.mix = double_number(tokens[i++], line_number, "Telephone mix");
             telephone.drive = double_number(tokens[i++], line_number, "Telephone drive");
+            if (version14 && i < tokens.size() && is_unsigned_token(tokens[i])) {
+              const auto count = unsigned_number(tokens[i++], line_number, "Telephone mix keyframe count");
+              if (count > 128 || i + count * 3 > tokens.size()) {
+                parse_fail(line_number, "invalid Telephone mix keyframes");
+              }
+              telephone.mix_keyframes.reserve(static_cast<std::size_t>(count));
+              for (std::uint64_t keyframe = 0; keyframe < count; ++keyframe) {
+                domain::ScalarKeyframe value;
+                value.time_seconds = double_number(tokens[i++], line_number, "Telephone mix keyframe time");
+                value.value = double_number(tokens[i++], line_number, "Telephone mix keyframe value");
+                const auto interpolation = unsigned_number(tokens[i++], line_number,
+                                                            "Telephone mix keyframe interpolation");
+                if (interpolation > 2) parse_fail(line_number, "invalid Telephone mix keyframe interpolation");
+                value.interpolation = static_cast<domain::KeyframeInterpolation>(interpolation);
+                telephone.mix_keyframes.push_back(value);
+              }
+            }
             try { telephone.validate(); } catch (const std::exception& error) { parse_fail(line_number, error.what()); }
           } else if (version11 && !tokens[i].quoted && tokens[i].text == "CLIP_UNDERWATER" && !saw_underwater) {
             saw_underwater = true;

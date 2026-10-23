@@ -50,7 +50,7 @@ Los Audio FX son efectos por clip, editables, deshacibles y guardados dentro del
 `Distant Music` acerca la música recuperando progresivamente el volumen y los agudos;
 `Telephone` crea una banda sonora de radio o teléfono; y `Underwater` agrega una atmósfera
 sumergida con filtro móvil. Se pueden combinar y automatizar con keyframes Hold / Linear /
-Smooth. Las recetas incluyen `Revelación`, `Suspenso`, `Memoria`, `Radio`, `Sumergido`,
+Smooth; Telephone también puede entrar progresivamente desde seco a procesado. Las recetas incluyen `Revelación`, `Suspenso`, `Memoria`, `Radio`, `Sumergido`,
 `Inmersión Profunda` y `Señal Perdida`.
 
 ## 📦 Requisitos

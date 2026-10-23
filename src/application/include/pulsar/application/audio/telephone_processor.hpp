@@ -23,6 +23,7 @@ private:
   int channel_count_;
   float low_state_[2]{0.0F, 0.0F};
   float band_state_[2]{0.0F, 0.0F};
+  std::size_t mix_keyframe_cursor_{0};
 };
 
 } // namespace pulsar::application

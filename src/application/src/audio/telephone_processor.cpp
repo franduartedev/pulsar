@@ -1,4 +1,5 @@
 #include <pulsar/application/audio/telephone_processor.hpp>
+#include <pulsar/application/audio/scalar_keyframe_evaluator.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -23,6 +24,7 @@ TelephoneProcessor::TelephoneProcessor(domain::TelephoneSettings settings, int s
 void TelephoneProcessor::reset() noexcept {
   low_state_[0] = low_state_[1] = 0.0F;
   band_state_[0] = band_state_[1] = 0.0F;
+  mix_keyframe_cursor_ = 0;
 }
 
 void TelephoneProcessor::process(AudioBlock& block, std::int64_t first_frame) noexcept {
@@ -30,15 +32,22 @@ void TelephoneProcessor::process(AudioBlock& block, std::int64_t first_frame) no
 }
 
 void TelephoneProcessor::process_interleaved(float* samples, std::size_t frame_count,
-                                             std::int64_t) noexcept {
+                                             std::int64_t first_frame) noexcept {
   if (samples == nullptr || frame_count == 0 || sample_rate_ <= 0 ||
       (channel_count_ != 1 && channel_count_ != 2)) return;
   const auto channels = channel_count_;
   const float low_alpha = coefficient(3400.0F, sample_rate_);
   const float high_alpha = coefficient(300.0F, sample_rate_);
-  const float mix = static_cast<float>(settings_.mix);
   const float drive = 1.0F + static_cast<float>(settings_.drive) * 7.0F;
+  mix_keyframe_cursor_ = 0;
   for (std::size_t frame = 0; frame < frame_count; ++frame) {
+    const auto absolute_frame = first_frame + static_cast<std::int64_t>(frame);
+    const float mix = settings_.mix_keyframes.empty()
+                          ? static_cast<float>(settings_.mix)
+                          : evaluate_scalar_keyframes(
+                                settings_.mix_keyframes,
+                                static_cast<float>(absolute_frame) / static_cast<float>(sample_rate_),
+                                mix_keyframe_cursor_);
     for (int channel = 0; channel < channels; ++channel) {
       const auto index = frame * static_cast<std::size_t>(channel_count_) + channel;
       const float input = std::isfinite(samples[index]) ? samples[index] : 0.0F;

@@ -49,8 +49,8 @@ Also: PNG / JPEG / WebP images and colour cards as clips, and a cross-dissolve t
 Audio FX are clip-level, undoable and persisted inside the project. `Distant Music`
 brings music forward with progressive gain and filter recovery; `Telephone` creates a
 focused radio/phone band; and `Underwater` adds a moving low-pass atmosphere. Each
-effect can be bypassed or combined with the others, and Underwater depth plus Distant
-Music gain support editable Hold / Linear / Smooth keyframes. Built-in recipes include
+effect can be bypassed or combined with the others, and Underwater depth, Telephone mix
+and Distant Music gain support editable Hold / Linear / Smooth keyframes. Built-in recipes include
 `Revelación`, `Suspenso`, `Memoria`, `Radio`, `Sumergido`, `Inmersión Profunda` and
 `Señal Perdida`.
 

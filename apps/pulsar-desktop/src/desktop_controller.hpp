@@ -114,6 +114,8 @@ class DesktopController final : public QObject {
   Q_PROPERTY(bool selectedTelephoneEnabled READ selectedTelephoneEnabled NOTIFY timelineChanged)
   Q_PROPERTY(double selectedTelephoneMix READ selectedTelephoneMix NOTIFY timelineChanged)
   Q_PROPERTY(double selectedTelephoneDrive READ selectedTelephoneDrive NOTIFY timelineChanged)
+  Q_PROPERTY(int selectedTelephoneMixKeyframeCount READ selectedTelephoneMixKeyframeCount NOTIFY timelineChanged)
+  Q_PROPERTY(QVariantList selectedTelephoneMixKeyframes READ selectedTelephoneMixKeyframes NOTIFY timelineChanged)
   Q_PROPERTY(bool selectedUnderwaterEnabled READ selectedUnderwaterEnabled NOTIFY timelineChanged)
   Q_PROPERTY(double selectedUnderwaterMix READ selectedUnderwaterMix NOTIFY timelineChanged)
   Q_PROPERTY(double selectedUnderwaterDepth READ selectedUnderwaterDepth NOTIFY timelineChanged)
@@ -229,6 +231,8 @@ public:
   [[nodiscard]] bool selectedTelephoneEnabled() const;
   [[nodiscard]] double selectedTelephoneMix() const;
   [[nodiscard]] double selectedTelephoneDrive() const;
+  [[nodiscard]] int selectedTelephoneMixKeyframeCount() const;
+  [[nodiscard]] QVariantList selectedTelephoneMixKeyframes() const;
   [[nodiscard]] bool selectedUnderwaterEnabled() const;
   [[nodiscard]] double selectedUnderwaterMix() const;
   [[nodiscard]] double selectedUnderwaterDepth() const;
@@ -323,6 +327,10 @@ public:
   Q_INVOKABLE void applySelectedDistantMusicPreset();
   Q_INVOKABLE void setSelectedTelephone(double mix, double drive, bool enabled);
   Q_INVOKABLE void applySelectedTelephonePreset();
+  Q_INVOKABLE void setSelectedTelephoneMixKeyframes(const QVariantList& keyframes);
+  Q_INVOKABLE void setSelectedTelephoneMixKeyframe(int index, double time_seconds,
+                                                    double value, int interpolation);
+  Q_INVOKABLE void removeSelectedTelephoneMixKeyframe(int index);
   Q_INVOKABLE void setSelectedUnderwater(double mix, double depth, bool enabled);
   Q_INVOKABLE void applySelectedUnderwaterPreset();
   Q_INVOKABLE void resetSelectedAudioEffects();
