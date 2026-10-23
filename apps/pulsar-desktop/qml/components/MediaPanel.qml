@@ -6,6 +6,7 @@ import "../theme/Theme.js" as Theme
 Panel {
     signal importRequested()
     signal importFolderRequested()
+    signal relinkRequested(string mediaId)
     // "Placa de color": the palette is hosted by Main (scene coordinates of the button).
     signal createColorRequested(real sx, real sy)
     // Drag from the library towards the timeline (scene coordinates; Main hosts the ghost).
@@ -240,8 +241,9 @@ Panel {
                 anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom
                 anchors.leftMargin: 12; anchors.rightMargin: 12; anchors.bottomMargin: 8
                 spacing: 6
-                PButton { width: assetRow.isAudio ? parent.width : (parent.width - 6) / 2; height: Theme.controlHeightSmall; primary: true; text: assetRow.isAudio ? "Insertar en el cabezal" : "Insertar"; enabled: model.available; onClicked: controller.insertAssetAtPlayhead(model.mediaId) }
-                PButton { visible: !assetRow.isAudio; width: (parent.width - 6) / 2; height: Theme.controlHeightSmall; text: "Al final"; enabled: model.available; onClicked: controller.appendAssetToVideoTrack(model.mediaId) }
+                PButton { visible: model.available; width: assetRow.isAudio ? parent.width : (parent.width - 6) / 2; height: Theme.controlHeightSmall; primary: true; text: assetRow.isAudio ? "Insertar en el cabezal" : "Insertar"; onClicked: controller.insertAssetAtPlayhead(model.mediaId) }
+                PButton { visible: model.available && !assetRow.isAudio; width: (parent.width - 6) / 2; height: Theme.controlHeightSmall; text: "Al final"; onClicked: controller.appendAssetToVideoTrack(model.mediaId) }
+                PButton { visible: !model.available; width: parent.width; height: Theme.controlHeightSmall; primary: true; text: "Relinkear archivo…"; onClicked: mediaPanel.relinkRequested(model.mediaId) }
             }
         }
     }

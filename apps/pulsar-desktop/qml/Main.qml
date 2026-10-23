@@ -56,6 +56,7 @@ Window {
     property bool allowClose: false
 
     property string pendingProjectPath: ""
+    property string relinkMediaId: ""
     function perform(action) {
         if (action === "close") { allowClose = true; root.close() }
         else if (action === "open") openProjectDialog.open()
@@ -143,6 +144,16 @@ Window {
         nameFilters: ["Proyectos PULSAR (*.pulsar)", "Todos los archivos (*)"]
         onAccepted: controller.openProject(decodeURIComponent(selectedFile.toString().replace(/^file:\/\//, "")))
     }
+    FileDialog {
+        id: relinkDialog
+        title: "Relinkear medio"
+        fileMode: FileDialog.OpenFile
+        nameFilters: ["Medios compatibles (*.mp4 *.mov *.mkv *.avi *.webm *.m4v *.wav *.mp3 *.m4a *.aac *.flac *.png *.jpg *.jpeg *.webp)", "Todos los archivos (*)"]
+        onAccepted: {
+            controller.relinkAsset(root.relinkMediaId, decodeURIComponent(selectedFile.toString().replace(/^file:\/\//, "")))
+            root.relinkMediaId = ""
+        }
+    }
 
     DropArea {
         anchors.fill: parent
@@ -187,6 +198,7 @@ Window {
         width: root.mediaWidth
         onImportRequested: importDialog.openFiles()
         onImportFolderRequested: importDialog.openFolder()
+        onRelinkRequested: function(mediaId) { root.relinkMediaId = mediaId; relinkDialog.open() }
         onCreateColorRequested: function(sx, sy) { var p = root.contentItem.mapFromItem(null, sx, sy); colorMenu.openAt(p.x, p.y) }
         onAssetDragStarted: function(mediaId, name, isVideo) { dragGhost.label = name; dragGhost.visible = true }
         onAssetDragMoved: function(mediaId, sx, sy) {

@@ -443,6 +443,28 @@ void DesktopController::openPaths(const QStringList& paths) {
   }
   wake_.notify_one();
 }
+void DesktopController::relinkAsset(const QString& media_id, const QString& path) {
+  if (!active_session_) return;
+  bool ok = false;
+  const auto numeric_id = media_id.toULongLong(&ok);
+  const auto trimmed = path.trimmed();
+  if (!ok || numeric_id == 0 || trimmed.isEmpty()) {
+    setError(QStringLiteral("Elegí un medio y un archivo válidos para relink."));
+    return;
+  }
+  try {
+    pulsar::media::ffmpeg::FFmpegMediaProbe probe;
+    active_session_->relink_asset(pulsar::domain::MediaId{numeric_id},
+                                  std::filesystem::path{trimmed.toStdString()}, probe);
+    refreshAssetsIfChanged();
+    publishTimeline();
+    setStatus(QStringLiteral("Medio relinkeado"));
+    clearError();
+  } catch (const std::exception& error) {
+    setError(QStringLiteral("No se pudo relinkear el medio: %1")
+                 .arg(QString::fromUtf8(error.what())));
+  }
+}
 void DesktopController::cancelImport() {
   if (import_total_ == 0 && !busy_) return;
   resetImportQueue();
