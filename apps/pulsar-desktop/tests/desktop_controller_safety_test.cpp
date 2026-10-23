@@ -342,6 +342,12 @@ int main(int argc, char** argv) {
   REQUIRE(86, thumb(1).isEmpty() && clip_missing(controller, 1) && !controller.errorMessage().contains(QStringLiteral("miniatura")));
   fs::copy_file(fixtures / "e6_video_b.mp4", root / "media/b.mp4");
   REQUIRE(87, controller.openProject(q(second)) && wait_until([&] { return !thumb(1).isEmpty(); }));
+  controller.selectTimelineClip(clip_key(1));
+  controller.setSelectedDistantMusicGainKeyframes(QVariantList{
+      QVariantMap{{QStringLiteral("time"), 9999.0}, {QStringLiteral("value"), -6.0},
+                  {QStringLiteral("interpolation"), 1}}});
+  REQUIRE(88, controller.errorMessage().contains(QStringLiteral("Keyframe inválido")));
+  REQUIRE(89, controller.selectedDistantMusicKeyframeCount() == 0);
 
   fs::remove_all(root);
   return 0;

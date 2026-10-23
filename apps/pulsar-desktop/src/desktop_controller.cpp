@@ -2015,6 +2015,7 @@ void DesktopController::setSelectedDistantMusicGainKeyframes(const QVariantList&
   }
   const auto* selected = active_session_->document().timeline().find_clip(*active_session_->selected_clip());
   if (selected == nullptr) return;
+  const double clip_duration = static_cast<double>(selected->duration().seconds());
   auto settings = selected->distant_music();
   settings.gain_keyframes.clear();
   for (const auto& item : keyframes) {
@@ -2024,7 +2025,8 @@ void DesktopController::setSelectedDistantMusicGainKeyframes(const QVariantList&
     const double time = map.value(QStringLiteral("time")).toDouble(&time_ok);
     const double value = map.value(QStringLiteral("value")).toDouble(&value_ok);
     const int interpolation = map.value(QStringLiteral("interpolation"), 1).toInt();
-    if (!time_ok || !value_ok || interpolation < 0 || interpolation > 2) {
+    if (!time_ok || !value_ok || !std::isfinite(time) || !std::isfinite(value) ||
+        time < 0.0 || time > clip_duration || interpolation < 0 || interpolation > 2) {
       setError(QStringLiteral("Keyframe inválido: usá tiempo, valor e interpolación válidos."));
       return;
     }
@@ -2045,6 +2047,12 @@ void DesktopController::setSelectedDistantMusicGainKeyframe(int index, double ti
   const auto* selected = active_session_->document().timeline().find_clip(*active_session_->selected_clip());
   if (selected == nullptr || index < 0 || static_cast<std::size_t>(index) >=
       selected->distant_music().gain_keyframes.size() || interpolation < 0 || interpolation > 2) return;
+  const double clip_duration = static_cast<double>(selected->duration().seconds());
+  if (!std::isfinite(time_seconds) || !std::isfinite(value) || time_seconds < 0.0 ||
+      time_seconds > clip_duration) {
+    setError(QStringLiteral("El keyframe debe estar dentro de la duración del clip."));
+    return;
+  }
   auto settings = selected->distant_music();
   settings.gain_keyframes[static_cast<std::size_t>(index)] = {
       time_seconds, value, static_cast<pulsar::domain::KeyframeInterpolation>(interpolation)};
