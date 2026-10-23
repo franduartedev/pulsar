@@ -1,4 +1,5 @@
 #include <pulsar/application/audio/distant_music_processor.hpp>
+#include <pulsar/application/audio/scalar_keyframe_evaluator.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -17,32 +18,6 @@ float curve_value(domain::DistantMusicCurve curve, float progress) noexcept {
     return progress * progress;
   }
   return progress;
-}
-
-float keyframed_gain_db(const std::vector<domain::ScalarKeyframe>& keyframes,
-                        float time_seconds, std::size_t& cursor) noexcept {
-  if (keyframes.empty()) return 0.0F;
-  if (time_seconds <= keyframes.front().time_seconds) {
-    cursor = 0;
-    return static_cast<float>(keyframes.front().value);
-  }
-  while (cursor + 1 < keyframes.size() && time_seconds > keyframes[cursor + 1].time_seconds) {
-    ++cursor;
-  }
-  if (cursor + 1 == keyframes.size()) return static_cast<float>(keyframes.back().value);
-  const auto& left = keyframes[cursor];
-  const auto& right = keyframes[cursor + 1];
-  if (right.interpolation == domain::KeyframeInterpolation::Hold) {
-    return static_cast<float>(left.value);
-  }
-  const float span = static_cast<float>(right.time_seconds - left.time_seconds);
-  const float progress = std::clamp(
-      (time_seconds - static_cast<float>(left.time_seconds)) / span, 0.0F, 1.0F);
-  const float shaped = right.interpolation == domain::KeyframeInterpolation::Smooth
-                           ? progress * progress * (3.0F - 2.0F * progress)
-                           : progress;
-  return static_cast<float>(left.value) +
-         (static_cast<float>(right.value) - static_cast<float>(left.value)) * shaped;
 }
 
 } // namespace
@@ -81,7 +56,7 @@ void DistantMusicProcessor::process_interleaved(float* samples, std::size_t fram
     const float shaped = curve_value(settings_.curve, progress);
     const float gain = settings_.gain_keyframes.empty()
                            ? initial_gain + (1.0F - initial_gain) * shaped
-                           : std::pow(10.0F, keyframed_gain_db(
+                           : std::pow(10.0F, evaluate_scalar_keyframes(
                                                    settings_.gain_keyframes,
                                                    static_cast<float>(absolute) /
                                                        static_cast<float>(sample_rate_),
