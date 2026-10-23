@@ -28,6 +28,11 @@ public:
                                              int sample_rate, int channel_count);
   static AudioEffectChain from_telephone(const domain::TelephoneSettings& settings,
                                          int sample_rate, int channel_count);
+  // Builds the canonical per-clip order. Keeping this in one place makes
+  // realtime preview and offline export agree as new effects are added.
+  static AudioEffectChain from_clip_effects(const domain::DistantMusicSettings& distant_music,
+                                            const domain::TelephoneSettings& telephone,
+                                            int sample_rate, int channel_count);
 
   [[nodiscard]] bool empty() const noexcept { return effects_.empty(); }
   [[nodiscard]] std::size_t size() const noexcept { return effects_.size(); }

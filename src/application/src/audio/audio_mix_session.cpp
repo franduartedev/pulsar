@@ -249,13 +249,9 @@ void AudioMixSession::configure(ProjectSnapshot snapshot) {
                                      source->contributor.telephone != replacement->telephone;
         source->contributor = *replacement;
         if (effect_changed) {
-          source->effects = std::make_unique<AudioEffectChain>(
-              AudioEffectChain::from_distant_music(replacement->distant_music,
-                                                   format_.sample_rate, format_.channel_count));
-          if (replacement->telephone.enabled) {
-            source->effects->add(std::make_unique<TelephoneProcessor>(
-                replacement->telephone, format_.sample_rate, format_.channel_count));
-          }
+          source->effects = std::make_unique<AudioEffectChain>(AudioEffectChain::from_clip_effects(
+              replacement->distant_music, replacement->telephone, format_.sample_rate,
+              format_.channel_count));
         }
       }
     }
@@ -364,13 +360,9 @@ AudioMixSession::SourceState* AudioMixSession::open_source(
                                              std::move(converter), timeline_position, target,
                                              origin);
   if (contributor.distant_music.enabled || contributor.telephone.enabled) {
-    state->effects = std::make_unique<AudioEffectChain>(
-        AudioEffectChain::from_distant_music(contributor.distant_music, format_.sample_rate,
-                                             format_.channel_count));
-    if (contributor.telephone.enabled) {
-      state->effects->add(std::make_unique<TelephoneProcessor>(
-          contributor.telephone, format_.sample_rate, format_.channel_count));
-    }
+    state->effects = std::make_unique<AudioEffectChain>(AudioEffectChain::from_clip_effects(
+        contributor.distant_music, contributor.telephone, format_.sample_rate,
+        format_.channel_count));
   }
   auto* result = state.get();
   sources_.push_back(std::move(state));

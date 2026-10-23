@@ -130,12 +130,8 @@ OfflineAudioRenderer::ContributorState& OfflineAudioRenderer::state_for(
     state->fade = ClipFade::from_times(contributor.fade_in, contributor.fade_out,
                                        contributor.timeline_range.duration(), 48'000);
     if (contributor.distant_music.enabled || contributor.telephone.enabled) {
-      state->effects = std::make_unique<AudioEffectChain>(
-          AudioEffectChain::from_distant_music(contributor.distant_music, 48'000, 2));
-      if (contributor.telephone.enabled) {
-        state->effects->add(std::make_unique<TelephoneProcessor>(
-            contributor.telephone, 48'000, 2));
-      }
+      state->effects = std::make_unique<AudioEffectChain>(AudioEffectChain::from_clip_effects(
+          contributor.distant_music, contributor.telephone, 48'000, 2));
     }
     state->first_clip_frame = domain::frame_at(contributor.timeline_range.start(),
                                                domain::FrameRate{48'000, 1}, domain::RoundingMode::Ceil).value();
