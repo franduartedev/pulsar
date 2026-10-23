@@ -181,6 +181,76 @@ Panel {
             width: parent.width
             spacing: Theme.spaceM
 
+            // ---- Pulse Map / Scene Cards ---------------------------------
+            InspectorSection {
+                id: pulseSection
+                first: true
+                heading: "PULSE MAP"
+                Text {
+                    width: parent.width
+                    wrapMode: Text.WordWrap
+                    text: controller.analysisRunning ? "Leyendo energía, transitorios y golpes…" :
+                          (controller.sceneCards.length > 0 ? "Mapa editorial listo: " + controller.sceneCards.length + " escenas" :
+                           "Detectá impactos y cambios de energía para encontrar cortes con intención.")
+                    color: Theme.textSecondary; font.pixelSize: Theme.fontSizeS
+                }
+                Canvas {
+                    id: pulseCanvas
+                    width: parent.width; height: 58
+                    visible: controller.pulseMap.length > 0
+                    onPaint: {
+                        var ctx = getContext("2d")
+                        ctx.clearRect(0, 0, width, height)
+                        ctx.fillStyle = Theme.bgInput
+                        ctx.fillRect(0, 0, width, height)
+                        var points = controller.pulseMap
+                        if (points.length < 1) return
+                        ctx.beginPath()
+                        for (var i = 0; i < points.length; ++i) {
+                            var x = points[i].time / Math.max(0.001, points[points.length - 1].time) * width
+                            var y = height - Math.min(1, Number(points[i].energy) * 2.0) * (height - 8) - 4
+                            if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y)
+                        }
+                        ctx.strokeStyle = Theme.accent; ctx.lineWidth = 1.5; ctx.stroke()
+                        ctx.fillStyle = Theme.warning
+                        for (var j = 0; j < points.length; ++j) {
+                            if (!points[j].pulse) continue
+                            var px = points[j].time / Math.max(0.001, points[points.length - 1].time) * width
+                            ctx.fillRect(px - 1, 2, 2, height - 4)
+                        }
+                    }
+                    Connections {
+                        target: controller
+                        function onAnalysisChanged() { pulseCanvas.requestPaint() }
+                    }
+                }
+                Row {
+                    width: parent.width; spacing: Theme.spaceS
+                    PButton {
+                        text: controller.analysisRunning ? "Cancelar análisis" : "Analizar clip"
+                        enabled: controller.analysisRunning || controller.selectedClipHasAudio
+                        onClicked: controller.analysisRunning ? controller.cancelAudioAnalysis() : controller.analyzeSelectedAudio()
+                    }
+                    Text { visible: controller.pulseMap.length > 0; anchors.verticalCenter: parent.verticalCenter; text: controller.pulseMap.length + " puntos"; color: Theme.textMuted; font.pixelSize: Theme.fontSizeXS }
+                }
+                Flow {
+                    width: parent.width; spacing: Theme.spaceS
+                    Repeater {
+                        model: controller.sceneCards
+                        delegate: Rectangle {
+                            required property var modelData
+                            width: Math.max(76, Math.min(112, pulseSection.width / 3 - 8)); height: 34
+                            radius: Theme.radiusS; color: Theme.bgInput; border.color: modelData.label === "Impact" ? Theme.warning : Theme.borderSubtle
+                            Column {
+                                anchors.centerIn: parent
+                                Text { anchors.horizontalCenter: parent.horizontalCenter; text: modelData.label; color: Theme.textPrimary; font.pixelSize: Theme.fontSizeXS; font.bold: true }
+                                Text { anchors.horizontalCenter: parent.horizontalCenter; text: modelData.pulses + " pulsos"; color: Theme.textMuted; font.pixelSize: 10 }
+                            }
+                        }
+                    }
+                }
+            }
+
             // ---- Nothing selected ------------------------------------------
             Column {
                 visible: inspector.currentTab === 0 && !inspector.titleSelected && !inspector.clipSelected && !inspector.trackSelected && inspector.summary.length === 0

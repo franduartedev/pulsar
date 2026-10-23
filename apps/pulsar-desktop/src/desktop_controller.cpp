@@ -23,6 +23,7 @@
 #include <pulsar/media/ffmpeg/ffmpeg_export_media_writer.hpp>
 #include <pulsar/application/export/export_job.hpp>
 #include <pulsar/application/composition/visual_compositor.hpp>
+#include <pulsar/application/timeline/timeline_clip_resolver.hpp>
 #if defined(PULSAR_HAS_QT_AUDIO)
 #include <pulsar/media/qt_audio/qt_audio_output.hpp>
 #endif
@@ -371,6 +372,8 @@ DesktopController::~DesktopController() {
   waveform_timer_.stop();
   export_cancel_requested_.store(true, std::memory_order_release);
   if (export_thread_.joinable()) export_thread_.join();
+  analysis_cancel_requested_.store(true, std::memory_order_release);
+  if (analysis_thread_.joinable()) analysis_thread_.join();
   waveform_items_.clear();
   waveform_item_stamps_.clear();
   { std::lock_guard lock{mutex_}; stop_worker_ = true; import_queue_.clear(); }
@@ -2277,6 +2280,114 @@ bool DesktopController::exportSubtitles(const QString& path) {
     setError(QStringLiteral("No se pudieron exportar los subtítulos."));
     return false;
   }
+}
+
+void DesktopController::cancelAudioAnalysis() {
+  analysis_cancel_requested_.store(true, std::memory_order_release);
+  ++analysis_generation_;
+  if (analysis_running_) {
+    analysis_running_ = false;
+    setStatus(QStringLiteral("Análisis cancelado"));
+    emit analysisChanged();
+  }
+}
+
+void DesktopController::analyzeSelectedAudio() {
+  if (analysis_running_) return;
+  if (analysis_thread_.joinable()) analysis_thread_.join();
+  if (!active_session_ || !active_session_->selected_clip()) {
+    setError(QStringLiteral("Seleccioná un clip con audio para analizarlo."));
+    return;
+  }
+  const auto resolved = pulsar::application::resolve_clip_by_id(
+      active_session_->document(), *active_session_->selected_clip());
+  if (!resolved || !resolved->audio) {
+    setError(QStringLiteral("El clip seleccionado no tiene audio utilizable."));
+    return;
+  }
+  std::filesystem::path runtime_path;
+  try {
+    runtime_path = desktop_runtime_media_path(active_project_file_, resolved->audio->source_locator);
+  } catch (const std::exception& error) {
+    setError(QString::fromUtf8(error.what()));
+    return;
+  }
+  const auto source_creator = waveform_source_creator_;
+  if (!source_creator) {
+    setError(QStringLiteral("El analizador de audio no está disponible."));
+    return;
+  }
+  const int stream_index = resolved->audio->metadata.stream_index;
+  const auto generation = ++analysis_generation_;
+  analysis_cancel_requested_.store(false, std::memory_order_release);
+  analysis_running_ = true;
+  emit analysisChanged();
+  clearError();
+  setStatus(QStringLiteral("Analizando audio…"));
+  analysis_thread_ = std::thread{[this, generation, source_creator, runtime_path, stream_index] {
+    try {
+      auto source = source_creator(runtime_path, stream_index);
+      if (!source) throw std::runtime_error{"audio analysis source could not be created"};
+      pulsar::application::PulseMap map;
+      map.window_frames = 1024;
+      map.points.reserve(100'000);
+      double offset_seconds = 0.0;
+      while (!analysis_cancel_requested_.load(std::memory_order_acquire)) {
+        auto block = source->next_block();
+        if (!block) break;
+        const auto partial = pulsar::application::analyze_pulse_map(*block);
+        if (map.sample_rate == 0) {
+          map.sample_rate = partial.sample_rate;
+          map.channel_count = partial.channel_count;
+          map.window_frames = partial.window_frames;
+        }
+        for (const auto& point : partial.points) {
+          if (map.points.size() >= 100'000) break;
+          auto shifted = point;
+          shifted.time_seconds += offset_seconds;
+          map.points.push_back(shifted);
+        }
+        offset_seconds += partial.duration_seconds;
+        map.duration_seconds = offset_seconds;
+      }
+      if (analysis_cancel_requested_.load(std::memory_order_acquire)) return;
+      const auto cards = pulsar::application::build_scene_cards(map);
+      QMetaObject::invokeMethod(this, [this, generation, map = std::move(map), cards] {
+        if (generation != analysis_generation_) return;
+        pulse_map_.clear();
+        for (const auto& point : map.points) {
+          pulse_map_.push_back(QVariantMap{{QStringLiteral("time"), point.time_seconds},
+                                           {QStringLiteral("energy"), point.energy},
+                                           {QStringLiteral("peak"), point.peak},
+                                           {QStringLiteral("transient"), point.transient},
+                                           {QStringLiteral("pulse"), point.pulse}});
+        }
+        scene_cards_.clear();
+        for (const auto& card : cards) {
+          QString label = QStringLiteral("Quiet");
+          if (card.label == pulsar::application::SceneCardLabel::Build) label = QStringLiteral("Build");
+          else if (card.label == pulsar::application::SceneCardLabel::Sustained) label = QStringLiteral("Sustained");
+          else if (card.label == pulsar::application::SceneCardLabel::Impact) label = QStringLiteral("Impact");
+          scene_cards_.push_back(QVariantMap{{QStringLiteral("start"), card.start_seconds},
+                                             {QStringLiteral("end"), card.end_seconds},
+                                             {QStringLiteral("energy"), card.average_energy},
+                                             {QStringLiteral("peak"), card.maximum_peak},
+                                             {QStringLiteral("pulses"), static_cast<qulonglong>(card.pulse_count)},
+                                             {QStringLiteral("label"), label}});
+        }
+        analysis_running_ = false;
+        setStatus(QStringLiteral("Pulse Map listo · %1 escenas").arg(scene_cards_.size()));
+        emit analysisChanged();
+      }, Qt::QueuedConnection);
+    } catch (const std::exception& error) {
+      QMetaObject::invokeMethod(this, [this, generation, message = QString::fromUtf8(error.what())] {
+        if (generation != analysis_generation_) return;
+        analysis_running_ = false;
+        setError(QStringLiteral("No se pudo analizar el audio: %1").arg(message));
+        emit analysisChanged();
+      }, Qt::QueuedConnection);
+    }
+  }};
 }
 
 bool DesktopController::openProjectImpl(const QString& path, std::optional<pulsar::application::ProjectRestoreState> restored) {

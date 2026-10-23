@@ -9,6 +9,8 @@
 #include <pulsar/application/media/media_probe_result.hpp>
 #include <pulsar/application/playback/timeline_playback_coordinator.hpp>
 #include <pulsar/application/waveform/waveform_cache.hpp>
+#include <pulsar/application/audio/pulse_map.hpp>
+#include <pulsar/application/audio/scene_cards.hpp>
 #include <pulsar/media/ffmpeg/ffmpeg_playback_visual_mailbox.hpp>
 
 #include <QElapsedTimer>
@@ -130,6 +132,9 @@ class DesktopController final : public QObject {
   Q_PROPERTY(bool canUndo READ canUndo NOTIFY timelineChanged)
   Q_PROPERTY(bool canRedo READ canRedo NOTIFY timelineChanged)
   Q_PROPERTY(QVariantList soundLibrary READ soundLibrary NOTIFY soundLibraryChanged)
+  Q_PROPERTY(QVariantList pulseMap READ pulseMap NOTIFY analysisChanged)
+  Q_PROPERTY(QVariantList sceneCards READ sceneCards NOTIFY analysisChanged)
+  Q_PROPERTY(bool analysisRunning READ analysisRunning NOTIFY analysisChanged)
 public:
   using WaveformSourceCreator = std::function<std::unique_ptr<pulsar::application::WaveformSource>(
       const std::filesystem::path&, int)>;
@@ -237,6 +242,9 @@ public:
   [[nodiscard]] bool canUndo() const { return active_session_ && active_session_->can_undo(); }
   [[nodiscard]] bool canRedo() const { return active_session_ && active_session_->can_redo(); }
   [[nodiscard]] QVariantList soundLibrary() const { return sound_library_; }
+  [[nodiscard]] QVariantList pulseMap() const { return pulse_map_; }
+  [[nodiscard]] QVariantList sceneCards() const { return scene_cards_; }
+  [[nodiscard]] bool analysisRunning() const noexcept { return analysis_running_; }
   [[nodiscard]] int importPending() const { return std::max(0, import_total_ - import_done_); }
   [[nodiscard]] int importTotal() const { return import_total_; }
   [[nodiscard]] QString appVersion() const;
@@ -366,6 +374,8 @@ public:
   Q_INVOKABLE bool openProject(const QString& path);
   Q_INVOKABLE bool importSubtitles(const QString& path);
   Q_INVOKABLE bool exportSubtitles(const QString& path);
+  Q_INVOKABLE void analyzeSelectedAudio();
+  Q_INVOKABLE void cancelAudioAnalysis();
   // Library actions on imported media. Video assets go to VIDEO 1 as one
   // undoable edit; overlap is refused without changing the project.
   Q_INVOKABLE void selectAsset(const QString& media_id);
@@ -392,6 +402,7 @@ signals:
   void projectDirtyChanged(); void activeProjectPathChanged();
   void diagnosticsChanged(); void timelineChanged(); void timelinePlayheadChanged(); void timelineViewChanged(); void snapEnabledChanged(); void recoveryChanged(); void importProgressChanged(); void waveformPolicyChanged(); void editActionStateChanged(); void focusImportPathRequested();
   void soundLibraryChanged(); void assetsChanged();
+  void analysisChanged();
 private:
   struct WorkerCommand { std::filesystem::path path; std::uint64_t generation; bool auto_place{true}; };
   static constexpr std::size_t kMaxQueuedImports = 500;
@@ -492,6 +503,9 @@ private:
   QString import_first_failure_;
   std::thread worker_; mutable std::mutex mutex_; std::condition_variable wake_; bool stop_worker_{false}; std::deque<WorkerCommand> import_queue_;
   std::thread export_thread_;
+  std::thread analysis_thread_;
+  std::atomic_bool analysis_cancel_requested_{false};
+  std::uint64_t analysis_generation_{0};
   std::atomic_bool export_cancel_requested_{false};
   std::uint64_t export_generation_{0};
   QString status_{"Vacío"}; QString technical_status_{"Preview CPU"}; QString media_name_; QString metadata_; QString error_message_; QString preview_source_; QString viewer_state_{"empty"}; QString position_text_{"00:00:00.000"}; QString duration_text_{"--:--:--.---"}; QString debug_metrics_; QVariantList timeline_ruler_ticks_; QVariantList timeline_tracks_; QString timeline_duration_text_{"00:00:00.000"}; QString selected_clip_key_; QString selected_visual_track_key_;
@@ -528,6 +542,9 @@ private:
   std::uint64_t asset_model_revision_{~std::uint64_t{0}};
   double timeline_playhead_progress_{0.0}; double progress_{0.0}; double export_progress_{0.0}; bool has_media_{false}; bool has_video_media_{false}; bool playing_{false}; bool busy_{false}; bool export_running_{false}; bool preview_late_{false}; bool published_project_dirty_{false};
   QString export_status_{""}; QString export_destination_;
+  QVariantList pulse_map_;
+  QVariantList scene_cards_;
+  bool analysis_running_{false};
   std::optional<pulsar::domain::MediaTime> timeline_view_start_;
   std::optional<pulsar::domain::MediaTime> timeline_view_duration_;
   double timeline_zoom_{1.0};
