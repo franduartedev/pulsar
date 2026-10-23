@@ -442,8 +442,8 @@ endif()
 if(NOT PULSAR_TEST_FFMPEG_CLI)
   message(FATAL_ERROR
     "PULSAR_TEST_FFMPEG_CLI was not found. Media integration tests require the "
-    "ffmpeg command-line tool with libx264 (the vcpkg library port does not "
-    "provide it). Install ffmpeg or configure with "
+    "ffmpeg command-line tool with libx264 (the vcpkg port provides libraries, "
+    "not the CLI). Install ffmpeg or configure with "
     "-DPULSAR_TEST_FFMPEG_CLI=/path/to/ffmpeg.")
 endif()
 

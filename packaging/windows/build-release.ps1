@@ -37,7 +37,7 @@ if (-not $ffmpegBin -or -not (Test-Path $ffmpegBin)) {
 }
 
 Get-ChildItem $ffmpegBin -File -Filter "*.dll" |
-    Where-Object { $_.Name -match "^(av|sw|postproc|vulkan|zimg)" } |
+    Where-Object { $_.Name -match "^(av|sw|postproc|vulkan|zimg|x264|libx264)" } |
     Copy-Item -Destination (Split-Path $exe) -Force
 
 Copy-Item (Join-Path $root "LICENSE") (Join-Path $stage "LICENSE.txt") -Force

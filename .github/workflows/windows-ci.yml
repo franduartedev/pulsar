@@ -15,7 +15,7 @@ concurrency:
 jobs:
   build-and-test:
     runs-on: windows-2022
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - name: Check out
         uses: actions/checkout@v4
@@ -43,20 +43,20 @@ jobs:
           path: |
             C:\vcpkg\installed
             C:\vcpkg\packages
-          key: windows-vcpkg-ffmpeg-${{ runner.os }}-${{ hashFiles('src/media/ffmpeg/CMakeLists.txt') }}
+          key: windows-vcpkg-ffmpeg-x264-v1-${{ runner.os }}-${{ hashFiles('src/media/ffmpeg/CMakeLists.txt') }}
 
       - name: Install FFmpeg port
         shell: pwsh
         run: |
           $vcpkg = (Get-Command vcpkg.exe).Source
           $vcpkgRoot = Split-Path -Parent $vcpkg
-          vcpkg install ffmpeg:x64-windows --disable-metrics
+          vcpkg install ffmpeg[x264]:x64-windows --disable-metrics
           "PULSAR_VCPKG_TOOLCHAIN=$vcpkgRoot/scripts/buildsystems/vcpkg.cmake" >> $env:GITHUB_ENV
           "PULSAR_VCPKG_ROOT=$vcpkgRoot" >> $env:GITHUB_ENV
 
       # Test-only dependency: the vcpkg ffmpeg port ships libraries without the
-      # CLI or libx264, so integration tests use a separately installed CLI.
-      # It is never linked into the product.
+      # CLI, so integration tests use a separately installed CLI. It is never
+      # linked into the product.
       - name: Install FFmpeg CLI for tests
         shell: pwsh
         run: |
