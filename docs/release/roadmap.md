@@ -14,6 +14,9 @@ implemented unless it appears in the [CHANGELOG](../../CHANGELOG.md).
 
 Audio-specific sequencing is tracked in [`docs/product/audio-fx-roadmap.md`](../product/audio-fx-roadmap.md).
 
+The product direction for the major editor milestones is in
+[`docs/release/vision-v1.2-v1.3.md`](vision-v1.2-v1.3.md).
+
 ## Prerequisites for OPERATOR (hardening list)
 
 Before an assistant may drive edits, the command layer needs: well-defined nested command
