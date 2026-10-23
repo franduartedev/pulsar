@@ -237,19 +237,10 @@ std::string ProjectCodec::encode(const ProjectSnapshot& snapshot) {
       }
     }
   }
-  const bool needs_v6 = snapshot.visual_track_ids.size() > 1 || has_visual_transforms ||
+  const bool needs_v6_layout = snapshot.visual_track_ids.size() > 1 || has_visual_transforms ||
       has_audio_track_state ||
       !snapshot.transitions.empty() ||
       (snapshot.canvas && snapshot.canvas != legacy_project_canvas(snapshot));
-  const std::size_t record_count = 1 + 1 + snapshot.timeline.tracks().size() + 1 +
-                                    snapshot.assets.size() + snapshot.titles.size() + snapshot.subtitles.size() + snapshot.transitions.size() +
-                                    (needs_v6 ? 1 + (snapshot.canvas ? 1 : 0) : 0);
-  std::size_t clip_count = 0;
-  for (const auto& track : snapshot.timeline.tracks()) clip_count += track.clips().size();
-  if (record_count + clip_count + 2 > max_records) {
-    throw ProjectCodecError{"project exceeds record limit"};
-  }
-  std::ostringstream output;
   // Files without titles stay byte-compatible version 2; titles need version 3.
   const bool has_titles = !snapshot.titles.empty() || snapshot.allocator_state.next_title_id != 1;
   const bool has_subtitles = !snapshot.subtitles.empty();
@@ -265,7 +256,23 @@ std::string ProjectCodec::encode(const ProjectSnapshot& snapshot) {
     }
   }
   // Version 4 adds clip fades; every file that does not need a newer feature keeps its old version.
-  output << (has_telephone_keyframes ? "PULSAR_PROJECT 14\n" : has_audio_effect_order ? "PULSAR_PROJECT 13\n" : has_underwater_keyframes ? "PULSAR_PROJECT 12\n" : has_underwater ? "PULSAR_PROJECT 11\n" : has_telephone ? "PULSAR_PROJECT 10\n" : has_subtitles ? "PULSAR_PROJECT 9\n" : has_distant_music_keyframes ? "PULSAR_PROJECT 8\n" : has_distant_music ? "PULSAR_PROJECT 7\n" : needs_v6 ? "PULSAR_PROJECT 6\n" : needs_v5 ? "PULSAR_PROJECT 5\n" : needs_v4 ? "PULSAR_PROJECT 4\n" : has_titles ? "PULSAR_PROJECT 3\n" : "PULSAR_PROJECT 2\n");
+  const int version = has_telephone_keyframes ? 14 : has_audio_effect_order ? 13 : has_underwater_keyframes ? 12
+      : has_underwater ? 11 : has_telephone ? 10 : has_subtitles ? 9 : has_distant_music_keyframes ? 8
+      : has_distant_music ? 7 : needs_v6_layout ? 6 : needs_v5 ? 5 : needs_v4 ? 4 : has_titles ? 3 : 2;
+  // Every version from 6 onward carries the VISUAL_TRACKS record, including
+  // when only a later feature raised the version number. The decoder requires
+  // that section for these versions.
+  const bool needs_v6 = needs_v6_layout || version >= 6;
+  const std::size_t record_count = 1 + 1 + snapshot.timeline.tracks().size() + 1 +
+                                    snapshot.assets.size() + snapshot.titles.size() + snapshot.subtitles.size() + snapshot.transitions.size() +
+                                    (needs_v6 ? 1 + (snapshot.canvas ? 1 : 0) : 0);
+  std::size_t clip_count = 0;
+  for (const auto& track : snapshot.timeline.tracks()) clip_count += track.clips().size();
+  if (record_count + clip_count + 2 > max_records) {
+    throw ProjectCodecError{"project exceeds record limit"};
+  }
+  std::ostringstream output;
+  output << "PULSAR_PROJECT " << version << "\n";
   output << "TIMELINE " << snapshot.timeline.id().value() << "\n";
   const auto tracks = sorted_tracks(snapshot.timeline);
   for (const auto* track : tracks) {
@@ -940,7 +947,14 @@ ProjectRestoreState ProjectCodec::decode(std::string_view bytes) {
           parse_fail(line_number, error.what());
         }
       } else if (tokens[0].text == "SUBTITLE") {
-        if (!version9 || (section != Section::Titles && section != Section::Subtitles) || tokens.size() != 9 || !tokens[8].quoted) {
+        // The encoder emits subtitles after assets, clips, transitions and
+        // titles, and any of those sections may be empty. Accept every
+        // position the encoder can produce, plus subsequent subtitle lines.
+        if (!version9 ||
+            (section != Section::Assets && section != Section::Clips &&
+             section != Section::Transitions && section != Section::Titles &&
+             section != Section::Subtitles) ||
+            tokens.size() != 9 || !tokens[8].quoted) {
           parse_fail(line_number, "invalid SUBTITLE");
         }
         std::size_t i = 1;

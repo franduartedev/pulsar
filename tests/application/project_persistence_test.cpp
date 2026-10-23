@@ -58,7 +58,7 @@ MediaTime t(std::int64_t value, Rational base = Rational{1, 1}) { return MediaTi
 ProjectDocument make_document() {
   ProjectDocument document;
   CommandProcessor processor{document};
-  const auto first = processor.import_asset("media dir/clip \\\"one\\\"\\n.mp4", FakeProbe{});
+  const auto first = processor.import_asset("media dir/clip \"one\"\n.mp4", FakeProbe{});
   const auto second = processor.import_asset("second.mp4", FakeProbe{});
   (void)processor.add_clip(first, TimeRange{t(1001, Rational{1, 30000}), t(2002, Rational{1, 30000})}, t(0));
   (void)processor.add_clip(second, TimeRange{t(3, Rational{1, 2}), t(5, Rational{1, 2})}, t(4));
@@ -739,7 +739,7 @@ void repository_normalizes_codec_failures() {
 
   // Malformed bytes through the real repository surface as repository errors.
   const auto malformed = root / "malformed.pulsar";
-  { std::ofstream output{malformed}; output << "PULSAR_PROJECT 9\n"; }
+  { std::ofstream output{malformed, std::ios::binary}; output << "PULSAR_PROJECT 999\n"; }
   bool load_rejected = false;
   try {
     (void)repository.load(malformed);
