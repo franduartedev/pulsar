@@ -322,6 +322,7 @@ public:
   Q_INVOKABLE void applySelectedTelephonePreset();
   Q_INVOKABLE void setSelectedUnderwater(double mix, double depth, bool enabled);
   Q_INVOKABLE void applySelectedUnderwaterPreset();
+  Q_INVOKABLE void resetSelectedAudioEffects();
   Q_INVOKABLE void setSelectedUnderwaterDepthKeyframes(const QVariantList& keyframes);
   Q_INVOKABLE void setSelectedUnderwaterDepthKeyframe(int index, double time_seconds,
                                                        double value, int interpolation);

@@ -675,7 +675,7 @@ Panel {
                         }
                     }
                 }
-                PButton { visible: inspector.clipSelected && controller.selectedClipHasAudio; width: parent.width; height: Theme.controlHeightSmall; text: "Restablecer efecto"; onClicked: controller.setSelectedDistantMusic(-30, 4, 900, 18000, 0.18, 1, false) }
+                PButton { visible: inspector.clipSelected && controller.selectedClipHasAudio; width: parent.width; height: Theme.controlHeightSmall; text: "Restablecer todos los efectos"; onClicked: controller.resetSelectedAudioEffects() }
                 Text { visible: inspector.clipSelected && !controller.selectedClipHasAudio; width: parent.width; wrapMode: Text.WordWrap; text: "Seleccioná un clip con audio para aplicar Distant Music."; color: Theme.textMuted; font.pixelSize: Theme.fontSizeS }
             }
 

@@ -1706,6 +1706,17 @@ void DesktopController::applySelectedUnderwaterPreset() {
   setSelectedUnderwater(0.78, 0.82, true);
 }
 
+void DesktopController::resetSelectedAudioEffects() {
+  if (!active_session_ || !active_session_->selected_clip()) return;
+  try {
+    active_session_->reset_audio_effects(*active_session_->selected_clip());
+    clearError();
+    publishTimeline();
+  } catch (const std::exception&) {
+    setError(QStringLiteral("No se pudieron restablecer los efectos de audio."));
+  }
+}
+
 void DesktopController::setSelectedUnderwaterDepthKeyframes(const QVariantList& keyframes) {
   if (!active_session_ || !active_session_->selected_clip()) return;
   if (keyframes.size() > 128) {
