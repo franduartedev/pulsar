@@ -1,0 +1,60 @@
+name: Windows CI
+
+on:
+  push:
+    branches: [main, feature/pulsar-audio-fx]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: windows-2022
+    timeout-minutes: 45
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Configure MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: 6.8.3
+          arch: win64_msvc2022_64
+          modules: qtmultimedia
+          cache: true
+
+      - name: Install Ninja
+        shell: pwsh
+        run: choco install ninja --no-progress --yes
+
+      - name: Install FFmpeg
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgDirectory: '${{ github.workspace }}/vcpkg'
+
+      - name: Install FFmpeg port
+        shell: pwsh
+        run: .\vcpkg\vcpkg.exe install ffmpeg:x64-windows
+
+      - name: Configure
+        shell: pwsh
+        run: >-
+          cmake -S . -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_TOOLCHAIN_FILE="${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake"
+          -DPULSAR_BUILD_DESKTOP=ON
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Test
+        shell: pwsh
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: ctest --test-dir build -C Release --output-on-failure
