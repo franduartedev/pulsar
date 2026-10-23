@@ -3,6 +3,7 @@
 #include <pulsar/application/audio/distant_music_processor.hpp>
 #include <pulsar/application/audio/telephone_processor.hpp>
 #include <pulsar/application/audio/underwater_processor.hpp>
+#include <pulsar/domain/timeline/audio_effect.hpp>
 
 #include <cstddef>
 #include <cstdint>
