@@ -121,6 +121,11 @@ void CommandProcessor::replace_title(domain::Title title) { execute(ReplaceTitle
 
 void CommandProcessor::remove_title(domain::TitleId id) { execute(RemoveTitleCommand{id}); }
 
+void CommandProcessor::replace_subtitles(std::vector<SubtitleCue> subtitles) {
+  if (subtitles == document_.subtitles()) return;
+  execute(ReplaceSubtitlesCommand{std::move(subtitles)});
+}
+
 void CommandProcessor::add_transition(domain::Transition transition) {
   execute(AddTransitionCommand{std::move(transition)});
 }
@@ -525,6 +530,8 @@ void CommandProcessor::apply(ProjectDocument& document, const Command& command, 
           document.remove_title_value(concrete_command.title_id);
         } else if constexpr (std::is_same_v<CommandType, ReplaceTitleCommand>) {
           document.replace_title_value(concrete_command.title);
+        } else if constexpr (std::is_same_v<CommandType, ReplaceSubtitlesCommand>) {
+          document.replace_subtitles_value(concrete_command.subtitles);
         } else if constexpr (std::is_same_v<CommandType, AddTransitionCommand>) {
           document.add_transition_value(concrete_command.transition);
         } else if constexpr (std::is_same_v<CommandType, RemoveTransitionCommand>) {
@@ -597,6 +604,8 @@ Command CommandProcessor::build_inverse(const ProjectDocument& document, const C
           const auto* existing = document.find_title(concrete_command.title.id());
           if (existing == nullptr) throw std::invalid_argument{"title does not exist in document"};
           return ReplaceTitleCommand{*existing};
+        } else if constexpr (std::is_same_v<CommandType, ReplaceSubtitlesCommand>) {
+          return ReplaceSubtitlesCommand{document.subtitles()};
         } else if constexpr (std::is_same_v<CommandType, AddTransitionCommand>) {
           return RemoveTransitionCommand{concrete_command.transition};
         } else if constexpr (std::is_same_v<CommandType, RemoveTransitionCommand>) {

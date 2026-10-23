@@ -136,6 +136,10 @@ struct ReplaceTitleCommand {
   domain::Title title;
 };
 
+struct ReplaceSubtitlesCommand {
+  std::vector<SubtitleCue> subtitles;
+};
+
 struct AddTransitionCommand { domain::Transition transition; };
 struct RemoveTransitionCommand { domain::Transition transition; };
 
@@ -150,6 +154,7 @@ using Command = std::variant<AddTrackCommand, RemoveTrackCommand, RestoreEmptyVi
                               RestoreSplitCommand, ImportAssetCommand, RemoveAssetCommand,
                               ReplaceAssetCommand,
                               AddTitleCommand, RemoveTitleCommand, ReplaceTitleCommand,
+                              ReplaceSubtitlesCommand,
                               AddTransitionCommand, RemoveTransitionCommand>;
 
 } // namespace pulsar::application

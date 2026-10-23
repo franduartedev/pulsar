@@ -28,6 +28,7 @@ struct ProjectRestoreState {
   std::vector<domain::TrackId> visual_track_ids{video_track_id};
   std::optional<ProjectCanvas> canvas{};
   std::vector<domain::Transition> transitions{};
+  std::vector<SubtitleCue> subtitles{};
 };
 
 } // namespace pulsar::application

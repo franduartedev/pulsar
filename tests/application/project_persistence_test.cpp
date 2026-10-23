@@ -119,6 +119,27 @@ void distant_music_gain_keyframes_roundtrip_as_project_version_eight() {
   assert(ProjectCodec::encode(restored.snapshot()) == bytes);
 }
 
+void subtitles_roundtrip_and_undo_as_project_version_nine() {
+  auto document = make_document();
+  CommandProcessor processor{document};
+  const std::vector<application::SubtitleCue> cues{
+      {1, t(0, Rational{1, 1000}), t(1500, Rational{1, 1000}), "Hola\nPULSAR"},
+      {2, t(2000, Rational{1, 1000}), t(3500, Rational{1, 1000}), "Una nueva escena"},
+  };
+  processor.replace_subtitles(cues);
+  assert(document.subtitles() == cues);
+  assert(processor.undo());
+  assert(document.subtitles().empty());
+  assert(processor.redo());
+  assert(document.subtitles() == cues);
+  const auto bytes = ProjectCodec::encode(document.snapshot());
+  assert(bytes.find("PULSAR_PROJECT 9") == 0);
+  assert(bytes.find("SUBTITLE 1") != std::string::npos);
+  const auto restored = ProjectDocument::restore(ProjectCodec::decode(bytes));
+  assert(restored.subtitles() == cues);
+  assert(ProjectCodec::encode(restored.snapshot()) == bytes);
+}
+
 void relinking_asset_is_undoable_and_preserves_clip_identity() {
   auto document = make_document();
   CommandProcessor processor{document};
@@ -659,6 +680,7 @@ int main() {
   codec_roundtrip_and_canonical_output();
   distant_music_roundtrips_as_project_version_seven();
   distant_music_gain_keyframes_roundtrip_as_project_version_eight();
+  subtitles_roundtrip_and_undo_as_project_version_nine();
   relinking_asset_is_undoable_and_preserves_clip_identity();
   canvas_preset_is_undoable_and_persisted();
   builtin_locator_roundtrip();

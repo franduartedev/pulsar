@@ -15,6 +15,7 @@ struct SubtitleCue {
   domain::MediaTime start{domain::MediaTime::zero()};
   domain::MediaTime end{domain::MediaTime::zero()};
   std::string text;
+  bool operator==(const SubtitleCue&) const = default;
 };
 
 class SrtError final : public std::invalid_argument {

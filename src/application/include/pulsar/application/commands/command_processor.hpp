@@ -42,6 +42,7 @@ public:
   domain::TitleId add_title(domain::Title title);
   void replace_title(domain::Title title);
   void remove_title(domain::TitleId id);
+  void replace_subtitles(std::vector<SubtitleCue> subtitles);
   void add_transition(domain::Transition transition);
   void remove_transition(domain::Transition transition);
   void move_clip(domain::ClipId clip_id, domain::TrackId destination_track_id,
