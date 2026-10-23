@@ -367,6 +367,14 @@ pulsar_apply_project_options(pulsar_pulse_map_tests)
 pulsar_apply_compiler_warnings(pulsar_pulse_map_tests)
 add_test(NAME pulsar.application.pulse_map COMMAND pulsar_pulse_map_tests)
 
+add_executable(pulsar_scene_cards_tests
+  application/scene_cards_test.cpp
+)
+target_link_libraries(pulsar_scene_cards_tests PRIVATE pulsar::application pulsar::domain)
+pulsar_apply_project_options(pulsar_scene_cards_tests)
+pulsar_apply_compiler_warnings(pulsar_scene_cards_tests)
+add_test(NAME pulsar.application.scene_cards COMMAND pulsar_scene_cards_tests)
+
 add_executable(pulsar_editor_session_tests
   application/editor_session_test.cpp
   ${CMAKE_SOURCE_DIR}/apps/pulsar-desktop/src/editor_session.cpp

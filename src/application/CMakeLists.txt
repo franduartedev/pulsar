@@ -8,6 +8,7 @@ add_library(pulsar_application
   src/audio/clip_gain.cpp
   src/audio/distant_music_processor.cpp
   src/audio/pulse_map.cpp
+  src/audio/scene_cards.cpp
   src/audio/audio_output_engine.cpp
   src/media/audio_block.cpp
   src/waveform/waveform_cache.cpp
