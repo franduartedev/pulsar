@@ -11,6 +11,7 @@ add_library(pulsar_application
   src/audio/scene_cards.cpp
   src/audio/audio_output_engine.cpp
   src/media/audio_block.cpp
+  src/subtitle/srt.cpp
   src/waveform/waveform_cache.cpp
   src/waveform/waveform_cache_manager.cpp
   src/waveform/waveform_renderer.cpp
