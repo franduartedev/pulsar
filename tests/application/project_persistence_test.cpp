@@ -101,6 +101,24 @@ void distant_music_roundtrips_as_project_version_seven() {
   assert(ProjectCodec::encode(restored.snapshot()) == bytes);
 }
 
+void distant_music_gain_keyframes_roundtrip_as_project_version_eight() {
+  auto document = make_document();
+  CommandProcessor processor{document};
+  domain::DistantMusicSettings settings;
+  settings.enabled = true;
+  settings.gain_keyframes = {{0.0, -42.0, domain::KeyframeInterpolation::Hold},
+                             {1.5, -12.0, domain::KeyframeInterpolation::Smooth},
+                             {3.0, 0.0, domain::KeyframeInterpolation::Linear}};
+  processor.set_clip_distant_music(domain::ClipId{1}, settings);
+  const auto bytes = ProjectCodec::encode(document.snapshot());
+  assert(bytes.find("PULSAR_PROJECT 8") == 0);
+  assert(bytes.find(" 3 0 -42 0 1.5 -12 2 3 0 1") != std::string::npos);
+  const auto restored = ProjectDocument::restore(ProjectCodec::decode(bytes));
+  const auto* clip = restored.timeline().find_clip(domain::ClipId{1});
+  assert(clip != nullptr && clip->distant_music() == settings);
+  assert(ProjectCodec::encode(restored.snapshot()) == bytes);
+}
+
 void visual_stack_versions_and_validation() {
   using domain::TrackId;
   using domain::TrackKind;
@@ -566,7 +584,7 @@ void repository_normalizes_codec_failures() {
 
   // Malformed bytes through the real repository surface as repository errors.
   const auto malformed = root / "malformed.pulsar";
-  { std::ofstream output{malformed}; output << "PULSAR_PROJECT 8\n"; }
+  { std::ofstream output{malformed}; output << "PULSAR_PROJECT 9\n"; }
   bool load_rejected = false;
   try {
     (void)repository.load(malformed);
@@ -610,6 +628,7 @@ int main() {
   visual_stack_versions_and_validation();
   codec_roundtrip_and_canonical_output();
   distant_music_roundtrips_as_project_version_seven();
+  distant_music_gain_keyframes_roundtrip_as_project_version_eight();
   builtin_locator_roundtrip();
   golden_fixture_decodes();
   strict_decode_rejects_malformed_input();

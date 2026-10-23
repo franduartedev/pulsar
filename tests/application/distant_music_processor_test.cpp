@@ -52,6 +52,17 @@ int main() {
   const auto level = application::measure_audio_level(measured_samples, 4);
   assert(level.peak == 1.0F && level.clipped_samples == 1);
 
+  settings.enabled = true;
+  settings.gain_keyframes = {{0.0, -40.0, domain::KeyframeInterpolation::Hold},
+                             {1.0, 0.0, domain::KeyframeInterpolation::Linear}};
+  application::DistantMusicProcessor automated{settings, rate, 2};
+  float automated_samples[2] = {1.0F, 1.0F};
+  automated.process_interleaved(automated_samples, 1, 0);
+  assert(automated_samples[0] < 0.02F);
+  automated.reset();
+  automated.process_interleaved(automated_samples, 1, rate);
+  assert(automated_samples[0] > 0.5F);
+
   settings.reverb_amount = 2.0;
   bool rejected = false;
   try {

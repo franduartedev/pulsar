@@ -19,6 +19,31 @@ float curve_value(domain::DistantMusicCurve curve, float progress) noexcept {
   return progress;
 }
 
+float keyframed_gain_db(const std::vector<domain::ScalarKeyframe>& keyframes,
+                        float time_seconds) noexcept {
+  if (keyframes.empty()) return 0.0F;
+  if (time_seconds <= keyframes.front().time_seconds) {
+    return static_cast<float>(keyframes.front().value);
+  }
+  for (std::size_t index = 1; index < keyframes.size(); ++index) {
+    const auto& left = keyframes[index - 1];
+    const auto& right = keyframes[index];
+    if (time_seconds > right.time_seconds) continue;
+    if (right.interpolation == domain::KeyframeInterpolation::Hold) {
+      return static_cast<float>(left.value);
+    }
+    const float span = static_cast<float>(right.time_seconds - left.time_seconds);
+    const float progress = std::clamp(
+        (time_seconds - static_cast<float>(left.time_seconds)) / span, 0.0F, 1.0F);
+    const float shaped = right.interpolation == domain::KeyframeInterpolation::Smooth
+                             ? progress * progress * (3.0F - 2.0F * progress)
+                             : progress;
+    return static_cast<float>(left.value) +
+           (static_cast<float>(right.value) - static_cast<float>(left.value)) * shaped;
+  }
+  return static_cast<float>(keyframes.back().value);
+}
+
 } // namespace
 
 DistantMusicProcessor::DistantMusicProcessor(domain::DistantMusicSettings settings, int sample_rate,
@@ -52,7 +77,13 @@ void DistantMusicProcessor::process_interleaved(float* samples, std::size_t fram
     const float progress = static_cast<float>(std::clamp<std::int64_t>(absolute, 0, duration_frames)) /
                            static_cast<float>(duration_frames);
     const float shaped = curve_value(settings_.curve, progress);
-    const float gain = initial_gain + (1.0F - initial_gain) * shaped;
+    const float gain = settings_.gain_keyframes.empty()
+                           ? initial_gain + (1.0F - initial_gain) * shaped
+                           : std::pow(10.0F, keyframed_gain_db(
+                                                   settings_.gain_keyframes,
+                                                   static_cast<float>(absolute) /
+                                                       static_cast<float>(sample_rate_)) /
+                                                       20.0F);
     const float cutoff = static_cast<float>(settings_.start_cutoff_hz +
         (settings_.end_cutoff_hz - settings_.start_cutoff_hz) * shaped);
     const float alpha = std::clamp(two_pi * cutoff * tau / (1.0F + two_pi * cutoff * tau), 0.001F, 1.0F);

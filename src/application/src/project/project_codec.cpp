@@ -204,11 +204,15 @@ std::string ProjectCodec::encode(const ProjectSnapshot& snapshot) {
   bool has_visual_transforms = false;
   bool has_audio_track_state = false;
   bool has_distant_music = false;
+  bool has_distant_music_keyframes = false;
   for (const auto& track : snapshot.timeline.tracks()) {
     if (track.audio_state() != domain::AudioTrackState{}) has_audio_track_state = true;
     for (const auto& clip : track.clips()) {
       if (!clip.visual_transform().is_default()) has_visual_transforms = true;
       if (clip.distant_music().enabled) has_distant_music = true;
+      if (clip.distant_music().enabled && !clip.distant_music().gain_keyframes.empty()) {
+        has_distant_music_keyframes = true;
+      }
     }
   }
   const bool needs_v6 = snapshot.visual_track_ids.size() > 1 || has_visual_transforms ||
@@ -238,7 +242,7 @@ std::string ProjectCodec::encode(const ProjectSnapshot& snapshot) {
     }
   }
   // Version 4 adds clip fades; every file that does not need a newer feature keeps its old version.
-  output << (has_distant_music ? "PULSAR_PROJECT 7\n" : needs_v6 ? "PULSAR_PROJECT 6\n" : needs_v5 ? "PULSAR_PROJECT 5\n" : needs_v4 ? "PULSAR_PROJECT 4\n" : has_titles ? "PULSAR_PROJECT 3\n" : "PULSAR_PROJECT 2\n");
+  output << (has_distant_music_keyframes ? "PULSAR_PROJECT 8\n" : has_distant_music ? "PULSAR_PROJECT 7\n" : needs_v6 ? "PULSAR_PROJECT 6\n" : needs_v5 ? "PULSAR_PROJECT 5\n" : needs_v4 ? "PULSAR_PROJECT 4\n" : has_titles ? "PULSAR_PROJECT 3\n" : "PULSAR_PROJECT 2\n");
   output << "TIMELINE " << snapshot.timeline.id().value() << "\n";
   const auto tracks = sorted_tracks(snapshot.timeline);
   for (const auto* track : tracks) {
@@ -352,6 +356,13 @@ std::string ProjectCodec::encode(const ProjectSnapshot& snapshot) {
                << fx.initial_gain_db << ' ' << fx.duration_seconds << ' '
                << fx.start_cutoff_hz << ' ' << fx.end_cutoff_hz << ' '
                << fx.reverb_amount << ' ' << static_cast<int>(fx.curve);
+        if (!fx.gain_keyframes.empty()) {
+          output << ' ' << fx.gain_keyframes.size();
+          for (const auto& keyframe : fx.gain_keyframes) {
+            output << ' ' << keyframe.time_seconds << ' ' << keyframe.value << ' '
+                   << static_cast<int>(keyframe.interpolation);
+          }
+        }
       }
       output << "\n";
     }
@@ -407,6 +418,7 @@ ProjectRestoreState ProjectCodec::decode(std::string_view bytes) {
   bool video_track = false;
   bool version6 = false;
   bool version7 = false;
+  bool version8 = false;
   bool allocator = false;
   bool ended = false;
   enum class Section { Header, Timeline, Tracks, VideoTrack, VisualTracks, Assets, Clips, Transitions, Titles, Allocator, End };
@@ -441,11 +453,12 @@ ProjectRestoreState ProjectCodec::decode(std::string_view bytes) {
 
     try {
       if (tokens[0].text == "PULSAR_PROJECT") {
-        if (header || tokens.size() != 2 || (tokens[1].text != "1" && tokens[1].text != "2" && tokens[1].text != "3" && tokens[1].text != "4" && tokens[1].text != "5" && tokens[1].text != "6" && tokens[1].text != "7")) {
+        if (header || tokens.size() != 2 || (tokens[1].text != "1" && tokens[1].text != "2" && tokens[1].text != "3" && tokens[1].text != "4" && tokens[1].text != "5" && tokens[1].text != "6" && tokens[1].text != "7" && tokens[1].text != "8")) {
           parse_fail(line_number, "invalid header/version");
         }
         header = true;
-        version7 = tokens[1].text == "7";
+        version7 = tokens[1].text == "7" || tokens[1].text == "8";
+        version8 = tokens[1].text == "8";
         version6 = version7 || tokens[1].text == "6";
         section = Section::Timeline;
       } else if (!header) {
@@ -665,6 +678,28 @@ ProjectRestoreState ProjectCodec::decode(std::string_view bytes) {
             const auto curve = unsigned_number(tokens[i++], line_number, "Distant Music curve");
             if (curve > 2) parse_fail(line_number, "invalid Distant Music curve");
             distant_music.curve = static_cast<domain::DistantMusicCurve>(curve);
+            if (version8 && i < tokens.size()) {
+              const auto count = unsigned_number(tokens[i++], line_number,
+                                                 "Distant Music keyframe count");
+              if (count > 128 || i + count * 3 > tokens.size()) {
+                parse_fail(line_number, "invalid Distant Music keyframes");
+              }
+              distant_music.gain_keyframes.reserve(static_cast<std::size_t>(count));
+              for (std::uint64_t keyframe = 0; keyframe < count; ++keyframe) {
+                domain::ScalarKeyframe value;
+                value.time_seconds = double_number(tokens[i++], line_number,
+                                                   "Distant Music keyframe time");
+                value.value = double_number(tokens[i++], line_number,
+                                            "Distant Music keyframe value");
+                const auto interpolation = unsigned_number(
+                    tokens[i++], line_number, "Distant Music keyframe interpolation");
+                if (interpolation > 2) {
+                  parse_fail(line_number, "invalid Distant Music keyframe interpolation");
+                }
+                value.interpolation = static_cast<domain::KeyframeInterpolation>(interpolation);
+                distant_music.gain_keyframes.push_back(value);
+              }
+            }
           } else {
             parse_fail(line_number, "invalid or duplicate CLIP properties");
           }
