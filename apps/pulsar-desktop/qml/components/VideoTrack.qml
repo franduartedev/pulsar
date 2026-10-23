@@ -17,6 +17,8 @@ Item {
             clipName: model.clipName
             startText: model.startText
             endText: model.endText
+            durationSeconds: model.durationSeconds
+            gainKeyframes: model.gainKeyframes
             missing: model.missing
             selected: model.selected
             muted: model.muted

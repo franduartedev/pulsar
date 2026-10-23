@@ -13,6 +13,8 @@ Rectangle {
     property string clipName: ""
     property string startText: ""
     property string endText: ""
+    property real durationSeconds: 0
+    property var gainKeyframes: []
     property bool missing: false
     property bool selected: false
     property bool muted: false
@@ -173,6 +175,46 @@ Rectangle {
         visible: width >= 10 && height >= 8
         Component.onCompleted: controller.attachWaveformItem(block.clipKey, waveform)
         Component.onDestruction: controller.detachWaveformItem(waveform)
+    }
+
+    // Distant Music automation is visible directly on the clip, so the
+    // editor can read the intended entrance without opening the Inspector.
+    Canvas {
+        id: gainEnvelope
+        visible: block.gainKeyframes.length > 0 && waveform.visible
+        x: waveform.x; y: waveform.y; width: waveform.width; height: waveform.height
+        z: 3
+        onVisibleChanged: requestPaint()
+        onWidthChanged: requestPaint(); onHeightChanged: requestPaint()
+        Connections {
+            target: block
+            function onGainKeyframesChanged() { gainEnvelope.requestPaint() }
+            function onDurationSecondsChanged() { gainEnvelope.requestPaint() }
+        }
+        onPaint: {
+            var ctx = getContext("2d")
+            ctx.reset()
+            var keys = block.gainKeyframes
+            if (keys.length === 0 || block.durationSeconds <= 0) return
+            ctx.strokeStyle = Theme.focus
+            ctx.lineWidth = 1.5
+            ctx.beginPath()
+            for (var i = 0; i < keys.length; ++i) {
+                var key = keys[i]
+                var x = Math.max(0, Math.min(width, Number(key.time) / block.durationSeconds * width))
+                var level = Math.max(0, Math.min(1, (Number(key.value) + 60) / 60))
+                var y = height - 4 - level * Math.max(4, height - 8)
+                if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y)
+            }
+            ctx.stroke()
+            ctx.fillStyle = Theme.focus
+            for (var j = 0; j < keys.length; ++j) {
+                var point = keys[j]
+                var px = Math.max(0, Math.min(width, Number(point.time) / block.durationSeconds * width))
+                var py = height - 4 - Math.max(0, Math.min(1, (Number(point.value) + 60) / 60)) * Math.max(4, height - 8)
+                ctx.beginPath(); ctx.arc(px, py, 2.5, 0, 2 * Math.PI); ctx.fill()
+            }
+        }
     }
 
     // Fades: translucent ramps over the clip's sound, drawn only when a fade exists.
