@@ -668,7 +668,8 @@ Panel {
                         delegate: Row { width: parent.width; spacing: Theme.spaceXS
                             Text { text: "t"; color: Theme.textMuted; width: 12; verticalAlignment: Text.AlignVCenter; height: Theme.controlHeightSmall }
                             TextInput { width: 52; text: Number(modelData.time).toFixed(2); color: Theme.textPrimary; validator: DoubleValidator { bottom: 0; top: 60; decimals: 2 }; onEditingFinished: controller.setSelectedTelephoneMixKeyframe(index, Number(text), modelData.value, modelData.interpolation) }
-                            TextInput { width: 52; text: Math.round(Number(modelData.value) * 100) + "%"; color: Theme.textPrimary; validator: DoubleValidator { bottom: 0; top: 100; decimals: 1 }; onEditingFinished: controller.setSelectedTelephoneMixKeyframe(index, modelData.time, Number(text) / 100, modelData.interpolation) }
+                            TextInput { width: 42; text: Math.round(Number(modelData.value) * 100).toString(); color: Theme.textPrimary; validator: DoubleValidator { bottom: 0; top: 100; decimals: 1 }; onEditingFinished: controller.setSelectedTelephoneMixKeyframe(index, modelData.time, Number(text) / 100, modelData.interpolation) }
+                            Text { text: "%"; color: Theme.textMuted; font.pixelSize: Theme.fontSizeXS; verticalAlignment: Text.AlignVCenter; height: Theme.controlHeightSmall }
                             PButton { width: 24; height: Theme.controlHeightSmall; text: "×"; onClicked: controller.removeSelectedTelephoneMixKeyframe(index) }
                         }
                     }
