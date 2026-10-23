@@ -80,6 +80,27 @@ void codec_roundtrip_and_canonical_output() {
   assert(bytes.find("CLIP ") != std::string::npos);
 }
 
+void distant_music_roundtrips_as_project_version_seven() {
+  auto document = make_document();
+  CommandProcessor processor{document};
+  domain::DistantMusicSettings settings;
+  settings.enabled = true;
+  settings.initial_gain_db = -24.0;
+  settings.duration_seconds = 3.5;
+  settings.start_cutoff_hz = 700.0;
+  settings.end_cutoff_hz = 16'000.0;
+  settings.reverb_amount = 0.35;
+  settings.curve = domain::DistantMusicCurve::Smooth;
+  processor.set_clip_distant_music(domain::ClipId{1}, settings);
+  const auto bytes = ProjectCodec::encode(document.snapshot());
+  assert(bytes.find("PULSAR_PROJECT 7") == 0);
+  assert(bytes.find("CLIP_DISTANT_MUSIC 1") != std::string::npos);
+  const auto restored = ProjectDocument::restore(ProjectCodec::decode(bytes));
+  const auto* clip = restored.timeline().find_clip(domain::ClipId{1});
+  assert(clip != nullptr && clip->distant_music() == settings);
+  assert(ProjectCodec::encode(restored.snapshot()) == bytes);
+}
+
 void visual_stack_versions_and_validation() {
   using domain::TrackId;
   using domain::TrackKind;
@@ -588,6 +609,7 @@ int main() {
   canvas_survives_primary_move_and_auxiliary_edits();
   visual_stack_versions_and_validation();
   codec_roundtrip_and_canonical_output();
+  distant_music_roundtrips_as_project_version_seven();
   builtin_locator_roundtrip();
   golden_fixture_decodes();
   strict_decode_rejects_malformed_input();

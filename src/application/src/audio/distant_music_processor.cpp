@@ -33,16 +33,21 @@ void DistantMusicProcessor::reset() noexcept {
 }
 
 void DistantMusicProcessor::process(AudioBlock& block, std::int64_t first_frame) noexcept {
+  process_interleaved(block.samples_mutable().data(), block.frame_count(), first_frame);
+}
+
+void DistantMusicProcessor::process_interleaved(float* samples, std::size_t frame_count,
+                                                std::int64_t first_frame) noexcept {
+  if (samples == nullptr) return;
   if (!settings_.enabled || sample_rate_ <= 0 || (channel_count_ != 1 && channel_count_ != 2)) return;
 
-  auto& samples = block.samples_mutable();
   const auto duration_frames = std::max<std::int64_t>(1, static_cast<std::int64_t>(
       std::llround(settings_.duration_seconds * static_cast<double>(sample_rate_))));
   const float initial_gain = std::pow(10.0F, static_cast<float>(settings_.initial_gain_db / 20.0));
   const float tau = 1.0F / static_cast<float>(sample_rate_);
   const float two_pi = 6.2831853071795864769F;
 
-  for (std::size_t frame = 0; frame < block.frame_count(); ++frame) {
+  for (std::size_t frame = 0; frame < frame_count; ++frame) {
     const auto absolute = first_frame + static_cast<std::int64_t>(frame);
     const float progress = static_cast<float>(std::clamp<std::int64_t>(absolute, 0, duration_frames)) /
                            static_cast<float>(duration_frames);

@@ -4,6 +4,7 @@
 #include <pulsar/domain/timeline/distant_music.hpp>
 
 #include <cstdint>
+#include <cstddef>
 
 namespace pulsar::application {
 
@@ -16,6 +17,7 @@ public:
 
   void reset() noexcept;
   void process(AudioBlock& block, std::int64_t first_frame) noexcept;
+  void process_interleaved(float* samples, std::size_t frame_count, std::int64_t first_frame) noexcept;
 
 private:
   domain::DistantMusicSettings settings_;

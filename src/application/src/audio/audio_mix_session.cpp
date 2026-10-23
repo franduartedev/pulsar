@@ -650,6 +650,10 @@ AudioMixRenderResult AudioMixSession::render(domain::MediaTime timeline_position
                                              contributor.timeline_range.duration(), format_.sample_rate);
       const auto first_clip_frame = static_cast<std::int64_t>(
           frames_ceil(source_timeline - contributor.timeline_range.start(), format_.sample_rate));
+      if (state->distant_music) {
+        state->distant_music->process_interleaved(
+            state->pcm.data() + state->pcm_offset, available, first_clip_frame);
+      }
       for (std::size_t frame = 0; frame < available; ++frame) {
         const float frame_gain = fade.active()
                                      ? gain.linear * fade.gain_at(first_clip_frame + static_cast<std::int64_t>(frame))
@@ -657,18 +661,7 @@ AudioMixRenderResult AudioMixSession::render(domain::MediaTime timeline_position
         for (std::size_t channel = 0; channel < channels; ++channel) {
           const auto destination = (output_begin + frame) * channels + channel;
           const auto source_index = state->pcm_offset + frame * channels + channel;
-          float sample = state->pcm[source_index];
-          if (state->distant_music) {
-            std::vector<float> one_sample(channels);
-            for (std::size_t c = 0; c < channels; ++c) {
-              one_sample[c] = state->pcm[state->pcm_offset + frame * channels + c];
-            }
-            AudioBlock block{format_.sample_rate, format_.channel_count, 1,
-                             std::move(one_sample), {1, format_.sample_rate}, std::nullopt};
-            state->distant_music->process(block, first_clip_frame + static_cast<std::int64_t>(frame));
-            sample = block.samples()[channel];
-          }
-          mixed[destination] += sample * frame_gain;
+          mixed[destination] += state->pcm[source_index] * frame_gain;
         }
       }
       ++result.mixed_contributors;

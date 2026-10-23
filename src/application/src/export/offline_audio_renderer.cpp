@@ -308,10 +308,8 @@ std::array<float, 2> OfflineAudioRenderer::contributor_sample(
           static_cast<long double>(second) * fraction);
     }
     if (state.distant_music) {
-      AudioBlock block{48'000, 2, 1, {result[0], result[1]}, {1, 48'000}, std::nullopt};
-      state.distant_music->process(block, output_frame - state.first_clip_frame);
-      result[0] = block.samples()[0];
-      result[1] = block.samples()[1];
+      state.distant_music->process_interleaved(result.data(), 1,
+                                               output_frame - state.first_clip_frame);
     }
     const float level = state.gain.linear *
         (state.fade.active() ? state.fade.gain_at(output_frame - state.first_clip_frame) : 1.0F);

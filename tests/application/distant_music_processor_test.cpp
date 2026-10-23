@@ -30,6 +30,11 @@ int main() {
   processor.process(block, 48'000);
   assert(block.samples().front() > before);
 
+  processor.reset();
+  float raw[4] = {1.0F, 1.0F, 1.0F, 1.0F};
+  processor.process_interleaved(raw, 2, 0);
+  assert(raw[0] < 0.1F && raw[2] > raw[0]);
+
   settings.reverb_amount = 2.0;
   bool rejected = false;
   try {
