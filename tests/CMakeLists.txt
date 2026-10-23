@@ -359,6 +359,14 @@ pulsar_apply_project_options(pulsar_distant_music_processor_tests)
 pulsar_apply_compiler_warnings(pulsar_distant_music_processor_tests)
 add_test(NAME pulsar.application.distant_music_processor COMMAND pulsar_distant_music_processor_tests)
 
+add_executable(pulsar_pulse_map_tests
+  application/pulse_map_test.cpp
+)
+target_link_libraries(pulsar_pulse_map_tests PRIVATE pulsar::application pulsar::domain)
+pulsar_apply_project_options(pulsar_pulse_map_tests)
+pulsar_apply_compiler_warnings(pulsar_pulse_map_tests)
+add_test(NAME pulsar.application.pulse_map COMMAND pulsar_pulse_map_tests)
+
 add_executable(pulsar_editor_session_tests
   application/editor_session_test.cpp
   ${CMAKE_SOURCE_DIR}/apps/pulsar-desktop/src/editor_session.cpp
