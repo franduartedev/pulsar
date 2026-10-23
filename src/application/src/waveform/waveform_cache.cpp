@@ -147,7 +147,9 @@ WaveformCacheKey make_waveform_cache_key(const std::filesystem::path& source_pat
   const auto size_text = error ? std::string{"missing"} : std::to_string(size);
   error.clear();
   const auto modified = std::filesystem::last_write_time(source_path, error);
-  const auto modified_text = error ? std::string{"unknown"} : std::to_string(modified.time_since_epoch().count());
+  const auto modified_text =
+      error ? std::string{"unknown"}
+            : std::to_string(static_cast<long long>(modified.time_since_epoch().count()));
   return {identity_path.generic_string() + "|size=" + size_text + "|mtime=" + modified_text,
           stream_index, sample_rate, channel_count, time_base, stream_origin};
 }

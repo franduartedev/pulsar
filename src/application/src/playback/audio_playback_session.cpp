@@ -1,5 +1,7 @@
 #include <pulsar/application/playback/audio_playback_session.hpp>
 
+#include <pulsar/domain/support/wide_integer.hpp>
+
 #include <algorithm>
 #include <cstdint>
 #include <limits>
@@ -459,9 +461,9 @@ std::size_t AudioPlaybackSession::source_frames_for(domain::MediaTime duration) 
     return 0;
   }
   const auto seconds = duration.seconds();
-  const auto numerator = static_cast<__int128_t>(seconds.numerator()) * source_->sample_rate();
-  const auto denominator = static_cast<__int128_t>(seconds.denominator());
-  return static_cast<std::size_t>(numerator / denominator);
+  const auto numerator = domain::WideInteger{seconds.numerator()} * source_->sample_rate();
+  const auto denominator = domain::WideInteger{seconds.denominator()};
+  return static_cast<std::size_t>(static_cast<std::uint64_t>(numerator / denominator));
 }
 
 domain::MediaTime AudioPlaybackSession::audio_target_for(

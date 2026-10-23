@@ -7,6 +7,7 @@
 #include <pulsar/media/ffmpeg/media_decode_error.hpp>
 
 #include <pulsar/application/media/still_media.hpp>
+#include <pulsar/domain/support/wide_integer.hpp>
 
 #include "internal/ffmpeg_common.hpp"
 
@@ -75,11 +76,7 @@ using PacketPtr = std::unique_ptr<AVPacket, PacketDeleter>;
 using FramePtr = std::unique_ptr<AVFrame, FrameDeleter>;
 using SwsContextPtr = std::unique_ptr<SwsContext, SwsContextDeleter>;
 
-#if defined(__SIZEOF_INT128__)
-using WideInt = __int128_t;
-#else
-#error "PULSAR requires signed __int128 support for exact seek timestamp conversion."
-#endif
+using WideInt = domain::WideInteger;
 
 [[nodiscard]] CodecContextPtr allocate_decoder_context(const AVCodec& decoder,
                                                        const AVCodecParameters& parameters) {

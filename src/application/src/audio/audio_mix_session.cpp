@@ -4,9 +4,11 @@
 #include <pulsar/application/audio/clip_gain.hpp>
 #include <pulsar/application/audio/audio_effect_chain.hpp>
 #include <pulsar/application/audio/output_stage.hpp>
+#include <pulsar/domain/support/wide_integer.hpp>
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <cstdlib>
 #include <iostream>
 #include <limits>
@@ -29,13 +31,13 @@ namespace {
     return 0;
   }
   const auto seconds = duration.seconds();
-  const auto numerator = static_cast<__int128_t>(seconds.numerator()) * sample_rate;
-  const auto denominator = static_cast<__int128_t>(seconds.denominator());
+  const auto numerator = domain::WideInteger{seconds.numerator()} * sample_rate;
+  const auto denominator = domain::WideInteger{seconds.denominator()};
   const auto frames = (numerator + denominator - 1) / denominator;
-  if (frames > static_cast<__int128_t>(std::numeric_limits<std::size_t>::max())) {
+  if (frames > domain::WideInteger::from_unsigned(std::numeric_limits<std::size_t>::max())) {
     throw std::overflow_error{"audio mix frame conversion overflow"};
   }
-  return static_cast<std::size_t>(frames);
+  return static_cast<std::size_t>(static_cast<std::uint64_t>(frames));
 }
 
 [[nodiscard]] std::size_t frames_floor(domain::MediaTime duration, int sample_rate) {
@@ -43,13 +45,13 @@ namespace {
     return 0;
   }
   const auto seconds = duration.seconds();
-  const auto numerator = static_cast<__int128_t>(seconds.numerator()) * sample_rate;
-  const auto denominator = static_cast<__int128_t>(seconds.denominator());
+  const auto numerator = domain::WideInteger{seconds.numerator()} * sample_rate;
+  const auto denominator = domain::WideInteger{seconds.denominator()};
   const auto frames = numerator / denominator;
-  if (frames > static_cast<__int128_t>(std::numeric_limits<std::size_t>::max())) {
+  if (frames > domain::WideInteger::from_unsigned(std::numeric_limits<std::size_t>::max())) {
     throw std::overflow_error{"audio source frame conversion overflow"};
   }
-  return static_cast<std::size_t>(frames);
+  return static_cast<std::size_t>(static_cast<std::uint64_t>(frames));
 }
 
 [[nodiscard]] bool same_identity(const AudioContributor& lhs,

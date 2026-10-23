@@ -1,5 +1,7 @@
 #include <pulsar/application/waveform/waveform_renderer.hpp>
 
+#include <pulsar/domain/support/wide_integer.hpp>
+
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -9,9 +11,10 @@ namespace pulsar::application {
 namespace {
 
 // Rational pixel mapping uses 128-bit products of normalized int64 rationals.
-// The largest cross product is below 2^126. Multiplication by pixel width is
-// performed as bounded modular doubling so it cannot overflow that product.
-__extension__ typedef unsigned __int128 WideUnsigned;
+// The largest cross product is below 2^126, so the signed wide integer is
+// large enough; multiplication by pixel width is performed as bounded modular
+// doubling so it cannot overflow that product.
+using WideUnsigned = domain::WideInteger;
 
 std::uint32_t fraction_pixel(domain::MediaTime time, domain::MediaTime start,
                              domain::MediaTime end, std::uint32_t width,

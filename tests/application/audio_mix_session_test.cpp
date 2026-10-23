@@ -4,6 +4,7 @@
 #include <pulsar/application/project/media_asset.hpp>
 #include <pulsar/domain/timeline/clip.hpp>
 #include <pulsar/domain/timeline/timeline.hpp>
+#include <pulsar/domain/support/wide_integer.hpp>
 #include <pulsar/domain/timeline/track.hpp>
 
 #include <algorithm>
@@ -63,10 +64,10 @@ public:
                                                      : domain::MediaTime::zero());
     if (relative < domain::MediaTime::zero()) return false;
     const auto seconds = relative.seconds();
-    const auto exact = static_cast<__int128_t>(seconds.numerator()) * spec_.rate /
+    const auto exact = domain::WideInteger{seconds.numerator()} * spec_.rate /
                        seconds.denominator();
-    if (exact < 0 || exact > static_cast<__int128_t>(spec_.total_frames)) return false;
-    cursor_ = static_cast<std::size_t>(exact);
+    if (exact < 0 || exact > domain::WideInteger::from_unsigned(spec_.total_frames)) return false;
+    cursor_ = static_cast<std::size_t>(static_cast<std::uint64_t>(exact));
     return true;
   }
 

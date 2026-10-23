@@ -1,6 +1,7 @@
 #include <pulsar/media/ffmpeg/ffmpeg_audio_decode_session.hpp>
 
 #include <pulsar/media/ffmpeg/media_decode_error.hpp>
+#include <pulsar/domain/support/wide_integer.hpp>
 
 #include "internal/ffmpeg_common.hpp"
 
@@ -33,7 +34,7 @@ namespace {
 using application::AudioBlock;
 using internal::ffmpeg_error_text;
 
-using WideInt = __int128_t;
+using WideInt = domain::WideInteger;
 
 [[nodiscard]] WideInt abs_wide(WideInt value) noexcept {
   return value < 0 ? -value : value;
