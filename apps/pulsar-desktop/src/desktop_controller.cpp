@@ -2349,6 +2349,7 @@ void DesktopController::analyzeSelectedAudio() {
         }
         offset_seconds += partial.duration_seconds;
         map.duration_seconds = offset_seconds;
+        if (map.points.size() >= 100'000) break;
       }
       if (analysis_cancel_requested_.load(std::memory_order_acquire)) return;
       const auto cards = pulsar::application::build_scene_cards(map);
