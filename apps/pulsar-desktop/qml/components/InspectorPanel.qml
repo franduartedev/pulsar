@@ -613,7 +613,7 @@ Panel {
                         Text { visible: controller.selectedAudioFxChain.length === 0; text: "Sin efectos"; color: Theme.textMuted; font.pixelSize: Theme.fontSizeXS; verticalAlignment: Text.AlignVCenter; height: Theme.controlHeightSmall }
                     } }
                 PButton { width: parent.width; height: Theme.controlHeightSmall; primary: true; text: "Aplicar preset Distant Music"; enabled: inspector.clipSelected && controller.selectedClipHasAudio; onClicked: controller.applySelectedDistantMusicPreset() }
-                FieldRow { visible: inspector.clipSelected && controller.selectedClipHasAudio; label: "Recetas"; Row { spacing: 4
+                FieldRow { visible: inspector.clipSelected && controller.selectedClipHasAudio; label: "Recetas"; Flow { width: parent.width; spacing: 4
                         Repeater { model: controller.cinematicRecipes
                             delegate: PButton { width: Math.max(58, implicitWidth + 14); height: Theme.controlHeightSmall; text: modelData.name; onClicked: controller.applySelectedCinematicRecipe(modelData.id) }
                         }

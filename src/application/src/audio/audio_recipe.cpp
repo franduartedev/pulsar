@@ -43,12 +43,28 @@ const std::vector<AudioRecipe>& builtin_audio_recipes() {
     submerged.mix = 0.78;
     submerged.depth = 0.82;
 
+    domain::DistantMusicSettings deep_dive_music = suspense;
+    deep_dive_music.initial_gain_db = -42.0;
+    deep_dive_music.duration_seconds = 6.0;
+    deep_dive_music.reverb_amount = 0.5;
+    domain::UnderwaterSettings deep_dive_water = submerged;
+    deep_dive_water.mix = 0.86;
+    deep_dive_water.depth = 0.9;
+
+    domain::DistantMusicSettings lost_signal_music = memory;
+    lost_signal_music.initial_gain_db = -34.0;
+    lost_signal_music.duration_seconds = 4.5;
+    domain::TelephoneSettings lost_signal_radio = radio;
+    lost_signal_radio.drive = 0.2;
+
     return std::vector<AudioRecipe>{
         {"reveal", "Revelación", reveal, {}, {}},
         {"suspense", "Suspenso", suspense, {}, {}},
         {"memory", "Memoria", memory, {}, {}},
         {"radio", "Radio", {}, radio, {}},
         {"submerge", "Sumergido", {}, {}, submerged},
+        {"deep_dive", "Inmersión Profunda", deep_dive_music, {}, deep_dive_water},
+        {"lost_signal", "Señal Perdida", lost_signal_music, lost_signal_radio, {}},
     };
   }();
   return recipes;
