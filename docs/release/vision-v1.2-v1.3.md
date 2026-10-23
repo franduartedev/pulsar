@@ -28,6 +28,8 @@ milestones, not a promise to ship every item at once.
 - Background waveform and thumbnail work with cancellation and bounded memory.
 - Project snapshots, autosave history and a recovery browser rather than one opaque recovery file.
 - Export queue with resumable jobs and a final “what changed since preview” report.
+- Linux and Windows release candidates with the same project format, preview/export behavior,
+  Audio FX coverage and documented manual smoke checklist.
 
 ## v1.3 — PULSAR's distinctive layer
 

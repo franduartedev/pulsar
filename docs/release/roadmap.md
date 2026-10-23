@@ -17,6 +17,18 @@ Audio-specific sequencing is tracked in [`docs/product/audio-fx-roadmap.md`](../
 The product direction for the major editor milestones is in
 [`docs/release/vision-v1.2-v1.3.md`](vision-v1.2-v1.3.md).
 
+## v1.2 cross-platform acceptance gate
+
+The v1.2 editor is not considered finished until the same release candidate is usable on
+Linux and Windows. The gate covers import, timeline editing, preview, Audio FX, project
+save/reopen, recovery and MP4 export. Each platform must have a repeatable CI build plus a
+manual smoke pass on real hardware; platform-specific packaging or path code must not change
+the project format or preview/export semantics.
+
+UI/UX improvements follow the existing visual system: current colors, typography, spacing and
+component language remain stable while new controls gain clearer state, validation, keyboard
+friendliness and visual feedback.
+
 ## Prerequisites for OPERATOR (hardening list)
 
 Before an assistant may drive edits, the command layer needs: well-defined nested command
