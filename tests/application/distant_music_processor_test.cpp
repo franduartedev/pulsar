@@ -31,9 +31,11 @@ int main() {
   assert(block.samples().back() > block.samples().front());
 
   processor.reset();
-  const auto before = block.samples().front();
-  processor.process(block, 48'000);
-  assert(block.samples().front() > before);
+  std::vector<float> restored_samples(4'800 * 2, 1.0F);
+  application::AudioBlock restored_block{rate, 2, 4'800, std::move(restored_samples),
+                                         {1, rate}, std::nullopt};
+  processor.process(restored_block, 48'000);
+  assert(restored_block.samples().front() > 0.5F);
 
   processor.reset();
   float raw[4] = {1.0F, 1.0F, 1.0F, 1.0F};
