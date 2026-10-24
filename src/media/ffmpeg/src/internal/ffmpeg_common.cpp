@@ -9,6 +9,7 @@ extern "C" {
 }
 
 #include <array>
+#include <cctype>
 #include <filesystem>
 #include <stdexcept>
 #include <system_error>
@@ -21,9 +22,9 @@ using application::MediaProbeErrorCode;
 
 [[nodiscard]] std::string ffmpeg_path_text(const std::filesystem::path& path) {
 #if defined(_WIN32)
-  const auto value = path.generic_u8string();
+  const auto value = path.u8string();
   std::string text{reinterpret_cast<const char*>(value.data()), value.size()};
-  if (text.starts_with("//?/")) text.erase(0, 4);
+  if (text.starts_with("\\\\?\\")) text.erase(0, 4);
   return text;
 #else
   return path.generic_string();
@@ -32,7 +33,17 @@ using application::MediaProbeErrorCode;
 
 [[nodiscard]] bool is_explicit_protocol_like_input(const std::filesystem::path& path) {
   const std::string text = path.generic_string();
-  return text.find("://") != std::string::npos || text.rfind("file:", 0) == 0;
+  if (text.rfind("file:", 0) == 0 || text.find("://") != std::string::npos) {
+    return true;
+  }
+
+  // On Windows, filesystem::path normalizes URI-looking input such as
+  // "https://..." to "https:/...". Keep drive-letter paths local while
+  // rejecting any other scheme before touching the filesystem.
+  const auto colon = text.find(':');
+  return colon != std::string::npos && colon + 1 < text.size() &&
+         text[colon + 1] == '/' &&
+         (colon != 1 || !std::isalpha(static_cast<unsigned char>(text[0])));
 }
 
 } // namespace
