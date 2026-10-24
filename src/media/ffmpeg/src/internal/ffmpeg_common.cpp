@@ -22,14 +22,17 @@ using application::MediaProbeErrorCode;
 [[nodiscard]] std::string ffmpeg_path_text(const std::filesystem::path& path) {
 #if defined(_WIN32)
   const auto value = path.generic_u8string();
-  return {reinterpret_cast<const char*>(value.data()), value.size()};
+  std::string text{reinterpret_cast<const char*>(value.data()), value.size()};
+  if (text.starts_with("//?/")) text.erase(0, 4);
+  if (text.size() >= 2 && text[1] == ':') return "file:///" + text;
+  return text;
 #else
   return path.generic_string();
 #endif
 }
 
 [[nodiscard]] bool is_explicit_protocol_like_input(const std::filesystem::path& path) {
-  const std::string text = ffmpeg_path_text(path);
+  const std::string text = path.generic_string();
   return text.find("://") != std::string::npos || text.rfind("file:", 0) == 0;
 }
 
