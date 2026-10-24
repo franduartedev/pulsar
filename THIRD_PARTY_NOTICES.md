@@ -29,7 +29,7 @@ and similar are not used. AAC uses FFmpeg's native encoder. **`libzvbi` (GPL-2.0
 
 ### Windows portable bundle
 
-The Windows bundle is built by `packaging/windows/build-release.ps1` against the vcpkg `ffmpeg[x264]` port, which
+The Windows bundle is built by `packaging/windows/build-release.ps1` against the vcpkg `ffmpeg[x264,zlib]` port, which
 enables the same GPL components as the Linux build: FFmpeg (GPL-2.0-or-later as built with `--enable-gpl`) and x264
 (GPL-2.0-or-later, shipped as a separate DLL beside `pulsar-desktop.exe`). The exact FFmpeg and x264 versions are the
 ones resolved by the vcpkg baseline recorded in the CI logs for the release commit; their unmodified upstream sources

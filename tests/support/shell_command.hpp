@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdlib>
 #include <filesystem>
 #include <string>
 
@@ -52,6 +53,17 @@ namespace pulsar::test_support {
   }
   quoted += "'";
   return quoted;
+#endif
+}
+
+// Runs a command line built from shell_quote() pieces. cmd.exe /c drops the
+// first and last quote of a command that starts with a quote and holds more
+// quotes (a quoted program plus a quoted path), so Windows needs one more pair.
+[[nodiscard]] inline int run_shell(const std::string& command) {
+#if defined(_WIN32)
+  return std::system(("\"" + command + "\"").c_str());
+#else
+  return std::system(command.c_str());
 #endif
 }
 
