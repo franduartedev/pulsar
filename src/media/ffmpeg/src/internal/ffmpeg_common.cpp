@@ -25,7 +25,7 @@ using application::MediaProbeErrorCode;
   const auto value = path.generic_u8string();
   std::string text{reinterpret_cast<const char*>(value.data()), value.size()};
   if (text.starts_with("//?/")) text.erase(0, 4);
-  if (text.size() >= 2 && text[1] == ':') return "file:///" + text;
+  if (text.size() >= 2 && text[1] == ':') return "file:" + text;
   return text;
 #else
   return path.generic_string();
