@@ -18,7 +18,6 @@ namespace pulsar::test_support {
   std::string text = utf8_path(path);
 #if defined(_WIN32)
   if (text.starts_with("//?/")) text.erase(0, 4);
-  if (text.size() >= 2 && text[1] == ':') return "file:///" + text;
 #endif
   return text;
 }

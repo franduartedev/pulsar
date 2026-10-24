@@ -44,11 +44,19 @@ bool throws_probe_error(Callable callable, MediaProbeErrorCode expected_code) {
   try {
     callable();
   } catch (const MediaProbeError& error) {
+    if (error.code() != expected_code) {
+      std::cerr << "unexpected probe error code: expected "
+                << static_cast<int>(expected_code) << ", got "
+                << static_cast<int>(error.code()) << ": " << error.what() << '\n';
+    }
     return error.code() == expected_code;
   } catch (...) {
+    std::cerr << "unexpected non-probe exception while checking probe error\n";
     return false;
   }
 
+  std::cerr << "probe call did not throw the expected error code: "
+            << static_cast<int>(expected_code) << '\n';
   return false;
 }
 

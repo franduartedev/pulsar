@@ -216,9 +216,6 @@ void FFmpegExportMediaWriter::Impl::open_output() {
   std::string output_path_text{reinterpret_cast<const char*>(output_path_utf8.data()),
                                output_path_utf8.size()};
   if (output_path_text.starts_with("//?/")) output_path_text.erase(0, 4);
-  if (output_path_text.size() >= 2 && output_path_text[1] == ':') {
-    output_path_text = "file:///" + output_path_text;
-  }
 #else
   const std::string output_path_text = output_path.generic_string();
 #endif
