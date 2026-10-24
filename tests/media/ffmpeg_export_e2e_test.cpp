@@ -30,6 +30,8 @@ extern "C" {
 #include <string>
 #include <vector>
 
+#include "../support/shell_command.hpp"
+
 namespace {
 using namespace pulsar;
 namespace exporting = application::exporting;
@@ -79,7 +81,7 @@ struct VideoSample {
 
 std::vector<VideoSample> decode_video_samples(const std::filesystem::path& path) {
   AVFormatContext* format = nullptr;
-  const auto path_text = path.generic_string();
+  const auto path_text = pulsar::test_support::ffmpeg_path(path);
   assert(avformat_open_input(&format, path_text.c_str(), nullptr, nullptr) == 0);
   assert(avformat_find_stream_info(format, nullptr) >= 0);
   const int stream_index = av_find_best_stream(format, AVMEDIA_TYPE_VIDEO, -1, -1, nullptr, 0);
@@ -197,7 +199,7 @@ void export_snapshot(const application::ProjectSnapshot& snapshot,
 
 int codec_profile(const std::filesystem::path& path, AVMediaType type) {
   AVFormatContext* format = nullptr;
-  const auto path_text = path.generic_string();
+  const auto path_text = pulsar::test_support::ffmpeg_path(path);
   assert(avformat_open_input(&format, path_text.c_str(), nullptr, nullptr) == 0);
   assert(avformat_find_stream_info(format, nullptr) >= 0);
   const int stream_index = av_find_best_stream(format, type, -1, -1, nullptr, 0);

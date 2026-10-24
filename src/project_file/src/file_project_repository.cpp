@@ -164,7 +164,7 @@ application::ProjectSaveResult FileProjectRepository::save(
     temporary = temp_path_for(destination, attempt);
     const HANDLE handle = CreateFileW(temporary.c_str(), GENERIC_WRITE, FILE_SHARE_READ,
                                       nullptr, CREATE_NEW,
-                                      FILE_ATTRIBUTE_NORMAL | FILE_FLAG_WRITE_THROUGH, nullptr);
+                                      FILE_ATTRIBUTE_NORMAL, nullptr);
     if (handle == INVALID_HANDLE_VALUE) {
       const auto error = GetLastError();
       if (error == ERROR_FILE_EXISTS || error == ERROR_ALREADY_EXISTS) continue;

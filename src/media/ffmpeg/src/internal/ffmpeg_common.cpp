@@ -19,8 +19,17 @@ namespace {
 using application::MediaProbeError;
 using application::MediaProbeErrorCode;
 
+[[nodiscard]] std::string ffmpeg_path_text(const std::filesystem::path& path) {
+#if defined(_WIN32)
+  const auto value = path.generic_u8string();
+  return {reinterpret_cast<const char*>(value.data()), value.size()};
+#else
+  return path.generic_string();
+#endif
+}
+
 [[nodiscard]] bool is_explicit_protocol_like_input(const std::filesystem::path& path) {
-  const std::string text = path.generic_string();
+  const std::string text = ffmpeg_path_text(path);
   return text.find("://") != std::string::npos || text.rfind("file:", 0) == 0;
 }
 
@@ -134,7 +143,7 @@ std::string codec_name(const AVCodecParameters& codec_parameters) {
 
 FormatContextPtr open_input_with_stream_info(const std::filesystem::path& path) {
   AVFormatContext* raw_context = nullptr;
-  const std::string path_text = path.generic_string();
+  const std::string path_text = ffmpeg_path_text(path);
   const int open_result = avformat_open_input(&raw_context, path_text.c_str(), nullptr, nullptr);
   if (open_result < 0) {
     throw MediaProbeError{MediaProbeErrorCode::UnsupportedMedia,

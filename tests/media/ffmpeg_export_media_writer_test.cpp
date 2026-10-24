@@ -24,6 +24,8 @@
 #include <string>
 #include <vector>
 
+#include "../support/shell_command.hpp"
+
 extern "C" {
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
@@ -75,7 +77,7 @@ struct MuxEvidence {
 
 MuxEvidence inspect_mux(const std::filesystem::path& path) {
   AVFormatContext* format = nullptr;
-  const auto path_text = path.generic_string();
+  const auto path_text = pulsar::test_support::ffmpeg_path(path);
   assert(avformat_open_input(&format, path_text.c_str(), nullptr, nullptr) == 0);
   assert(avformat_find_stream_info(format, nullptr) >= 0);
   int video_index = -1;

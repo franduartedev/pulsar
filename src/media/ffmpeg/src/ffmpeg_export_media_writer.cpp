@@ -211,7 +211,13 @@ void FFmpegExportMediaWriter::Impl::open_output() {
   if (!packet) fail(ExportMediaWriterErrorCode::InternalInvariant,
                     "FFmpeg could not allocate an output packet");
   AVFormatContext* raw_format = nullptr;
+#if defined(_WIN32)
+  const auto output_path_utf8 = output_path.generic_u8string();
+  const std::string output_path_text{reinterpret_cast<const char*>(output_path_utf8.data()),
+                                     output_path_utf8.size()};
+#else
   const std::string output_path_text = output_path.generic_string();
+#endif
   const auto result = avformat_alloc_output_context2(
       &raw_format, nullptr, "mp4", output_path_text.c_str());
   if (result < 0 || raw_format == nullptr) {

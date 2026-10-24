@@ -14,6 +14,10 @@ namespace pulsar::test_support {
 #endif
 }
 
+[[nodiscard]] inline std::string ffmpeg_path(const std::filesystem::path& path) {
+  return utf8_path(path);
+}
+
 // Quotes a path for the shell that std::system() uses on this platform:
 // POSIX single quotes, or cmd.exe double quotes on Windows.
 [[nodiscard]] inline std::string shell_quote(const std::filesystem::path& path) {
