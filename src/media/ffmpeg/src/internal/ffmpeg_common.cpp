@@ -9,7 +9,6 @@ extern "C" {
 }
 
 #include <array>
-#include <cctype>
 #include <filesystem>
 #include <stdexcept>
 #include <system_error>
@@ -25,7 +24,6 @@ using application::MediaProbeErrorCode;
   const auto value = path.generic_u8string();
   std::string text{reinterpret_cast<const char*>(value.data()), value.size()};
   if (text.starts_with("//?/")) text.erase(0, 4);
-  if (text.size() >= 2 && text[1] == ':') return "file:" + text;
   return text;
 #else
   return path.generic_string();
@@ -34,16 +32,7 @@ using application::MediaProbeErrorCode;
 
 [[nodiscard]] bool is_explicit_protocol_like_input(const std::filesystem::path& path) {
   const std::string text = path.generic_string();
-  if (text.rfind("file:", 0) == 0 || text.find("://") != std::string::npos) return true;
-
-  // On Windows, filesystem path normalization can collapse the two slashes in
-  // a URI scheme (for example, "https://..." becomes "https:/..."). Treat
-  // any non-drive-letter scheme as a protocol while keeping ordinary local
-  // paths such as "C:/media/file.mp4" local.
-  const auto colon = text.find(':');
-  return colon != std::string::npos && colon + 1 < text.size() &&
-         text[colon + 1] == '/' &&
-         (colon != 1 || !std::isalpha(static_cast<unsigned char>(text[0])));
+  return text.find("://") != std::string::npos || text.rfind("file:", 0) == 0;
 }
 
 } // namespace
