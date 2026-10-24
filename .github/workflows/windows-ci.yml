@@ -38,6 +38,7 @@ jobs:
         run: choco install ninja --no-progress --yes
 
       - name: Cache vcpkg FFmpeg artifacts
+        id: vcpkg-cache
         uses: actions/cache@v4
         with:
           path: |
@@ -49,6 +50,7 @@ jobs:
             windows-vcpkg-ffmpeg-x264-v1-${{ runner.os }}-
 
       - name: Install FFmpeg port
+        id: vcpkg-install
         shell: pwsh
         run: |
           $vcpkg = (Get-Command vcpkg.exe).Source
@@ -56,6 +58,18 @@ jobs:
           vcpkg install ffmpeg[x264]:x64-windows --disable-metrics
           "PULSAR_VCPKG_TOOLCHAIN=$vcpkgRoot/scripts/buildsystems/vcpkg.cmake" >> $env:GITHUB_ENV
           "PULSAR_VCPKG_ROOT=$vcpkgRoot" >> $env:GITHUB_ENV
+
+      # Persist the expensive port build before the test gate. A failing test
+      # must not force the next Windows iteration to rebuild FFmpeg from zero.
+      - name: Save vcpkg FFmpeg artifacts
+        if: ${{ steps.vcpkg-install.outcome == 'success' && steps.vcpkg-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            C:\vcpkg\installed
+            C:\vcpkg\packages
+            C:\vcpkg\downloads
+          key: ${{ steps.vcpkg-cache.outputs.cache-primary-key }}
 
       # Test-only dependency: the vcpkg ffmpeg port ships libraries without the
       # CLI, so integration tests use a separately installed CLI. It is never
