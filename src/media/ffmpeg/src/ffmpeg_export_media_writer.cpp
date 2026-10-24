@@ -212,10 +212,15 @@ void FFmpegExportMediaWriter::Impl::open_output() {
                     "FFmpeg could not allocate an output packet");
   AVFormatContext* raw_format = nullptr;
 #if defined(_WIN32)
-  const auto output_path_utf8 = output_path.u8string();
+  const auto output_path_utf8 = output_path.generic_u8string();
   std::string output_path_text{reinterpret_cast<const char*>(output_path_utf8.data()),
                                output_path_utf8.size()};
-  if (output_path_text.starts_with("\\\\?\\")) output_path_text.erase(0, 4);
+  if (output_path_text.starts_with("//?/")) output_path_text.erase(0, 4);
+  if (output_path_text.size() >= 2 && output_path_text[1] == ':') {
+    output_path_text = "file:" + output_path_text;
+  } else if (output_path_text.starts_with("//")) {
+    output_path_text = "file:" + output_path_text;
+  }
 #else
   const std::string output_path_text = output_path.generic_string();
 #endif

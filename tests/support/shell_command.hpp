@@ -16,12 +16,13 @@ namespace pulsar::test_support {
 
 [[nodiscard]] inline std::string ffmpeg_path(const std::filesystem::path& path) {
 #if defined(_WIN32)
-  // FFmpeg's Windows file protocol accepts native DOS paths. Keep the
-  // backslashes produced by path.u8string(); converting C:\\... to C:/...
-  // makes some FFmpeg builds treat the drive letter as a protocol name.
-  const auto value = path.u8string();
+  // libavformat receives a URL.  Use its explicit local-file form so the
+  // direct test calls behave the same as the production FFmpeg adapter.
+  const auto value = path.generic_u8string();
   std::string text{reinterpret_cast<const char*>(value.data()), value.size()};
-  if (text.starts_with("\\\\?\\")) text.erase(0, 4);
+  if (text.starts_with("//?/")) text.erase(0, 4);
+  if (text.size() >= 2 && text[1] == ':') return "file:" + text;
+  if (text.starts_with("//")) return "file:" + text;
   return text;
 #else
   return path.generic_string();
