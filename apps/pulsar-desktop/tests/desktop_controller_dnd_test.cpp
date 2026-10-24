@@ -146,6 +146,8 @@ int main(int argc, char** argv) {
     REQUIRE(36, fresh.errorMessage().isEmpty() && fresh.timelineTracks().size() == 3 && clips(fresh) == 3);
   }
 
-  fs::remove_all(root);
+  // Windows keeps files open by the live controller locked: best-effort cleanup.
+  std::error_code cleanup_error;
+  fs::remove_all(root, cleanup_error);
   return 0;
 }
