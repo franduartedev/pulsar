@@ -200,7 +200,7 @@ void write_non_zero_start_h264_fixture(const std::filesystem::path& path) {
   const std::string encoder_check_command =
       shell_quote(PULSAR_TEST_FFMPEG_CLI) +
       " -hide_banner -loglevel error -h encoder=libx264 >" + null_device() + " 2>&1";
-  if (std::system(encoder_check_command.c_str()) != 0) {
+  if (pulsar::test_support::run_shell(encoder_check_command) != 0) {
     throw std::runtime_error{
         "ffmpeg CLI is available, but the required libx264 encoder is not"};
   }
@@ -214,7 +214,7 @@ void write_non_zero_start_h264_fixture(const std::filesystem::path& path) {
       "-sc_threshold 0 -preset veryfast -f matroska " +
       shell_quote(path);
 
-  if (std::system(command.c_str()) != 0) {
+  if (pulsar::test_support::run_shell(command) != 0) {
     throw std::runtime_error{
         "ffmpeg CLI could not create the required non-zero start-time H.264/B-frame fixture"};
   }

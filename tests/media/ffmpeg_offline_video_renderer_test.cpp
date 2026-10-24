@@ -83,7 +83,7 @@ void normalizes_non_zero_stream_origin() {
                        "-i testsrc2=size=320x180:rate=25:duration=1 "
                        "-vf setpts=PTS+5/TB -c:v libx264 -pix_fmt yuv420p "
                        "-bf 0 -g 25 -f matroska " + shell_quote(path);
-  if (std::system(command.c_str()) != 0) {
+  if (pulsar::test_support::run_shell(command) != 0) {
     throw std::runtime_error{"could not create non-zero stream-origin fixture"};
   }
 
@@ -118,7 +118,7 @@ void preserves_declared_gaps_from_real_media() {
   const auto command = shell_quote(PULSAR_TEST_FFMPEG_CLI) +
       " -y -hide_banner -loglevel error -f lavfi -i testsrc2=size=64x36:rate=25:duration=1"
       " -vf setpts=2*PTS -fps_mode passthrough -c:v ffv1 -an " + shell_quote(path);
-  if (std::system(command.c_str()) != 0) throw std::runtime_error{"could not create declared-gap fixture"};
+  if (pulsar::test_support::run_shell(command) != 0) throw std::runtime_error{"could not create declared-gap fixture"};
   try {
     application::ProjectDocument document;
     application::CommandProcessor processor{document};
@@ -193,7 +193,7 @@ void renders_long_fixtures_with_bounded_state() {
                          " -y -hide_banner -loglevel error -f lavfi "
                          "-i testsrc2=size=64x36:rate=25:duration=" + std::to_string(seconds) +
                          " -c:v mpeg4 -pix_fmt yuv420p -an -f matroska " + shell_quote(path);
-    if (std::system(command.c_str()) != 0) {
+    if (pulsar::test_support::run_shell(command) != 0) {
       throw std::runtime_error{"could not create long offline-render fixture"};
     }
 
@@ -236,7 +236,7 @@ void renders_h264_24fps_non_frame_aligned_source_range() {
                        "-i testsrc2=size=1280x720:rate=24:duration=11.458 "
                        "-c:v libx264 -pix_fmt yuv420p -bf 2 -g 48 "
                        "-video_track_timescale 12288 -an " + shell_quote(path);
-  if (std::system(command.c_str()) != 0) {
+  if (pulsar::test_support::run_shell(command) != 0) {
     throw std::runtime_error{"could not create H264/24fps regression fixture"};
   }
 
