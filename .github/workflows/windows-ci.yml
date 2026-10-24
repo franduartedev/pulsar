@@ -94,7 +94,10 @@ jobs:
           -DPULSAR_TEST_FFMPEG_CLI="$env:PULSAR_TEST_FFMPEG_CLI"
 
       - name: Build
-        run: cmake --build build --parallel
+        # vcpkg's z-applocal post-link step copies the same FFmpeg DLLs into
+        # the shared test directory. Parallel Ninja links race on those files
+        # and intermittently fail with ERROR_SHARING_VIOLATION.
+        run: cmake --build build --parallel 1
 
       - name: Test
         shell: pwsh
