@@ -1,7 +1,12 @@
 # Test cases use the standard assert-based contract throughout the suite.
-# Keep those checks active even when the product is built in Release mode.
+# Keep those checks active even when the product is built in Release mode. On
+# MSVC, /U undefines a preprocessor symbol (the spelling is /UNDEBUG), whereas
+# GCC/Clang use -U. Without this, Windows tests continue after a failed
+# invariant and often report a misleading 0xc0000409 or segmentation fault.
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
   set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -UNDEBUG")
+elseif(MSVC)
+  set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /UNDEBUG")
 endif()
 
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
