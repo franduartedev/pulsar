@@ -22,15 +22,12 @@ using application::MediaProbeErrorCode;
 
 [[nodiscard]] std::string ffmpeg_path_text(const std::filesystem::path& path) {
 #if defined(_WIN32)
-  // libavformat consumes a URL, not a Win32 wide path.  In particular, a
-  // native `C:\\...` string can be parsed as a protocol-bearing URL by some
-  // Windows FFmpeg builds.  Use the documented file: URL form with generic
-  // UTF-8 separators instead; this also keeps non-ASCII paths intact.
+  // libavformat's Windows URL parser recognizes a fully-qualified DOS path
+  // (`C:/...`) as a local file. Use generic UTF-8 separators instead of the
+  // native `C:\\...` form; this also keeps non-ASCII paths intact.
   const auto value = path.generic_u8string();
   std::string text{reinterpret_cast<const char*>(value.data()), value.size()};
   if (text.starts_with("//?/")) text.erase(0, 4);
-  if (text.size() >= 2 && text[1] == ':') return "file:" + text;
-  if (text.starts_with("//")) return "file:" + text;
   return text;
 #else
   return path.generic_string();
