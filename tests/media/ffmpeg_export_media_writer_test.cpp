@@ -248,44 +248,46 @@ void verifies_mp4_profile_and_decodes_audio(pulsar::domain::FrameRate rate,
   assert(result.audio_streams[0].duration.has_value());
   assert(*result.audio_streams[0].duration == plan.output_duration());
 
-  pulsar::media::ffmpeg::FFmpegVideoDecodeSession video{path, result.video_streams[0].stream_index};
-  std::uint64_t decoded_video_frames = 0;
-  while (const auto frame = video.decode_next()) {
-    assert(frame->width == plan.output_width());
-    assert(frame->height == plan.output_height());
-    assert(frame->presentation_timestamp.has_value());
-    ++decoded_video_frames;
-  }
-  // The existing decoder session may retain one delayed visual frame at EOF;
-  // ffprobe packet/frame validation below is the authoritative count check.
-  assert(decoded_video_frames + 1 >= static_cast<std::uint64_t>(plan.frame_count()));
-
-  pulsar::media::ffmpeg::FFmpegAudioDecodeSession audio{path, result.audio_streams[0].stream_index};
-  std::uint64_t decoded_frames = 0;
-  std::uint64_t non_zero = 0;
-  std::uint64_t decoded_cursor = 0;
-  std::uint64_t first_event = std::numeric_limits<std::uint64_t>::max();
-  std::uint64_t last_event = 0;
-  while (const auto block = audio.decode_next()) {
-    assert(block->sample_rate() == 48'000);
-    assert(block->channel_count() == 2);
-    decoded_frames += block->frame_count();
-    for (std::size_t index = 0; index < block->samples().size(); ++index) {
-      const auto sample = block->samples()[index];
-      assert(std::isfinite(sample));
-      if (std::abs(sample) > 0.05F) {
-        ++non_zero;
-        const auto frame_index = decoded_cursor + index / 2;
-        first_event = std::min(first_event, frame_index);
-        last_event = frame_index;
-      }
+  {
+    pulsar::media::ffmpeg::FFmpegVideoDecodeSession video{path, result.video_streams[0].stream_index};
+    std::uint64_t decoded_video_frames = 0;
+    while (const auto frame = video.decode_next()) {
+      assert(frame->width == plan.output_width());
+      assert(frame->height == plan.output_height());
+      assert(frame->presentation_timestamp.has_value());
+      ++decoded_video_frames;
     }
-    decoded_cursor += block->frame_count();
+    // The existing decoder session may retain one delayed visual frame at EOF;
+    // ffprobe packet/frame validation below is the authoritative count check.
+    assert(decoded_video_frames + 1 >= static_cast<std::uint64_t>(plan.frame_count()));
+
+    pulsar::media::ffmpeg::FFmpegAudioDecodeSession audio{path, result.audio_streams[0].stream_index};
+    std::uint64_t decoded_frames = 0;
+    std::uint64_t non_zero = 0;
+    std::uint64_t decoded_cursor = 0;
+    std::uint64_t first_event = std::numeric_limits<std::uint64_t>::max();
+    std::uint64_t last_event = 0;
+    while (const auto block = audio.decode_next()) {
+      assert(block->sample_rate() == 48'000);
+      assert(block->channel_count() == 2);
+      decoded_frames += block->frame_count();
+      for (std::size_t index = 0; index < block->samples().size(); ++index) {
+        const auto sample = block->samples()[index];
+        assert(std::isfinite(sample));
+        if (std::abs(sample) > 0.05F) {
+          ++non_zero;
+          const auto frame_index = decoded_cursor + index / 2;
+          first_event = std::min(first_event, frame_index);
+          last_event = frame_index;
+        }
+      }
+      decoded_cursor += block->frame_count();
+    }
+    assert(decoded_frames >= static_cast<std::uint64_t>(plan.audio_sample_count()));
+    assert(non_zero > 0);
+    assert(first_event < 2048);
+    assert(last_event + 4096 >= static_cast<std::uint64_t>(plan.audio_sample_count()));
   }
-  assert(decoded_frames >= static_cast<std::uint64_t>(plan.audio_sample_count()));
-  assert(non_zero > 0);
-  assert(first_event < 2048);
-  assert(last_event + 4096 >= static_cast<std::uint64_t>(plan.audio_sample_count()));
   std::filesystem::remove(path);
 }
 
@@ -400,3 +402,4 @@ int main() {
   rejects_premature_finish_and_allows_idempotent_abort();
   cleans_up_when_header_write_fails();
 }
+
