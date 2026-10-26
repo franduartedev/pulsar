@@ -352,6 +352,11 @@ void FFmpegExportMediaWriter::Impl::setup_audio() {
     fail(ExportMediaWriterErrorCode::EncoderUnavailable,
          "AAC encoder did not accept the required AAC-LC profile");
   }
+  // The encoder may report its codec-delay as initial padding after open2().
+  // The export contract writes the priming samples explicitly, so this metadata
+  // must be cleared before copying codec parameters to the MP4 stream.
+  audio_codec->initial_padding = 0;
+  audio_codec->trailing_padding = 0;
   const auto parameters_result = avcodec_parameters_from_context(audio_stream->codecpar,
                                                                   audio_codec.get());
   if (parameters_result < 0) fail(ExportMediaWriterErrorCode::InternalInvariant,
@@ -361,8 +366,6 @@ void FFmpegExportMediaWriter::Impl::setup_audio() {
     fail(ExportMediaWriterErrorCode::EncoderUnavailable,
          "AAC stream parameters are not AAC-LC");
   }
-  audio_codec->initial_padding = 0;
-  audio_codec->trailing_padding = 0;
   audio_stream->codecpar->initial_padding = 0;
   audio_stream->codecpar->trailing_padding = 0;
   audio_frame_size = audio_codec->frame_size > 0 ? audio_codec->frame_size : 1024;

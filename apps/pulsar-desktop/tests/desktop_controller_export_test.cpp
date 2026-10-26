@@ -123,5 +123,7 @@ int main(int argc, char** argv) {
     shutdown_controller.exportProject(QString::fromStdString((root / "shutdown.mp4").string()));
   }
 
-  std::filesystem::remove_all(root);
+  // Windows keeps files open by the live controller locked: best-effort cleanup.
+  std::error_code cleanup_error;
+  std::filesystem::remove_all(root, cleanup_error);
 }

@@ -45,9 +45,9 @@ jobs:
             C:\vcpkg\installed
             C:\vcpkg\packages
             C:\vcpkg\downloads
-          key: windows-vcpkg-ffmpeg-x264-v1-${{ runner.os }}-${{ hashFiles('src/media/ffmpeg/CMakeLists.txt') }}
+          key: windows-vcpkg-ffmpeg-x264-zlib-v1-${{ runner.os }}-${{ hashFiles('src/media/ffmpeg/CMakeLists.txt') }}
           restore-keys: |
-            windows-vcpkg-ffmpeg-x264-v1-${{ runner.os }}-
+            windows-vcpkg-ffmpeg-x264-zlib-v1-${{ runner.os }}-
 
       - name: Install FFmpeg port
         id: vcpkg-install
@@ -55,7 +55,7 @@ jobs:
         run: |
           $vcpkg = (Get-Command vcpkg.exe).Source
           $vcpkgRoot = Split-Path -Parent $vcpkg
-          vcpkg install ffmpeg[x264]:x64-windows --disable-metrics
+          vcpkg install ffmpeg[x264,zlib]:x64-windows --disable-metrics
           "PULSAR_VCPKG_TOOLCHAIN=$vcpkgRoot/scripts/buildsystems/vcpkg.cmake" >> $env:GITHUB_ENV
           "PULSAR_VCPKG_ROOT=$vcpkgRoot" >> $env:GITHUB_ENV
 

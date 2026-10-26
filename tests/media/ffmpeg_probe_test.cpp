@@ -135,7 +135,7 @@ bool wav_probe_tests(const FFmpegMediaProbe& probe, const std::filesystem::path&
   write_wav_fixture(wav_path);
 
   const auto result = probe.probe(wav_path);
-  if (result.path != wav_path) {
+  if (!std::filesystem::equivalent(result.path, wav_path)) {
     return false;
   }
   if (result.audio_streams.size() != 1 || !result.video_streams.empty()) {

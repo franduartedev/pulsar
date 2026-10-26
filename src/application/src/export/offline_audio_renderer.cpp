@@ -217,6 +217,32 @@ void OfflineAudioRenderer::load_until(ContributorState& state, domain::MediaTime
                                                         static_cast<std::size_t>(decoded->channel_count)),
                               decoded->sample_rate);
     if (state.previous_end.has_value() && effective_start > *state.previous_end) {
+      // Timestamp rounding at a decoded-block boundary can leave one physical
+      // sample of apparent silence on Windows FFmpeg. Keep the source grid
+      // contiguous when the discrepancy is only that rounding residue.
+      const auto one_sample = source_sample_time(1, decoded->sample_rate);
+      if (effective_start - *state.previous_end <= one_sample) {
+        const auto shift = effective_start - *state.previous_end;
+        effective_start = *state.previous_end;
+        end = end - shift;
+      }
+    }
+    if (state.blocks.empty()) {
+      // A seek can land one physical sample after the requested unaligned
+      // source position on some FFmpeg/platform combinations. The decoded
+      // block still contains the requested first sample; normalize that
+      // decoder rounding here instead of manufacturing a one-sample gap.
+      const auto first_valid_time = source_sample_time(state.first_valid_index,
+                                                       decoded->sample_rate);
+      const auto one_sample = source_sample_time(1, decoded->sample_rate);
+      if (effective_start > first_valid_time &&
+          effective_start - first_valid_time <= one_sample) {
+        const auto shift = effective_start - first_valid_time;
+        effective_start = first_valid_time;
+        end = end - shift;
+      }
+    }
+    if (state.previous_end.has_value() && effective_start > *state.previous_end) {
       // The gap is represented by absence between two bounded blocks. It is
       // counted when samples are requested from that interval.
     }
@@ -259,6 +285,22 @@ float OfflineAudioRenderer::sample_at_channel(ContributorState& state,
     const auto index = domain::frame_at(offset, domain::FrameRate{block.sample_rate, 1},
                                         domain::RoundingMode::Floor).value();
     return channel_sample(block, index, channel);
+  }
+
+  // FFmpeg may expose an AAC priming boundary one physical source sample
+  // away from the requested grid on Windows. It is a timestamp quantization
+  // residue, not an editorial gap: use the adjacent decoded sample instead
+  // of manufacturing silence and reporting a source discontinuity.
+  const auto one_sample = source_sample_time(1, state.source->sample_rate());
+  for (const auto& block : state.blocks) {
+    if (relative_time < block.start && block.start - relative_time <= one_sample) {
+      return channel_sample(block, 0, channel);
+    }
+    if (relative_time >= block.end && relative_time - block.end <= one_sample) {
+      const auto frames = static_cast<std::int64_t>(
+          block.samples.size() / static_cast<std::size_t>(block.channel_count));
+      if (frames > 0) return channel_sample(block, frames - 1, channel);
+    }
   }
   if (state.eof && relative_time < state.contributor.source_range.end()) {
     if (channel == 0) {
@@ -423,3 +465,4 @@ std::optional<OfflineAudioBlock> OfflineAudioRenderer::render_next_block() {
 }
 
 } // namespace pulsar::application::exporting
+

@@ -616,7 +616,8 @@ void DesktopController::requestThumbnails() {
 }
 
 void DesktopController::resetThumbnails() {
-  thumb_service_.cancelPending();
+  thumb_refresh_timer_.stop();
+  thumb_service_.cancelPendingAndWait();
   thumb_pending_.clear();
   thumb_failed_.clear();
   thumb_cache_->clear();
@@ -655,7 +656,13 @@ void DesktopController::publishTimeline() {
   }
   timeline_model_.refresh(*active_session_, *timeline_view_start_, *timeline_view_duration_, thumbnailLookup());
   title_model_.refresh(active_session_->titles(), active_session_->selected_title(), *timeline_view_start_, *timeline_view_duration_);
-  requestThumbnails();
+  // Do not hold a media decoder open while the caller is still completing a
+  // project switch or file operation. The queued request runs once the Qt
+  // event loop regains control, after the current operation can release paths.
+  const auto epoch = editor_session_epoch_;
+  QMetaObject::invokeMethod(this, [this, epoch] {
+    if (epoch == editor_session_epoch_) requestThumbnails();
+  }, Qt::QueuedConnection);
   timeline_tracks_.clear();
   int audio_number = 0;
   const auto& visual_ids = active_session_->document().visual_track_ids();
@@ -2759,6 +2766,10 @@ bool DesktopController::openProjectImpl(const QString& path, std::optional<pulsa
         std::move(restore_state), makeWorkerFactory(candidate_mailbox, project_path),
         makeAudioSourceFactory(project_path), std::unique_ptr<pulsar::application::AudioOutput>{}, makeCompositionPreview(project_path));
 #endif
+    // Release all handles owned by the old project before committing the new
+    // session.  This matters on Windows, where an in-flight thumbnail decode
+    // must finish before the media file can be replaced or removed.
+    resetThumbnails();
     resetImportQueue();
     active_session_ = std::move(candidate);
     visual_mailbox_ = std::move(candidate_mailbox);
@@ -2771,6 +2782,11 @@ bool DesktopController::openProjectImpl(const QString& path, std::optional<pulsa
     ++editor_session_epoch_; selected_asset_id_.clear(); resetThumbnails();
   } catch (const std::exception& error) {
     // Candidate-first: the current session, mailbox and workers were never touched.
+    // A failed open must still release decoration-only thumbnail decoders. On
+    // Windows callers may remove or replace a media file immediately after a
+    // rejected open, and an old thumbnail handle would otherwise keep it
+    // locked even though the current project remains active.
+    resetThumbnails();
     logCause("open project failed", error);
     setBusy(false);
     setError(projectOpenMessage(error));
@@ -3832,3 +3848,4 @@ void DesktopController::setBusy(bool value){if(busy_==value)return;busy_=value;e
 QString DesktopController::formatTime(MediaTime time){auto sec=time.seconds();auto whole=sec.numerator()/sec.denominator();auto rem=sec.numerator()%sec.denominator();auto ms=static_cast<std::int64_t>(std::llround(static_cast<long double>(rem)*1000.0L/static_cast<long double>(sec.denominator())));if(ms>=1000){++whole;ms=0;}return QString("%1:%2:%3.%4").arg(whole/3600,2,10,QChar('0')).arg((whole/60)%60,2,10,QChar('0')).arg(whole%60,2,10,QChar('0')).arg(ms,3,10,QChar('0'));}
 MediaTime DesktopController::mediaTimeFromSeconds(double seconds){if(!std::isfinite(seconds)||seconds<=0)return MediaTime::zero();const auto q=std::llround(seconds*1'000'000.0);return MediaTime{q,Rational{1,1'000'000}};}
 double DesktopController::secondsAsDouble(MediaTime time){const auto sec=time.seconds();return static_cast<double>(sec.numerator())/static_cast<double>(sec.denominator());}
+

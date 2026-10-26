@@ -37,8 +37,10 @@ void real_e2_e3_e4_export_smoke() {
 
   project_file::FilesystemExportOutputPublisher publisher;
   {
-    std::ofstream old_file{destination};
-    old_file << "old";
+    {
+      std::ofstream old_file{destination};
+      old_file << "old";
+    }
     const auto replacement = publisher.create_temporary_sibling(destination);
     std::ofstream new_file{replacement};
     new_file << "new";

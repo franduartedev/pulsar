@@ -474,6 +474,7 @@ void export_reference_project_and_inspect() {
   std::ifstream cancelled_destination{destination};
   const std::string cancelled_bytes{std::istreambuf_iterator<char>{cancelled_destination}, {}};
   assert(cancelled_bytes == sentinel);
+  cancelled_destination.close();  // Windows cannot delete a file that is still open.
   for (const auto& entry : std::filesystem::directory_iterator(root)) {
     assert(entry.path().filename().string().find("reference.mp4.pulsar-") == std::string::npos);
   }
@@ -496,6 +497,7 @@ void export_reference_project_and_inspect() {
   std::ifstream unchanged{destination};
   const std::string preserved{std::istreambuf_iterator<char>{unchanged}, {}};
   assert(preserved == sentinel);
+  unchanged.close();
   gain_evidence(a, root);
   overlap_evidence(a, b, root);
   sound_and_sync_evidence(a, root);

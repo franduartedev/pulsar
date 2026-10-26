@@ -36,13 +36,12 @@ using application::MediaProbeErrorCode;
 
 [[nodiscard]] bool is_explicit_protocol_like_input(const std::filesystem::path& path) {
   const std::string text = path.generic_string();
-  if (text.rfind("file:", 0) == 0 || text.find("://") != std::string::npos) {
-    return true;
-  }
+  if (text.rfind("file:", 0) == 0 || text.find("://") != std::string::npos) return true;
 
-  // On Windows, filesystem::path normalizes URI-looking input such as
-  // "https://..." to "https:/...". Keep drive-letter paths local while
-  // rejecting any other scheme before touching the filesystem.
+  // std::filesystem normalization collapses the two slashes of a URI scheme
+  // on every platform ("https://..." becomes "https:/..."). Treat any
+  // non-drive-letter scheme as a protocol while keeping ordinary local paths
+  // such as "C:/media/file.mp4" local.
   const auto colon = text.find(':');
   return colon != std::string::npos && colon + 1 < text.size() &&
          text[colon + 1] == '/' &&

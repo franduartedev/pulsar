@@ -152,7 +152,7 @@ bool worker_completion_counter_plumbing_tests() {
       " -y -hide_banner -loglevel error -f lavfi -i testsrc=duration=2:size=64x64:rate=10"
       " -pix_fmt yuv420p -c:v mpeg4 " +
       shell_quote(media);
-  if (std::system(command.c_str()) != 0) {
+  if (pulsar::test_support::run_shell(command) != 0) {
     return false;
   }
   auto mailbox = std::make_shared<pulsar::media::ffmpeg::FFmpegPlaybackVisualMailbox>(8);
