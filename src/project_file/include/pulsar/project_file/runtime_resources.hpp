@@ -2,7 +2,18 @@
 
 #include <cstdlib>
 #include <filesystem>
+#include <string>
 #include <system_error>
+
+#if defined(_WIN32)
+#  ifndef NOMINMAX
+#    define NOMINMAX
+#  endif
+#  ifndef WIN32_LEAN_AND_MEAN
+#    define WIN32_LEAN_AND_MEAN
+#  endif
+#  include <windows.h>
+#endif
 
 namespace pulsar::project_file {
 
@@ -14,8 +25,27 @@ namespace pulsar::project_file {
 //   3. <exe dir>/../share/pulsar/assets        (installed under a prefix)
 //   4. <cwd>/assets
 // Returns the first directory that contains sounds/index.json, or an empty path.
-// Linux-only today: the executable is located through /proc/self/exe (see the
-// Windows readiness notes in docs/release/0.1.0-beta.md).
+// The executable is located through /proc/self/exe on Linux and
+// GetModuleFileNameW on Windows.
+[[nodiscard]] inline std::filesystem::path executable_path() {
+#if defined(_WIN32)
+  std::wstring buffer(512, L'\0');
+  for (;;) {
+    const DWORD length = ::GetModuleFileNameW(nullptr, buffer.data(), static_cast<DWORD>(buffer.size()));
+    if (length == 0) return {};
+    if (length < buffer.size()) {
+      buffer.resize(length);
+      return std::filesystem::path{buffer};
+    }
+    buffer.resize(buffer.size() * 2);
+  }
+#else
+  std::error_code error;
+  auto executable = std::filesystem::read_symlink("/proc/self/exe", error);
+  return error ? std::filesystem::path{} : executable;
+#endif
+}
+
 [[nodiscard]] inline std::filesystem::path assets_directory() {
   namespace fs = std::filesystem;
   std::error_code error;
@@ -26,8 +56,8 @@ namespace pulsar::project_file {
       override_dir != nullptr && usable(fs::path{override_dir})) {
     return fs::path{override_dir};
   }
-  const auto executable = fs::read_symlink("/proc/self/exe", error);
-  if (!error) {
+  const auto executable = executable_path();
+  if (!executable.empty()) {
     const auto dir = executable.parent_path();
     for (const auto& candidate : {dir / "assets", dir.parent_path() / "assets",
                                   dir.parent_path() / "share" / "pulsar" / "assets"}) {

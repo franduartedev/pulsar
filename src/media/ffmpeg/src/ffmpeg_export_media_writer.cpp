@@ -170,7 +170,7 @@ void FFmpegExportMediaWriter::Impl::open_output() {
                     "FFmpeg could not allocate an output packet");
   AVFormatContext* raw_format = nullptr;
   const auto result = avformat_alloc_output_context2(
-      &raw_format, nullptr, "mp4", output_path.string().c_str());
+      &raw_format, nullptr, "mp4", internal::path_to_utf8(output_path).c_str());
   if (result < 0 || raw_format == nullptr) {
     fail(ExportMediaWriterErrorCode::MuxerUnavailable,
          "MP4 muxer is unavailable: " + ffmpeg_error_text(result));
@@ -183,7 +183,7 @@ void FFmpegExportMediaWriter::Impl::open_output() {
                                         video_stream->time_base);
   audio_stream->duration = plan.audio_sample_count();
   if ((format->oformat->flags & AVFMT_NOFILE) == 0 &&
-      avio_open(&format->pb, output_path.string().c_str(), AVIO_FLAG_WRITE) < 0) {
+      avio_open(&format->pb, internal::path_to_utf8(output_path).c_str(), AVIO_FLAG_WRITE) < 0) {
     fail(ExportMediaWriterErrorCode::OutputOpenFailed,
          "could not open MP4 output path for writing");
   }

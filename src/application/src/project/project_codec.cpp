@@ -275,7 +275,7 @@ std::string ProjectCodec::encode(const ProjectSnapshot& snapshot) {
       const auto& audio = *asset->audio();
       output << "ASSET " << asset->id().value() << " AUDIO_ONLY ";
       append_time(output, asset->playable_duration());
-      output << ' ' << quote(asset->source_locator().string()) << " AUDIO "
+      output << ' ' << quote(asset->source_locator().generic_string()) << " AUDIO "
              << audio.stream_index << ' ' << audio.sample_rate << ' '
              << audio.channel_count << ' ' << audio.time_base.numerator() << ' '
              << audio.time_base.denominator() << ' ';
@@ -286,7 +286,7 @@ std::string ProjectCodec::encode(const ProjectSnapshot& snapshot) {
     }
     output << "ASSET " << asset->id().value() << ' ' << asset->video_stream_index() << ' ';
     append_time(output, asset->playable_duration());
-    output << ' ' << quote(asset->source_locator().string()) << ' '
+    output << ' ' << quote(asset->source_locator().generic_string()) << ' '
            << quote(asset->metadata().codec_name) << ' ' << asset->metadata().width << ' '
            << asset->metadata().height << ' ' << asset->metadata().time_base.numerator() << ' '
            << asset->metadata().time_base.denominator() << ' ';

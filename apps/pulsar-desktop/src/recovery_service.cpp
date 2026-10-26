@@ -16,6 +16,10 @@ fs::path RecoveryStore::default_directory() {
   if (const char* override_dir = std::getenv("PULSAR_RECOVERY_DIR"); override_dir != nullptr && *override_dir != '\0') {
     return fs::path{override_dir};
   }
+#if defined(_WIN32)
+  if (const char* local = std::getenv("LOCALAPPDATA"); local != nullptr && *local != '\0') return fs::path{local} / "PULSAR" / "recovery";
+  if (const char* roaming = std::getenv("APPDATA"); roaming != nullptr && *roaming != '\0') return fs::path{roaming} / "PULSAR" / "recovery";
+#endif
   if (const char* xdg = std::getenv("XDG_DATA_HOME"); xdg != nullptr && *xdg != '\0') return fs::path{xdg} / "PULSAR" / "recovery";
   if (const char* home = std::getenv("HOME"); home != nullptr && *home != '\0') return fs::path{home} / ".local" / "share" / "PULSAR" / "recovery";
   return fs::temp_directory_path() / "PULSAR" / "recovery";
