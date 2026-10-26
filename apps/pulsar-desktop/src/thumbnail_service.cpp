@@ -84,6 +84,12 @@ void ThumbnailService::cancelPending() {
   queue_.clear();
 }
 
+void ThumbnailService::cancelPendingAndWait() {
+  std::unique_lock lock{mutex_};
+  queue_.clear();
+  idle_.wait(lock, [this] { return !active_; });
+}
+
 void ThumbnailService::shutdown() {
   {
     std::lock_guard lock{mutex_};
@@ -123,6 +129,7 @@ void ThumbnailService::run() {
       if (stop_) return;
       request = std::move(queue_.front());
       queue_.pop_front();
+      active_ = true;
     }
     bool ok = false;
     try {
@@ -135,10 +142,14 @@ void ThumbnailService::run() {
     } catch (...) {
       ok = false;  // decoration only: a bad file just has no picture
     }
+    bool stopping = false;
     {
       std::lock_guard lock{mutex_};
-      if (stop_) return;  // never signal while shutting down
+      active_ = false;
+      stopping = stop_;
     }
+    idle_.notify_all();
+    if (stopping) return;  // never signal while shutting down
     QMetaObject::invokeMethod(this, [this, key = QString::fromStdString(request.key), ok] { emit finished(key, ok); },
                               Qt::QueuedConnection);
   }

@@ -616,7 +616,7 @@ void DesktopController::requestThumbnails() {
 }
 
 void DesktopController::resetThumbnails() {
-  thumb_service_.cancelPending();
+  thumb_service_.cancelPendingAndWait();
   thumb_pending_.clear();
   thumb_failed_.clear();
   thumb_cache_->clear();
