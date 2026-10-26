@@ -216,6 +216,21 @@ void OfflineAudioRenderer::load_until(ContributorState& state, domain::MediaTime
                               static_cast<std::int64_t>(samples.size() /
                                                         static_cast<std::size_t>(decoded->channel_count)),
                               decoded->sample_rate);
+    if (state.blocks.empty()) {
+      // A seek can land one physical sample after the requested unaligned
+      // source position on some FFmpeg/platform combinations. The decoded
+      // block still contains the requested first sample; normalize that
+      // decoder rounding here instead of manufacturing a one-sample gap.
+      const auto first_valid_time = source_sample_time(state.first_valid_index,
+                                                       decoded->sample_rate);
+      const auto one_sample = source_sample_time(1, decoded->sample_rate);
+      if (effective_start > first_valid_time &&
+          effective_start - first_valid_time <= one_sample) {
+        const auto shift = effective_start - first_valid_time;
+        effective_start = first_valid_time;
+        end -= shift;
+      }
+    }
     if (state.previous_end.has_value() && effective_start > *state.previous_end) {
       // The gap is represented by absence between two bounded blocks. It is
       // counted when samples are requested from that interval.
