@@ -616,6 +616,7 @@ void DesktopController::requestThumbnails() {
 }
 
 void DesktopController::resetThumbnails() {
+  thumb_refresh_timer_.stop();
   thumb_service_.cancelPendingAndWait();
   thumb_pending_.clear();
   thumb_failed_.clear();
@@ -655,7 +656,13 @@ void DesktopController::publishTimeline() {
   }
   timeline_model_.refresh(*active_session_, *timeline_view_start_, *timeline_view_duration_, thumbnailLookup());
   title_model_.refresh(active_session_->titles(), active_session_->selected_title(), *timeline_view_start_, *timeline_view_duration_);
-  requestThumbnails();
+  // Do not hold a media decoder open while the caller is still completing a
+  // project switch or file operation. The queued request runs once the Qt
+  // event loop regains control, after the current operation can release paths.
+  const auto epoch = editor_session_epoch_;
+  QMetaObject::invokeMethod(this, [this, epoch] {
+    if (epoch == editor_session_epoch_) requestThumbnails();
+  }, Qt::QueuedConnection);
   timeline_tracks_.clear();
   int audio_number = 0;
   const auto& visual_ids = active_session_->document().visual_track_ids();

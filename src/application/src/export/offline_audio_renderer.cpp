@@ -216,6 +216,17 @@ void OfflineAudioRenderer::load_until(ContributorState& state, domain::MediaTime
                               static_cast<std::int64_t>(samples.size() /
                                                         static_cast<std::size_t>(decoded->channel_count)),
                               decoded->sample_rate);
+    if (state.previous_end.has_value() && effective_start > *state.previous_end) {
+      // Timestamp rounding at a decoded-block boundary can leave one physical
+      // sample of apparent silence on Windows FFmpeg. Keep the source grid
+      // contiguous when the discrepancy is only that rounding residue.
+      const auto one_sample = source_sample_time(1, decoded->sample_rate);
+      if (effective_start - *state.previous_end <= one_sample) {
+        const auto shift = effective_start - *state.previous_end;
+        effective_start = *state.previous_end;
+        end = end - shift;
+      }
+    }
     if (state.blocks.empty()) {
       // A seek can land one physical sample after the requested unaligned
       // source position on some FFmpeg/platform combinations. The decoded
