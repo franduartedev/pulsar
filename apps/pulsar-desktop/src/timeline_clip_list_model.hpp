@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QAbstractListModel>
+#include <QVariantList>
 
 #include <pulsar/domain/ids/ids.hpp>
 #include <pulsar/domain/timeline/clip.hpp>
@@ -21,6 +22,7 @@ public:
     StartRole,
     EndRole,
     DurationRole,
+    DurationSecondsRole,
     MissingRole,
     SelectedRole,
     MutedRole,
@@ -37,6 +39,7 @@ public:
     FadeOutRole,
     TransitionInRole,
     TransitionStartProgressRole,
+    GainKeyframesRole,
   };
 
   explicit TimelineClipListModel(QObject* parent = nullptr);
@@ -58,6 +61,7 @@ private:
     QString start;
     QString end;
     QString duration;
+    double duration_seconds{0.0};
     bool missing{false};
     bool selected{false};
     bool muted{false};
@@ -74,6 +78,7 @@ private:
     double fade_out{0.0};
     bool transition_in{false};
     double transition_start_progress{0.0};
+    QVariantList gain_keyframes;
   };
   std::vector<Row> rows_;
 };

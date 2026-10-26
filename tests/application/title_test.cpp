@@ -192,6 +192,16 @@ void compositor_blend_cache_and_failure() {
   // Another frame of the same title: cached, no new raster; a different title: new raster.
   assert(compositor.composite(canvas, titles, ms(1500)) && rasterizer->calls == 1);
   assert(compositor.composite(canvas, titles, secs(2)) && rasterizer->calls == 2);
+  // Editorial title and a subtitle can coexist on the same frame; both active overlays draw.
+  const std::vector<Title> stacked{Title{TitleId{3}, "Editorial", TimeRange{secs(1), secs(2)}},
+                                   Title{TitleId{4}, "Subtitle", TimeRange{secs(1), secs(2)}}};
+  std::vector<std::uint8_t> stacked_pixels(16 * 16 * 4, 0);
+  for (std::size_t i = 3; i < stacked_pixels.size(); i += 4) stacked_pixels[i] = 255;
+  auto stacked_rasterizer = std::make_shared<FlatRasterizer>();
+  composition::TitleCompositor stacked_compositor{stacked_rasterizer};
+  assert(stacked_compositor.composite(composition::RgbaCanvas{16, 16, 64, stacked_pixels.data()}, stacked, secs(1)));
+  assert(stacked_rasterizer->calls == 2);
+  assert(stacked_pixels[(4 * 16 + 4) * 4] > 128);
   assert(!compositor.composite(canvas, titles, secs(3)));                              // end is exclusive
   // Rasterising again for another canvas size.
   std::vector<std::uint8_t> big(32 * 32 * 4, 0);
@@ -349,6 +359,13 @@ void output_stage_properties() {
   assert(soft_output_stage(1.0F) > kOutputKnee && soft_output_stage(1.0F) < 1.0F);
   assert(soft_output_stage(1e9F) <= 1.0F && soft_output_stage(-1e9F) >= -1.0F);
   assert(soft_output_stage(std::nanf("")) == 0.0F && soft_output_stage(INFINITY) == 0.0F);
+  float staged[] = {0.5F, 1.0F, -1.5F, 0.0F};
+  const auto stats = application::apply_soft_output_stage(staged, 4);
+  assert(stats.input_peak == 1.5F);
+  assert(stats.limited_samples == 2);
+  assert(staged[0] == 0.5F);
+  assert(staged[1] == soft_output_stage(1.0F));
+  assert(staged[2] == soft_output_stage(-1.5F));
   // Continuous at the knee with slope ~1.
   const float just_above = soft_output_stage(kOutputKnee + 1e-4F);
   assert(std::fabs((just_above - kOutputKnee) - 1e-4F) < 2e-6F);

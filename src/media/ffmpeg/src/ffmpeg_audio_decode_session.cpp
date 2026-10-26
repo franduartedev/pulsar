@@ -1,6 +1,7 @@
 #include <pulsar/media/ffmpeg/ffmpeg_audio_decode_session.hpp>
 
 #include <pulsar/media/ffmpeg/media_decode_error.hpp>
+#include <pulsar/domain/support/wide_integer.hpp>
 
 #include "internal/ffmpeg_common.hpp"
 
@@ -33,7 +34,7 @@ namespace {
 using application::AudioBlock;
 using internal::ffmpeg_error_text;
 
-using WideInt = __int128_t;
+using WideInt = domain::WideInteger;
 
 [[nodiscard]] WideInt abs_wide(WideInt value) noexcept {
   return value < 0 ? -value : value;
@@ -131,7 +132,8 @@ using FramePtr = std::unique_ptr<AVFrame, FrameDeleter>;
 using SwrContextPtr = std::unique_ptr<SwrContext, SwrContextDeleter>;
 
 [[nodiscard]] CodecContextPtr allocate_decoder_context(const AVCodec& decoder,
-                                                       const AVCodecParameters& parameters) {
+                                                       const AVCodecParameters& parameters,
+                                                       AVRational packet_time_base) {
   AVCodecContext* raw_context = avcodec_alloc_context3(&decoder);
   if (raw_context == nullptr) {
     throw MediaDecodeError{MediaDecodeErrorCode::DecoderInitializationFailed,
@@ -145,6 +147,11 @@ using SwrContextPtr = std::unique_ptr<SwrContext, SwrContextDeleter>;
                            "FFmpeg could not copy audio decoder parameters: " +
                                ffmpeg_error_text(parameters_result)};
   }
+
+  // AAC packets may carry priming/discard metadata. FFmpeg needs the packet
+  // time base before opening the decoder so it can translate those timestamps
+  // while it initializes the codec delay state.
+  context->pkt_timebase = packet_time_base;
 
   const int open_result = avcodec_open2(context.get(), &decoder, nullptr);
   if (open_result < 0) {
@@ -284,7 +291,7 @@ public:
     stream_time_base_ = internal::convert_required_time_base(stream.time_base);
     stream_start_timestamp_ =
         internal::convert_timestamp(stream.start_time, stream_time_base_);
-    codec_context_ = allocate_decoder_context(*decoder, *stream.codecpar);
+    codec_context_ = allocate_decoder_context(*decoder, *stream.codecpar, stream.time_base);
     sample_rate_ = codec_context_->sample_rate;
     channel_count_ = codec_context_->ch_layout.nb_channels;
     if (sample_rate_ <= 0 || channel_count_ <= 0) {
@@ -588,3 +595,4 @@ std::optional<domain::MediaTime> FFmpegAudioDecodeSession::stream_start_timestam
 }
 
 } // namespace pulsar::media::ffmpeg
+

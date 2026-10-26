@@ -58,7 +58,7 @@ MediaTime t(std::int64_t value, Rational base = Rational{1, 1}) { return MediaTi
 ProjectDocument make_document() {
   ProjectDocument document;
   CommandProcessor processor{document};
-  const auto first = processor.import_asset("media dir/clip \\\"one\\\"\\n.mp4", FakeProbe{});
+  const auto first = processor.import_asset("media dir/clip \"one\"\n.mp4", FakeProbe{});
   const auto second = processor.import_asset("second.mp4", FakeProbe{});
   (void)processor.add_clip(first, TimeRange{t(1001, Rational{1, 30000}), t(2002, Rational{1, 30000})}, t(0));
   (void)processor.add_clip(second, TimeRange{t(3, Rational{1, 2}), t(5, Rational{1, 2})}, t(4));
@@ -78,6 +78,200 @@ void codec_roundtrip_and_canonical_output() {
   assert(restored.document_generation() == 0);
   assert(bytes.find("VIDEO_TRACK") != std::string::npos);
   assert(bytes.find("CLIP ") != std::string::npos);
+}
+
+void distant_music_roundtrips_as_project_version_seven() {
+  auto document = make_document();
+  CommandProcessor processor{document};
+  domain::DistantMusicSettings settings;
+  settings.enabled = true;
+  settings.initial_gain_db = -24.0;
+  settings.duration_seconds = 3.5;
+  settings.start_cutoff_hz = 700.0;
+  settings.end_cutoff_hz = 16'000.0;
+  settings.reverb_amount = 0.35;
+  settings.curve = domain::DistantMusicCurve::Smooth;
+  processor.set_clip_distant_music(domain::ClipId{1}, settings);
+  const auto bytes = ProjectCodec::encode(document.snapshot());
+  assert(bytes.find("PULSAR_PROJECT 7") == 0);
+  assert(bytes.find("CLIP_DISTANT_MUSIC 1") != std::string::npos);
+  const auto restored = ProjectDocument::restore(ProjectCodec::decode(bytes));
+  const auto* clip = restored.timeline().find_clip(domain::ClipId{1});
+  assert(clip != nullptr && clip->distant_music() == settings);
+  assert(ProjectCodec::encode(restored.snapshot()) == bytes);
+}
+
+void distant_music_gain_keyframes_roundtrip_as_project_version_eight() {
+  auto document = make_document();
+  CommandProcessor processor{document};
+  domain::DistantMusicSettings settings;
+  settings.enabled = true;
+  settings.gain_keyframes = {{0.0, -42.0, domain::KeyframeInterpolation::Hold},
+                             {1.5, -12.0, domain::KeyframeInterpolation::Smooth},
+                             {3.0, 0.0, domain::KeyframeInterpolation::Linear}};
+  processor.set_clip_distant_music(domain::ClipId{1}, settings);
+  const auto bytes = ProjectCodec::encode(document.snapshot());
+  assert(bytes.find("PULSAR_PROJECT 8") == 0);
+  assert(bytes.find(" 3 0 -42 0 1.5 -12 2 3 0 1") != std::string::npos);
+  const auto restored = ProjectDocument::restore(ProjectCodec::decode(bytes));
+  const auto* clip = restored.timeline().find_clip(domain::ClipId{1});
+  assert(clip != nullptr && clip->distant_music() == settings);
+  assert(ProjectCodec::encode(restored.snapshot()) == bytes);
+}
+
+void subtitles_roundtrip_and_undo_as_project_version_nine() {
+  auto document = make_document();
+  CommandProcessor processor{document};
+  const std::vector<application::SubtitleCue> cues{
+      {1, t(0, Rational{1, 1000}), t(1500, Rational{1, 1000}), "Hola\nPULSAR"},
+      {2, t(2000, Rational{1, 1000}), t(3500, Rational{1, 1000}), "Una nueva escena"},
+  };
+  processor.replace_subtitles(cues);
+  assert(document.subtitles() == cues);
+  assert(processor.undo());
+  assert(document.subtitles().empty());
+  assert(processor.redo());
+  assert(document.subtitles() == cues);
+  const auto bytes = ProjectCodec::encode(document.snapshot());
+  assert(bytes.find("PULSAR_PROJECT 9") == 0);
+  assert(bytes.find("SUBTITLE 1") != std::string::npos);
+  const auto restored = ProjectDocument::restore(ProjectCodec::decode(bytes));
+  assert(restored.subtitles() == cues);
+  assert(ProjectCodec::encode(restored.snapshot()) == bytes);
+}
+
+void telephone_roundtrips_as_project_version_ten() {
+  auto document = make_document();
+  CommandProcessor processor{document};
+  domain::TelephoneSettings settings;
+  settings.enabled = true;
+  settings.mix = 0.8;
+  settings.drive = 0.25;
+  domain::DistantMusicSettings distant;
+  distant.enabled = true;
+  distant.gain_keyframes = {{0.0, -36.0, domain::KeyframeInterpolation::Hold},
+                            {2.0, 0.0, domain::KeyframeInterpolation::Smooth}};
+  processor.set_clip_distant_music(domain::ClipId{1}, distant);
+  processor.set_clip_telephone(domain::ClipId{1}, settings);
+  assert(document.timeline().find_clip(domain::ClipId{1})->telephone() == settings);
+  assert(document.timeline().find_clip(domain::ClipId{1})->distant_music() == distant);
+  assert(processor.undo());
+  assert(!document.timeline().find_clip(domain::ClipId{1})->telephone().enabled);
+  assert(processor.redo());
+  const auto bytes = ProjectCodec::encode(document.snapshot());
+  assert(bytes.find("PULSAR_PROJECT 10") == 0);
+  assert(bytes.find("CLIP_TELEPHONE 1") != std::string::npos);
+  const auto restored = ProjectDocument::restore(ProjectCodec::decode(bytes));
+  assert(restored.timeline().find_clip(domain::ClipId{1})->telephone() == settings);
+  assert(restored.timeline().find_clip(domain::ClipId{1})->distant_music() == distant);
+  assert(ProjectCodec::encode(restored.snapshot()) == bytes);
+}
+
+void underwater_roundtrips_as_project_version_eleven() {
+  auto document = make_document();
+  CommandProcessor processor{document};
+  domain::UnderwaterSettings settings;
+  settings.enabled = true;
+  settings.mix = 0.76;
+  settings.depth = 0.84;
+  processor.set_clip_underwater(domain::ClipId{1}, settings);
+  assert(document.timeline().find_clip(domain::ClipId{1})->underwater() == settings);
+  assert(processor.undo());
+  assert(!document.timeline().find_clip(domain::ClipId{1})->underwater().enabled);
+  assert(processor.redo());
+  const auto bytes = ProjectCodec::encode(document.snapshot());
+  assert(bytes.find("PULSAR_PROJECT 11") == 0);
+  assert(bytes.find("CLIP_UNDERWATER 1") != std::string::npos);
+  const auto restored = ProjectDocument::restore(ProjectCodec::decode(bytes));
+  assert(restored.timeline().find_clip(domain::ClipId{1})->underwater() == settings);
+  assert(ProjectCodec::encode(restored.snapshot()) == bytes);
+}
+
+void underwater_keyframes_roundtrip_as_project_version_twelve() {
+  auto document = make_document();
+  CommandProcessor processor{document};
+  domain::UnderwaterSettings settings;
+  settings.enabled = true;
+  settings.mix = 0.7;
+  settings.depth = 0.5;
+  settings.depth_keyframes = {{0.0, 0.95, domain::KeyframeInterpolation::Hold},
+                              {2.0, 0.15, domain::KeyframeInterpolation::Smooth}};
+  processor.set_clip_underwater(domain::ClipId{1}, settings);
+  const auto bytes = ProjectCodec::encode(document.snapshot());
+  assert(bytes.find("PULSAR_PROJECT 12") == 0);
+  assert(bytes.find("CLIP_UNDERWATER 1") != std::string::npos);
+  const auto restored = ProjectDocument::restore(ProjectCodec::decode(bytes));
+  assert(restored.timeline().find_clip(domain::ClipId{1})->underwater() == settings);
+  assert(ProjectCodec::encode(restored.snapshot()) == bytes);
+}
+
+void audio_effect_order_roundtrips_as_project_version_thirteen() {
+  auto document = make_document();
+  CommandProcessor processor{document};
+  const std::vector<domain::AudioEffectType> order{
+      domain::AudioEffectType::Underwater,
+      domain::AudioEffectType::DistantMusic,
+      domain::AudioEffectType::Telephone};
+  processor.set_clip_audio_effect_order(domain::ClipId{1}, order);
+  assert(document.timeline().find_clip(domain::ClipId{1})->audio_effect_order() == order);
+  assert(processor.undo());
+  assert(document.timeline().find_clip(domain::ClipId{1})->audio_effect_order() ==
+         domain::canonical_audio_effect_order());
+  assert(processor.redo());
+  const auto bytes = ProjectCodec::encode(document.snapshot());
+  assert(bytes.find("PULSAR_PROJECT 13") == 0);
+  assert(bytes.find("CLIP_FX_ORDER 2 0 1") != std::string::npos);
+  const auto restored = ProjectDocument::restore(ProjectCodec::decode(bytes));
+  assert(restored.timeline().find_clip(domain::ClipId{1})->audio_effect_order() == order);
+  assert(ProjectCodec::encode(restored.snapshot()) == bytes);
+}
+
+void telephone_mix_keyframes_roundtrip_as_project_version_fourteen() {
+  auto document = make_document();
+  CommandProcessor processor{document};
+  domain::TelephoneSettings settings;
+  settings.enabled = true;
+  settings.mix = 0.25;
+  settings.drive = 0.4;
+  settings.mix_keyframes = {{0.0, 0.0, domain::KeyframeInterpolation::Hold},
+                            {1.5, 1.0, domain::KeyframeInterpolation::Smooth}};
+  processor.set_clip_telephone(domain::ClipId{1}, settings);
+  const auto bytes = ProjectCodec::encode(document.snapshot());
+  assert(bytes.find("PULSAR_PROJECT 14") == 0);
+  assert(bytes.find("CLIP_TELEPHONE 1") != std::string::npos);
+  const auto restored = ProjectDocument::restore(ProjectCodec::decode(bytes));
+  assert(restored.timeline().find_clip(domain::ClipId{1})->telephone() == settings);
+  assert(ProjectCodec::encode(restored.snapshot()) == bytes);
+}
+
+void relinking_asset_is_undoable_and_preserves_clip_identity() {
+  auto document = make_document();
+  CommandProcessor processor{document};
+  processor.relink_asset(domain::MediaId{1}, "relinked/clip.mp4", FakeProbe{});
+  const auto replacement = document.find_asset(domain::MediaId{1});
+  assert(replacement.has_value());
+  assert(replacement->source_locator() == std::filesystem::path{"relinked/clip.mp4"});
+  assert(document.timeline().find_clip(domain::ClipId{1}) != nullptr);
+  assert(processor.undo());
+  assert(document.find_asset(domain::MediaId{1})->source_locator() ==
+         std::filesystem::path{"media dir/clip \"one\"\n.mp4"});
+  assert(processor.redo());
+  assert(document.find_asset(domain::MediaId{1})->source_locator() ==
+         std::filesystem::path{"relinked/clip.mp4"});
+}
+
+void canvas_preset_is_undoable_and_persisted() {
+  auto document = make_document();
+  CommandProcessor processor{document};
+  const auto original = *document.canvas();
+  processor.set_project_canvas(application::ProjectCanvas{1080, 1920, original.frame_rate, false});
+  assert(document.canvas()->width == 1080 && document.canvas()->height == 1920);
+  assert(processor.undo());
+  assert(*document.canvas() == original);
+  assert(processor.redo());
+  const auto bytes = ProjectCodec::encode(document.snapshot());
+  assert(bytes.find("CANVAS 1080 1920") != std::string::npos);
+  assert(ProjectCodec::encode(ProjectDocument::restore(ProjectCodec::decode(bytes)).snapshot()) == bytes);
 }
 
 void visual_stack_versions_and_validation() {
@@ -545,7 +739,7 @@ void repository_normalizes_codec_failures() {
 
   // Malformed bytes through the real repository surface as repository errors.
   const auto malformed = root / "malformed.pulsar";
-  { std::ofstream output{malformed}; output << "PULSAR_PROJECT 7\n"; }
+  { std::ofstream output{malformed, std::ios::binary}; output << "PULSAR_PROJECT 999\n"; }
   bool load_rejected = false;
   try {
     (void)repository.load(malformed);
@@ -588,6 +782,16 @@ int main() {
   canvas_survives_primary_move_and_auxiliary_edits();
   visual_stack_versions_and_validation();
   codec_roundtrip_and_canonical_output();
+  distant_music_roundtrips_as_project_version_seven();
+  distant_music_gain_keyframes_roundtrip_as_project_version_eight();
+  subtitles_roundtrip_and_undo_as_project_version_nine();
+  telephone_roundtrips_as_project_version_ten();
+  underwater_roundtrips_as_project_version_eleven();
+  underwater_keyframes_roundtrip_as_project_version_twelve();
+  audio_effect_order_roundtrips_as_project_version_thirteen();
+  telephone_mix_keyframes_roundtrip_as_project_version_fourteen();
+  relinking_asset_is_undoable_and_preserves_clip_identity();
+  canvas_preset_is_undoable_and_persisted();
   builtin_locator_roundtrip();
   golden_fixture_decodes();
   strict_decode_rejects_malformed_input();

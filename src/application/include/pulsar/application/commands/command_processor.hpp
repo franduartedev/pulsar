@@ -29,6 +29,7 @@ public:
   void remove_empty_visual_track(domain::TrackId track_id);
   void reorder_visual_track(domain::TrackId track_id, std::size_t visual_index);
   void set_track_audio_state(domain::TrackId track_id, domain::AudioTrackState state);
+  void set_project_canvas(ProjectCanvas canvas);
 
   [[nodiscard]] domain::ClipId add_clip(domain::MediaId media_id,
                                          domain::TimeRange source_range,
@@ -41,6 +42,7 @@ public:
   domain::TitleId add_title(domain::Title title);
   void replace_title(domain::Title title);
   void remove_title(domain::TitleId id);
+  void replace_subtitles(std::vector<SubtitleCue> subtitles);
   void add_transition(domain::Transition transition);
   void remove_transition(domain::Transition transition);
   void move_clip(domain::ClipId clip_id, domain::TrackId destination_track_id,
@@ -51,6 +53,11 @@ public:
   void set_clip_muted(domain::ClipId clip_id, bool muted);
   // Linear audio fades at the clip start / end (zero = none); one undo step. No-op when unchanged.
   void set_clip_fades(domain::ClipId clip_id, domain::MediaTime fade_in, domain::MediaTime fade_out);
+  void set_clip_distant_music(domain::ClipId clip_id, domain::DistantMusicSettings settings);
+  void set_clip_telephone(domain::ClipId clip_id, domain::TelephoneSettings settings);
+  void set_clip_underwater(domain::ClipId clip_id, domain::UnderwaterSettings settings);
+  void set_clip_audio_effect_order(domain::ClipId clip_id,
+                                   std::vector<domain::AudioEffectType> order);
   // Visual transform (position/scale/rotation/opacity); one undo step. No-op when unchanged.
   void set_clip_visual_transform(domain::ClipId clip_id, domain::VisualTransform transform);
   // Direct-manipulation transaction. Preview updates mutate through the command
@@ -66,6 +73,8 @@ public:
                                            domain::MediaTime split_timeline_position);
   [[nodiscard]] domain::MediaId import_asset(const std::filesystem::path& source_locator,
                                               const MediaProbe& probe);
+  void relink_asset(domain::MediaId media_id, const std::filesystem::path& source_locator,
+                    const MediaProbe& probe);
 
   [[nodiscard]] bool can_undo() const noexcept;
   [[nodiscard]] bool can_redo() const noexcept;

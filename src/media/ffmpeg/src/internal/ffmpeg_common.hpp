@@ -15,13 +15,6 @@ extern "C" {
 
 namespace pulsar::media::ffmpeg::internal {
 
-// FFmpeg expects UTF-8 paths. On Windows path::string() is the ANSI code page,
-// which mangles non-ASCII folder names (e.g. "Películas"), so go through u8string().
-[[nodiscard]] inline std::string path_to_utf8(const std::filesystem::path& path) {
-  const auto text = path.u8string();
-  return std::string{text.begin(), text.end()};
-}
-
 struct FormatContextDeleter {
   void operator()(AVFormatContext* context) const noexcept;
 };

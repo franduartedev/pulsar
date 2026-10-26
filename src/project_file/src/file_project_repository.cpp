@@ -8,22 +8,15 @@
 #include <atomic>
 #include <cerrno>
 #include <chrono>
+#include <fcntl.h>
 #include <fstream>
 #include <sstream>
 #include <string>
 #include <system_error>
-
-#if defined(_WIN32)
-#  ifndef NOMINMAX
-#    define NOMINMAX
-#  endif
-#  ifndef WIN32_LEAN_AND_MEAN
-#    define WIN32_LEAN_AND_MEAN
-#  endif
-#  include <windows.h>
+#ifdef _WIN32
+#include <windows.h>
 #else
-#  include <fcntl.h>
-#  include <unistd.h>
+#include <unistd.h>
 #endif
 
 namespace pulsar::project_file {
@@ -41,15 +34,6 @@ std::atomic<std::uint64_t> temp_counter{0};
   throw application::ProjectRepositoryError{message + ": " + std::generic_category().message(errno)};
 }
 
-bool is_readable(const std::filesystem::path& path) {
-#if defined(_WIN32)
-  return ::GetFileAttributesW(path.c_str()) != INVALID_FILE_ATTRIBUTES &&
-         std::ifstream{path, std::ios::binary}.is_open();
-#else
-  return ::access(path.c_str(), R_OK) == 0;
-#endif
-}
-
 std::filesystem::path temp_path_for(const std::filesystem::path& destination, int attempt) {
   const auto parent = destination.parent_path().empty() ? std::filesystem::path{"."}
                                                          : destination.parent_path();
@@ -58,6 +42,12 @@ std::filesystem::path temp_path_for(const std::filesystem::path& destination, in
   const auto sequence = temp_counter.fetch_add(1, std::memory_order_relaxed);
   return parent / (destination.filename().string() + ".tmp-" + std::to_string(stamp) + "-" +
                    std::to_string(sequence) + "-" + std::to_string(attempt));
+}
+
+bool readable_regular_file(const std::filesystem::path& path, std::error_code& error) {
+  if (!std::filesystem::is_regular_file(path, error) || error) return false;
+  std::ifstream input{path, std::ios::binary};
+  return static_cast<bool>(input);
 }
 
 std::string read_all(const std::filesystem::path& path) {
@@ -93,11 +83,9 @@ void refresh_availability(application::ProjectRestoreState& state,
       const auto filename = logical.substr(std::string{"pulsar-sound:"}.size()) + ".wav";
       const auto root = assets_directory();
       const auto candidate = root / "sounds" / filename;
-      readable = !root.empty() && std::filesystem::is_regular_file(candidate, error) &&
-                 is_readable(candidate);
+      readable = !root.empty() && readable_regular_file(candidate, error);
     } else {
-      const bool regular = std::filesystem::is_regular_file(check_path, error);
-      readable = !error && regular && is_readable(check_path);
+      readable = readable_regular_file(check_path, error);
     }
     const auto availability = readable ? application::MediaAvailability::Available
                                        : application::MediaAvailability::Unavailable;
@@ -132,60 +120,9 @@ application::ProjectSaveResult FileProjectRepository::save(
   if (!project_size_allowed(bytes.size())) {
     throw application::ProjectRepositoryError{"encoded project exceeds size limit"};
   }
-#if defined(_WIN32)
-  // Same contract as the POSIX path: write a unique sibling, flush it to disk,
-  // then replace the destination in one step (write-through).
-  HANDLE handle = INVALID_HANDLE_VALUE;
   std::filesystem::path temporary;
-  for (int attempt = 0; attempt < 32; ++attempt) {
-    temporary = temp_path_for(destination, attempt);
-    handle = ::CreateFileW(temporary.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_NEW,
-                           FILE_ATTRIBUTE_NORMAL, nullptr);
-    if (handle != INVALID_HANDLE_VALUE) break;
-    if (::GetLastError() != ERROR_FILE_EXISTS && ::GetLastError() != ERROR_ALREADY_EXISTS) {
-      throw application::ProjectRepositoryError{"cannot create project temporary file (error " +
-                                                std::to_string(::GetLastError()) + ")"};
-    }
-  }
-  if (handle == INVALID_HANDLE_VALUE) {
-    throw application::ProjectRepositoryError{"cannot obtain unique project temporary file"};
-  }
-  const auto cleanup = [&] { (void)::DeleteFileW(temporary.c_str()); };
-  const auto fail_win = [&](const char* what) {
-    const auto code = ::GetLastError();
-    (void)::CloseHandle(handle);
-    cleanup();
-    throw application::ProjectRepositoryError{std::string{what} + " (error " +
-                                              std::to_string(code) + ")"};
-  };
-  std::size_t written = 0;
-  while (written < bytes.size()) {
-    const DWORD chunk = static_cast<DWORD>(std::min<std::size_t>(bytes.size() - written, 1u << 24));
-    DWORD count = 0;
-    if (!::WriteFile(handle, bytes.data() + written, chunk, &count, nullptr) || count == 0) {
-      fail_win("cannot write project temporary file");
-    }
-    written += count;
-  }
-  if (!::FlushFileBuffers(handle)) fail_win("cannot flush project temporary file");
-  if (!::CloseHandle(handle)) {
-    const auto code = ::GetLastError();
-    cleanup();
-    throw application::ProjectRepositoryError{"cannot close project temporary file (error " +
-                                              std::to_string(code) + ")"};
-  }
-  if (!::MoveFileExW(temporary.c_str(), destination.c_str(),
-                     MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
-    const auto code = ::GetLastError();
-    cleanup();
-    throw application::ProjectRepositoryError{"cannot atomically install project file (error " +
-                                              std::to_string(code) + ")"};
-  }
-  // MOVEFILE_WRITE_THROUGH already waited for the rename to reach the disk.
-  return application::ProjectSaveResult{application::ProjectSaveStatus::Durable};
-#else
+#ifndef _WIN32
   int fd = -1;
-  std::filesystem::path temporary;
   for (int attempt = 0; attempt < 32; ++attempt) {
     temporary = temp_path_for(destination, attempt);
     fd = ::open(temporary.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0600);
@@ -221,7 +158,56 @@ application::ProjectSaveResult FileProjectRepository::save(
     errno = saved_errno;
     fail("cannot close project temporary file");
   }
+#else
+  bool created = false;
+  for (int attempt = 0; attempt < 32 && !created; ++attempt) {
+    temporary = temp_path_for(destination, attempt);
+    const HANDLE handle = CreateFileW(temporary.c_str(), GENERIC_WRITE, FILE_SHARE_READ,
+                                      nullptr, CREATE_NEW,
+                                      FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (handle == INVALID_HANDLE_VALUE) {
+      const auto error = GetLastError();
+      if (error == ERROR_FILE_EXISTS || error == ERROR_ALREADY_EXISTS) continue;
+      throw application::ProjectRepositoryError{"cannot create project temporary file"};
+    }
 
+    bool ok = true;
+    std::size_t written = 0;
+    while (written < bytes.size()) {
+      const auto remaining = bytes.size() - written;
+      const auto chunk = static_cast<DWORD>(std::min<std::size_t>(remaining, 1U << 20));
+      DWORD count = 0;
+      if (!WriteFile(handle, bytes.data() + written, chunk, &count, nullptr) || count == 0) {
+        ok = false;
+        break;
+      }
+      written += count;
+    }
+    if (ok && !FlushFileBuffers(handle)) ok = false;
+    if (!CloseHandle(handle)) ok = false;
+    if (!ok) {
+      std::error_code error;
+      (void)std::filesystem::remove(temporary, error);
+      throw application::ProjectRepositoryError{"cannot write project temporary file"};
+    }
+    created = true;
+  }
+  if (!created) {
+    throw application::ProjectRepositoryError{"cannot obtain unique project temporary file"};
+  }
+  auto cleanup = [&] {
+    std::error_code error;
+    (void)std::filesystem::remove(temporary, error);
+  };
+  if (!MoveFileExW(temporary.c_str(), destination.c_str(),
+                   MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+    cleanup();
+    throw application::ProjectRepositoryError{"cannot atomically install project file"};
+  }
+  return application::ProjectSaveResult{application::ProjectSaveStatus::Durable};
+#endif
+
+#ifndef _WIN32
   if (::rename(temporary.c_str(), destination.c_str()) != 0) {
     const int saved_errno = errno;
     cleanup();

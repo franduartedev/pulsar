@@ -79,6 +79,7 @@ public:
   // False when the queue is full (the caller simply asks again on a later refresh).
   bool request(ThumbnailRequest request);
   void cancelPending();   // drops queued work (project switch); a running decode finishes
+  void cancelPendingAndWait(); // drops queued work and waits for an active decode to release files
   void shutdown();        // idempotent: cancel + join
 
 signals:
@@ -89,7 +90,9 @@ private:
   std::shared_ptr<ThumbnailCache> cache_;
   std::mutex mutex_;
   std::condition_variable wake_;
+  std::condition_variable idle_;
   std::deque<ThumbnailRequest> queue_;
   bool stop_{false};
+  bool active_{false};
   std::thread thread_;
 };

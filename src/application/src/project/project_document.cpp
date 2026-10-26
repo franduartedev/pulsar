@@ -210,6 +210,7 @@ ProjectDocument ProjectDocument::restore(const ProjectRestoreState& state) {
   restored.visual_track_ids_ = state.visual_track_ids;
   restored.assets_ = state.assets;
   restored.transitions_ = state.transitions;
+  restored.replace_subtitles_value(state.subtitles);
   restored.canvas_ = state.canvas ? state.canvas : legacy_project_canvas(restored.snapshot());
   restored.allocator_.state = state.allocator_state;
   for (const auto& transition : restored.transitions_) restored.validate_transition(transition);
@@ -285,6 +286,23 @@ void ProjectDocument::remove_title_value(domain::TitleId id) {
   titles_.erase(found);
 }
 
+void ProjectDocument::replace_subtitles_value(const std::vector<SubtitleCue>& subtitles) {
+  if (subtitles.size() > 10'000) throw std::invalid_argument{"too many subtitle cues"};
+  std::unordered_set<std::uint32_t> sequences;
+  for (std::size_t index = 0; index < subtitles.size(); ++index) {
+    const auto& cue = subtitles[index];
+    if (cue.sequence == 0 || !sequences.insert(cue.sequence).second || cue.start >= cue.end ||
+        cue.text.empty() || cue.text.size() > 16'384) {
+      throw std::invalid_argument{"invalid subtitle cue"};
+    }
+    if (index > 0 && (cue.start < subtitles[index - 1].start ||
+                      cue.start < subtitles[index - 1].end)) {
+      throw std::invalid_argument{"subtitle cues must be ordered and non-overlapping"};
+    }
+  }
+  subtitles_ = subtitles;
+}
+
 void ProjectDocument::replace_title_value(const domain::Title& title) {
   const auto found = std::find_if(titles_.begin(), titles_.end(), [&](const domain::Title& t) { return t.id() == title.id(); });
   if (found == titles_.end()) throw std::invalid_argument{"title does not exist in document"};
@@ -357,6 +375,18 @@ void ProjectDocument::add_asset_value(const MediaAsset& asset) {
   ++asset_revision_;
 }
 
+void ProjectDocument::replace_asset_value(const MediaAsset& asset) {
+  const auto found = std::find_if(assets_.begin(), assets_.end(),
+                                  [id = asset.id()](const MediaAsset& item) {
+                                    return item.id() == id;
+                                  });
+  if (found == assets_.end()) {
+    throw std::invalid_argument{"media asset does not exist in document"};
+  }
+  *found = asset;
+  ++asset_revision_;
+}
+
 void ProjectDocument::remove_asset_value(domain::MediaId id) {
   for (const auto& track : timeline_.tracks()) {
     for (const auto& clip : track.clips()) {
@@ -404,7 +434,7 @@ void ProjectDocument::validate_clip_for_track(domain::TrackId track_id,
 ProjectSnapshot ProjectDocument::snapshot() const {
   return ProjectSnapshot{timeline_, assets_, video_track_id_, allocator_.state,
                          current_history_state_id_, saved_history_state_id_, next_history_state_id_,
-                           document_generation_, titles_, visual_track_ids_, canvas_, transitions_};
+                         document_generation_, titles_, visual_track_ids_, canvas_, transitions_, subtitles_};
 }
 
 void ProjectDocument::ensure_new_edit_possible() const {

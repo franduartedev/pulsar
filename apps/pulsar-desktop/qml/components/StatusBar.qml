@@ -51,6 +51,37 @@ Item {
             elide: Text.ElideRight
             width: Math.min(implicitWidth, Math.max(120, bar.width * 0.45))
         }
+        Text {
+            visible: controller.hasMedia
+            anchors.verticalCenter: parent.verticalCenter
+            text: "P " + Math.round(controller.previewPeakDb) + " dB   R " + Math.round(controller.previewRmsDb) + " dB"
+            color: controller.previewLimitedSamples > 0 ? Theme.warning : Theme.textMuted
+            font.family: Theme.mono
+            font.pixelSize: Theme.fontSizeXS
+        }
+        Item {
+            visible: controller.hasMedia
+            width: 56; height: 10
+            Accessible.name: "Nivel de pico"
+            Rectangle {
+                anchors.left: parent.left; anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
+                height: 3; radius: 1.5; color: Theme.track
+            }
+            Rectangle {
+                anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
+                height: 3; radius: 1.5
+                width: parent.width * Math.max(0, Math.min(1, (controller.previewPeakDb + 60) / 60))
+                color: controller.previewLimitedSamples > 0 ? Theme.warning : Theme.accent
+            }
+        }
+        Text {
+            visible: controller.hasMedia && controller.previewLimitedSamples > 0
+            anchors.verticalCenter: parent.verticalCenter
+            text: "LIMIT " + controller.previewLimitedSamples
+            color: Theme.warning
+            font.family: Theme.mono
+            font.pixelSize: Theme.fontSizeXS
+        }
     }
     Rectangle {
         visible: controller.exportRunning

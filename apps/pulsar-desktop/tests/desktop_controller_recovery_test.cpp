@@ -36,11 +36,19 @@ int clips(DesktopController& c) { return c.timelineClips()->rowCount(); }
 bool has_files(const fs::path& dir) { return fs::exists(dir / "session.meta") || fs::exists(dir / "session.pulsar-recovery"); }
 void write_text(const fs::path& path, const std::string& text) { std::ofstream out{path, std::ios::binary}; out << text; }
 
+void set_environment(const char* name, const std::string& value) {
+#if defined(_WIN32)
+  _putenv_s(name, value.c_str());
+#else
+  setenv(name, value.c_str(), 1);
+#endif
+}
+
 struct Session {
   PreviewImageProvider provider;
   std::unique_ptr<DesktopController> controller;
   explicit Session(const fs::path& recovery_dir) {
-    setenv("PULSAR_RECOVERY_DIR", recovery_dir.c_str(), 1);
+    set_environment("PULSAR_RECOVERY_DIR", recovery_dir.string());
     controller = std::make_unique<DesktopController>(provider, DesktopController::WaveformSourceCreator{});
   }
 };

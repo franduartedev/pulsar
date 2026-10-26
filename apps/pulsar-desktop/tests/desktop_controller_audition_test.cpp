@@ -10,6 +10,7 @@
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
+#include <numbers>
 
 namespace {
 namespace fs = std::filesystem;
@@ -34,7 +35,7 @@ std::vector<unsigned char> make_wav(int rate, int channels, int bits, const std:
 }
 std::vector<double> sine(int frames, int rate, double amplitude = 0.5) {
   std::vector<double> v(static_cast<std::size_t>(frames));
-  for (int i = 0; i < frames; ++i) v[static_cast<std::size_t>(i)] = amplitude * std::sin(2.0 * M_PI * 440.0 * i / rate);
+  for (int i = 0; i < frames; ++i) v[static_cast<std::size_t>(i)] = amplitude * std::sin(2.0 * std::numbers::pi * 440.0 * i / rate);
   return v;
 }
 float peak(const std::vector<float>& samples, std::size_t from = 0, std::size_t to = static_cast<std::size_t>(-1)) {

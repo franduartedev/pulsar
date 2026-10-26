@@ -9,6 +9,8 @@ Rectangle {
     signal saveProjectRequested()
     signal saveProjectAsRequested()
     signal importMediaRequested()
+    signal importSubtitlesRequested()
+    signal exportSubtitlesRequested()
     signal exportRequested()
     signal aboutRequested()
     color: Theme.bgRoot
@@ -56,6 +58,14 @@ Rectangle {
         PButton { flat: true; text: "Guardar"; enabled: controller.projectDirty; onClicked: header.saveProjectRequested() }
         PButton { visible: header.width >= 1120; flat: true; text: "Guardar como…"; onClicked: header.saveProjectAsRequested() }
         PButton { visible: header.width >= 1040; flat: true; text: "Importar"; onClicked: header.importMediaRequested() }
+        PButton { visible: header.width >= 1200; flat: true; text: "SRT"; onClicked: header.importSubtitlesRequested() }
+        PButton { visible: header.width >= 1280; flat: true; text: "Exportar SRT"; onClicked: header.exportSubtitlesRequested() }
+        Row { visible: header.width >= 1180; spacing: 2
+            Text { anchors.verticalCenter: parent.verticalCenter; text: "Lienzo"; color: Theme.textMuted; font.pixelSize: Theme.fontSizeXS }
+            PButton { flat: true; text: "16:9"; onClicked: controller.setCanvasPreset("landscape") }
+            PButton { flat: true; text: "9:16"; onClicked: controller.setCanvasPreset("portrait") }
+            PButton { flat: true; text: "1:1"; onClicked: controller.setCanvasPreset("square") }
+        }
         Item { width: Theme.spaceM; height: 1 }
         PButton { text: "Cancelar"; visible: controller.exportRunning; onClicked: controller.cancelExport() }
         PButton {

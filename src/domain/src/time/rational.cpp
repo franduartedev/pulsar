@@ -1,16 +1,14 @@
 #include <pulsar/domain/time/rational.hpp>
 
+#include <pulsar/domain/support/wide_integer.hpp>
+
 #include <limits>
 #include <stdexcept>
 
 namespace pulsar::domain {
 namespace {
 
-#if defined(__SIZEOF_INT128__)
-using WideInt = __int128_t;
-#else
-#error "PULSAR requires a compiler with signed __int128 support for exact rational comparisons."
-#endif
+using WideInt = WideInteger;
 
 [[nodiscard]] std::int64_t checked_to_int64(WideInt value) {
   if (value < static_cast<WideInt>(std::numeric_limits<std::int64_t>::min()) ||

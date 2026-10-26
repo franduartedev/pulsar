@@ -10,6 +10,7 @@
 #include <functional>
 #include <iterator>
 #include <string>
+#include <system_error>
 #include <vector>
 
 namespace {
@@ -73,10 +74,15 @@ int main(int argc, char** argv) {
   if (read_bytes(source) != source_before) return 1;
 
   // Existing filesystem aliases resolve to the same source and are protected too.
+  // Creating a symlink needs a privilege that some Windows accounts lack, so
+  // skip this check rather than failing the whole export contract.
   const auto source_alias = root / "source-alias.mp4";
-  std::filesystem::create_symlink(source.filename(), source_alias);
-  controller.exportProject(QString::fromStdString(source_alias.string()));
-  if (controller.exportRunning() || read_bytes(source) != source_before) return 1;
+  std::error_code alias_error;
+  std::filesystem::create_symlink(source.filename(), source_alias, alias_error);
+  if (!alias_error) {
+    controller.exportProject(QString::fromStdString(source_alias.string()));
+    if (controller.exportRunning() || read_bytes(source) != source_before) return 1;
+  }
   const auto video_key = controller.timelineClips()->index(0, 0)
       .data(TimelineClipListModel::ClipKeyRole).toString();
   controller.selectTimelineClip(video_key);
@@ -117,5 +123,7 @@ int main(int argc, char** argv) {
     shutdown_controller.exportProject(QString::fromStdString((root / "shutdown.mp4").string()));
   }
 
-  std::filesystem::remove_all(root);
+  // Windows keeps files open by the live controller locked: best-effort cleanup.
+  std::error_code cleanup_error;
+  std::filesystem::remove_all(root, cleanup_error);
 }

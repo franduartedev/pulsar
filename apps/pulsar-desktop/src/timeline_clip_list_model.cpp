@@ -3,6 +3,7 @@
 #include "editor_session.hpp"
 
 #include <algorithm>
+#include <QVariantMap>
 
 TimelineClipListModel::TimelineClipListModel(QObject* parent) : QAbstractListModel{parent} {}
 
@@ -20,6 +21,7 @@ QVariant TimelineClipListModel::data(const QModelIndex& index, int role) const {
   case StartRole: return row.start;
   case EndRole: return row.end;
   case DurationRole: return row.duration;
+  case DurationSecondsRole: return row.duration_seconds;
   case MissingRole: return row.missing;
   case SelectedRole: return row.selected;
   case MutedRole: return row.muted;
@@ -36,20 +38,22 @@ QVariant TimelineClipListModel::data(const QModelIndex& index, int role) const {
   case FadeOutRole: return row.fade_out;
   case TransitionInRole: return row.transition_in;
   case TransitionStartProgressRole: return row.transition_start_progress;
+  case GainKeyframesRole: return row.gain_keyframes;
   default: return {};
   }
 }
 
 QHash<int, QByteArray> TimelineClipListModel::roleNames() const {
   return {{ClipKeyRole, "clipKey"}, {NameRole, "clipName"}, {StartRole, "startText"},
-          {EndRole, "endText"}, {DurationRole, "durationText"}, {MissingRole, "missing"},
+          {EndRole, "endText"}, {DurationRole, "durationText"}, {DurationSecondsRole, "durationSeconds"}, {MissingRole, "missing"},
           {SelectedRole, "selected"}, {MutedRole, "muted"}, {GainDbRole, "gainDb"},
           {StartProgressRole, "startProgress"}, {EndProgressRole, "endProgress"},
           {InViewportRole, "inViewport"}, {TrackIndexRole, "trackIndex"},
           {AudioTrackRole, "audioTrack"}, {HasAudioRole, "hasAudio"}, {ThumbSourceRole, "thumbSource"},
            {KindRole, "kind"}, {FadeInRole, "fadeIn"}, {FadeOutRole, "fadeOut"},
            {TransitionInRole, "transitionIn"},
-           {TransitionStartProgressRole, "transitionStartProgress"}};
+           {TransitionStartProgressRole, "transitionStartProgress"},
+           {GainKeyframesRole, "gainKeyframes"}};
 }
 
 void TimelineClipListModel::refresh(const pulsar::desktop::EditorSession& session,
@@ -70,6 +74,7 @@ void TimelineClipListModel::refresh(const pulsar::desktop::EditorSession& sessio
     row.start = QString::fromStdString(view.start);
     row.end = QString::fromStdString(view.end);
     row.duration = QString::fromStdString(view.duration);
+    row.duration_seconds = static_cast<double>(clip->duration());
     row.missing = view.missing;
     row.selected = view.selected;
     row.muted = clip->muted();
@@ -81,6 +86,12 @@ void TimelineClipListModel::refresh(const pulsar::desktop::EditorSession& sessio
     row.track_index = static_cast<int>(view.track_index);
     row.audio_track = view.track_kind == pulsar::domain::TrackKind::Audio;
     row.has_audio = view.has_audio;
+    for (const auto& keyframe : clip->distant_music().gain_keyframes) {
+      QVariantMap point;
+      point.insert(QStringLiteral("time"), keyframe.time_seconds);
+      point.insert(QStringLiteral("value"), keyframe.value);
+      row.gain_keyframes.push_back(point);
+    }
     const auto transition = std::find_if(
         session.document().transitions().begin(), session.document().transitions().end(),
         [&](const auto& item) { return item.incoming_clip_id == clip->id(); });
@@ -115,8 +126,10 @@ void TimelineClipListModel::refresh(const pulsar::desktop::EditorSession& sessio
   }
 
   constexpr int roles[] = {ClipKeyRole, NameRole, StartRole, EndRole, DurationRole,
+                           DurationSecondsRole,
                            MissingRole, SelectedRole, MutedRole, GainDbRole,
-                           StartProgressRole, EndProgressRole, InViewportRole};
+                           StartProgressRole, EndProgressRole, InViewportRole,
+                           GainKeyframesRole};
   constexpr int track_roles[] = {TrackIndexRole, AudioTrackRole, HasAudioRole, ThumbSourceRole};
   for (std::size_t row_index = 0; row_index < rows_.size(); ++row_index) {
     auto& row = rows_[row_index];
@@ -130,6 +143,7 @@ void TimelineClipListModel::refresh(const pulsar::desktop::EditorSession& sessio
       case StartRole: role_changed = row.start != next.start; break;
       case EndRole: role_changed = row.end != next.end; break;
       case DurationRole: role_changed = row.duration != next.duration; break;
+      case DurationSecondsRole: role_changed = row.duration_seconds != next.duration_seconds; break;
       case MissingRole: role_changed = row.missing != next.missing; break;
       case SelectedRole: role_changed = row.selected != next.selected; break;
       case MutedRole: role_changed = row.muted != next.muted; break;
@@ -137,6 +151,7 @@ void TimelineClipListModel::refresh(const pulsar::desktop::EditorSession& sessio
       case StartProgressRole: role_changed = row.start_progress != next.start_progress; break;
       case EndProgressRole: role_changed = row.end_progress != next.end_progress; break;
       case InViewportRole: role_changed = row.in_viewport != next.in_viewport; break;
+      case GainKeyframesRole: role_changed = row.gain_keyframes != next.gain_keyframes; break;
       default: break;
       }
       changed = changed || role_changed;

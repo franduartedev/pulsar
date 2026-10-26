@@ -7,6 +7,8 @@
 #include <QEventLoop>
 #include <QGuiApplication>
 #include <QTimer>
+#include <QVariantList>
+#include <QVariantMap>
 
 #include <cmath>
 #include <cstdio>
@@ -222,44 +224,60 @@ int main(int argc, char** argv) {
   controller.toggleSelectedClipMute();
   REQUIRE(50, !clip_muted(1));
 
+  // ---- Distant Music automation reaches the timeline model ------------------------
+  QVariantList automation{
+      QVariantMap{{QStringLiteral("time"), 0.0}, {QStringLiteral("value"), -30.0},
+                  {QStringLiteral("interpolation"), 1}},
+      QVariantMap{{QStringLiteral("time"), 2.0}, {QStringLiteral("value"), -6.0},
+                  {QStringLiteral("interpolation"), 2}}};
+  controller.setSelectedDistantMusicGainKeyframes(automation);
+  REQUIRE(51, controller.errorMessage().isEmpty());
+  const auto timeline_automation = controller.timelineClips()->index(1, 0).data(
+      TimelineClipListModel::GainKeyframesRole).toList();
+  REQUIRE(52, timeline_automation.size() == 2);
+  REQUIRE(53, std::abs(timeline_automation.at(0).toMap().value(QStringLiteral("time")).toDouble()) < 0.001);
+  REQUIRE(54, std::abs(timeline_automation.at(1).toMap().value(QStringLiteral("value")).toDouble() + 6.0) < 0.001);
+  REQUIRE(55, controller.timelineClips()->index(1, 0).data(
+      TimelineClipListModel::DurationSecondsRole).toDouble() > 0.0);
+
   // ---- Snap toggle: same engine, only enabled/disabled -------------------------------
   const double width = 1000.0;
   const double start_px = controller.timelineClips()->index(1, 0).data(TimelineClipListModel::StartProgressRole).toDouble() * width;
   const double end_px = controller.timelineClips()->index(1, 0).data(TimelineClipListModel::EndProgressRole).toDouble() * width;
   const double press = (start_px + end_px) / 2.0;
-  REQUIRE(51, controller.snapEnabled());
+  REQUIRE(56, controller.snapEnabled());
   const auto snapped = controller.previewTimelineMove(clip_key(1), press, press + 3.0, width);
-  REQUIRE(52, snapped.value("guide").toDouble() >= 0.0 && std::abs(snapped.value("offset").toDouble()) < 0.5);
+  REQUIRE(57, snapped.value("guide").toDouble() >= 0.0 && std::abs(snapped.value("offset").toDouble()) < 0.5);
   controller.setSnapEnabled(false);
   const auto free_move = controller.previewTimelineMove(clip_key(1), press, press + 3.0, width);
-  REQUIRE(53, free_move.value("guide").toDouble() < 0.0 && std::abs(free_move.value("offset").toDouble() - 3.0) < 0.5);
+  REQUIRE(58, free_move.value("guide").toDouble() < 0.0 && std::abs(free_move.value("offset").toDouble() - 3.0) < 0.5);
   // Overlap protection is not part of snapping: dragging left over the neighbour still stops flush.
   const auto into_neighbour = controller.previewTimelineMove(clip_key(1), press, press - (end_px - start_px), width);
-  REQUIRE(54, into_neighbour.value("offset").toDouble() >= -0.5);
+  REQUIRE(59, into_neighbour.value("offset").toDouble() >= -0.5);
   controller.setSnapEnabled(true);
   const auto again = controller.previewTimelineMove(clip_key(1), press, press + 3.0, width);
-  REQUIRE(55, again.value("guide").toDouble() >= 0.0);
+  REQUIRE(60, again.value("guide").toDouble() >= 0.0);
 
   // ---- Wheel zoom keeps the time under the cursor ------------------------------------
   controller.zoomTimelineAt(width * 0.75, width, 4.0);
-  REQUIRE(56, controller.timelineZoom() > 3.9 && controller.timelineScroll() > 0.0);
+  REQUIRE(61, controller.timelineZoom() > 3.9 && controller.timelineScroll() > 0.0);
   controller.fitTimeline();
-  REQUIRE(57, controller.timelineZoom() == 1.0 && controller.timelineScroll() == 0.0);
+  REQUIRE(62, controller.timelineZoom() == 1.0 && controller.timelineScroll() == 0.0);
 
   // ---- Editing power: selection order, Q/W, ripple delete (controller level) ---------
-  REQUIRE(58, controller.openProject(q(second)) && clips(controller) == 2);
+  REQUIRE(63, controller.openProject(q(second)) && clips(controller) == 2);
   const auto clip_start = [&](int row) { return controller.timelineClips()->index(row, 0).data(TimelineClipListModel::StartRole).toString(); };
   const auto clip_end = [&](int row) { return controller.timelineClips()->index(row, 0).data(TimelineClipListModel::EndRole).toString(); };
   controller.selectTimelineClip(QString{});
   controller.selectNextClip();
-  REQUIRE(59, controller.selectedClipKey() == clip_key(0));              // no selection: first
+  REQUIRE(64, controller.selectedClipKey() == clip_key(0));              // no selection: first
   controller.selectNextClip();
-  REQUIRE(60, controller.selectedClipKey() == clip_key(1));
+  REQUIRE(65, controller.selectedClipKey() == clip_key(1));
   controller.selectNextClip();
-  REQUIRE(61, controller.selectedClipKey() == clip_key(1));              // stays at the end
+  REQUIRE(66, controller.selectedClipKey() == clip_key(1));              // stays at the end
   controller.selectPreviousClip();
-  REQUIRE(62, controller.selectedClipKey() == clip_key(0));
-  REQUIRE(63, !controller.projectDirty());                               // selection is not an edit
+  REQUIRE(67, controller.selectedClipKey() == clip_key(0));
+  REQUIRE(68, !controller.projectDirty());                               // selection is not an edit
 
   controller.selectTimelineClip(clip_key(1));
   const auto b_start_text = clip_start(1);
@@ -267,31 +285,31 @@ int main(int argc, char** argv) {
   controller.seekToStart();
   controller.trimSelectedStartToPlayhead();                              // playhead outside: silent no-op
   controller.trimSelectedEndToPlayhead();
-  REQUIRE(64, clip_start(1) == b_start_text && clip_end(1) == b_end_text && controller.errorMessage().isEmpty() && !controller.projectDirty());
+  REQUIRE(69, clip_start(1) == b_start_text && clip_end(1) == b_end_text && controller.errorMessage().isEmpty() && !controller.projectDirty());
   controller.seekNormalized(0.7);
   controller.trimSelectedStartToPlayhead();                              // Q
-  REQUIRE(65, clip_start(1) != b_start_text && clip_end(1) == b_end_text && controller.projectDirty());
+  REQUIRE(70, clip_start(1) != b_start_text && clip_end(1) == b_end_text && controller.projectDirty());
   controller.seekNormalized(0.9);
   controller.trimSelectedEndToPlayhead();                                // W
-  REQUIRE(66, clip_end(1) != b_end_text);
+  REQUIRE(71, clip_end(1) != b_end_text);
   controller.undoEdit();
   controller.undoEdit();
-  REQUIRE(67, clip_start(1) == b_start_text && clip_end(1) == b_end_text);
+  REQUIRE(72, clip_start(1) == b_start_text && clip_end(1) == b_end_text);
   controller.redoEdit();
   controller.redoEdit();
-  REQUIRE(68, clip_start(1) != b_start_text && clip_end(1) != b_end_text);
+  REQUIRE(73, clip_start(1) != b_start_text && clip_end(1) != b_end_text);
   controller.undoEdit();
   controller.undoEdit();
 
   controller.selectTimelineClip(clip_key(0));
-  REQUIRE(69, controller.canRippleDelete());
+  REQUIRE(74, controller.canRippleDelete());
   const auto a_start_text = clip_start(0);
   controller.rippleDeleteSelectedClip();
-  REQUIRE(70, clips(controller) == 1 && clip_start(0) == a_start_text && controller.selectedClipKey().isEmpty());
+  REQUIRE(75, clips(controller) == 1 && clip_start(0) == a_start_text && controller.selectedClipKey().isEmpty());
   controller.undoEdit();
-  REQUIRE(71, clips(controller) == 2 && clip_start(1) == b_start_text);  // one undo restores the gap-closing move too
+  REQUIRE(76, clips(controller) == 2 && clip_start(1) == b_start_text);  // one undo restores the gap-closing move too
   controller.redoEdit();
-  REQUIRE(72, clips(controller) == 1 && clip_start(0) == a_start_text);
+  REQUIRE(77, clips(controller) == 1 && clip_start(0) == a_start_text);
   controller.undoEdit();
   controller.rippleDeleteSelectedClip();                                 // nothing selected after undo? either way: no crash
 
@@ -303,27 +321,33 @@ int main(int argc, char** argv) {
     (void)cache.get("k1");                                               // k2 is now the oldest
     cache.put("k4", image());
     cache.put("k5", image());
-    REQUIRE(73, cache.size() == 3 && cache.contains("k1") && cache.contains("k5") && !cache.contains("k2") && !cache.contains("k3"));
-    REQUIRE(74, cache.bytes() == 3u * 4u * 4u * 4u && cache.get("missing").isNull());
+    REQUIRE(78, cache.size() == 3 && cache.contains("k1") && cache.contains("k5") && !cache.contains("k2") && !cache.contains("k3"));
+    REQUIRE(79, cache.bytes() == 3u * 4u * 4u * 4u && cache.get("missing").isNull());
   }
   const auto thumb = [&](int row) { return controller.timelineClips()->index(row, 0).data(TimelineClipListModel::ThumbSourceRole).toString(); };
-  REQUIRE(75, controller.openProject(q(second)) && clips(controller) == 2);
-  REQUIRE(76, wait_until([&] { return !thumb(0).isEmpty() && !thumb(1).isEmpty(); }));
-  REQUIRE(77, controller.thumbnailCache()->size() >= 2 && controller.thumbnailCache()->size() <= 192);
+  REQUIRE(80, controller.openProject(q(second)) && clips(controller) == 2);
+  REQUIRE(81, wait_until([&] { return !thumb(0).isEmpty() && !thumb(1).isEmpty(); }));
+  REQUIRE(82, controller.thumbnailCache()->size() >= 2 && controller.thumbnailCache()->size() <= 192);
   {
     ThumbnailImageProvider provider{controller.thumbnailCache()};
     QSize size;
     const auto image = provider.requestImage(thumb(0), &size, {});
-    REQUIRE(78, !image.isNull() && image.width() <= ThumbnailCache::kWidth && image.height() <= ThumbnailCache::kHeight && size == image.size());
+    REQUIRE(83, !image.isNull() && image.width() <= ThumbnailCache::kWidth && image.height() <= ThumbnailCache::kHeight && size == image.size());
   }
   // Offline media: no picture, no error, clip still listed as offline.
   fs::remove(root / "media/b.mp4");
-  REQUIRE(79, controller.openProject(q(second)));
-  REQUIRE(80, wait_until([&] { return !thumb(0).isEmpty(); }));
+  REQUIRE(84, controller.openProject(q(second)));
+  REQUIRE(85, wait_until([&] { return !thumb(0).isEmpty(); }));
   spin(300);
-  REQUIRE(81, thumb(1).isEmpty() && clip_missing(controller, 1) && !controller.errorMessage().contains(QStringLiteral("miniatura")));
+  REQUIRE(86, thumb(1).isEmpty() && clip_missing(controller, 1) && !controller.errorMessage().contains(QStringLiteral("miniatura")));
   fs::copy_file(fixtures / "e6_video_b.mp4", root / "media/b.mp4");
-  REQUIRE(82, controller.openProject(q(second)) && wait_until([&] { return !thumb(1).isEmpty(); }));
+  REQUIRE(87, controller.openProject(q(second)) && wait_until([&] { return !thumb(1).isEmpty(); }));
+  controller.selectTimelineClip(clip_key(1));
+  controller.setSelectedDistantMusicGainKeyframes(QVariantList{
+      QVariantMap{{QStringLiteral("time"), 9999.0}, {QStringLiteral("value"), -6.0},
+                  {QStringLiteral("interpolation"), 1}}});
+  REQUIRE(88, controller.errorMessage().contains(QStringLiteral("Keyframe inválido")));
+  REQUIRE(89, controller.selectedDistantMusicKeyframeCount() == 0);
 
   fs::remove_all(root);
   return 0;

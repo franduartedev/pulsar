@@ -1,12 +1,21 @@
 # Test cases use the standard assert-based contract throughout the suite.
-# Keep those checks active even when the product is built in Release mode.
+# Keep those checks active even when the product is built in Release mode. On
+# MSVC, /U undefines a preprocessor symbol (the spelling is /UNDEBUG), whereas
+# GCC/Clang use -U. Without this, Windows tests continue after a failed
+# invariant and often report a misleading 0xc0000409 or segmentation fault.
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
   set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -UNDEBUG")
+elseif(MSVC)
+  set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /UNDEBUG")
 endif()
 
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
 add_test(NAME pulsar.assets.core_sounds_content
          COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/test_core_sounds.py)
+
+# Tests embed this path as a C string literal. Normalize it so Windows
+# backslashes are not interpreted as escape sequences by the compiler.
+file(TO_CMAKE_PATH "${CMAKE_SOURCE_DIR}" PULSAR_SOURCE_DIR)
 
 add_executable(pulsar_smoke_tests
   smoke/bootstrap_test.cpp
@@ -36,6 +45,20 @@ pulsar_apply_project_options(pulsar_time_tests)
 pulsar_apply_compiler_warnings(pulsar_time_tests)
 
 add_test(NAME pulsar.domain.time_model COMMAND pulsar_time_tests)
+
+add_executable(pulsar_wide_integer_tests
+  domain/wide_integer_test.cpp
+)
+
+target_link_libraries(pulsar_wide_integer_tests
+  PRIVATE
+    pulsar::domain
+)
+
+pulsar_apply_project_options(pulsar_wide_integer_tests)
+pulsar_apply_compiler_warnings(pulsar_wide_integer_tests)
+
+add_test(NAME pulsar.domain.wide_integer COMMAND pulsar_wide_integer_tests)
 
 add_executable(pulsar_timeline_tests
   domain/timeline_model_test.cpp
@@ -261,7 +284,7 @@ target_link_libraries(pulsar_project_persistence_tests
 
 pulsar_apply_project_options(pulsar_project_persistence_tests)
 pulsar_apply_compiler_warnings(pulsar_project_persistence_tests)
-target_compile_definitions(pulsar_project_persistence_tests PRIVATE PULSAR_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_compile_definitions(pulsar_project_persistence_tests PRIVATE PULSAR_SOURCE_DIR="${PULSAR_SOURCE_DIR}")
 
 add_test(NAME pulsar.application.project_persistence COMMAND pulsar_project_persistence_tests)
 
@@ -277,7 +300,7 @@ target_link_libraries(pulsar_audio_model_tests
 
 pulsar_apply_project_options(pulsar_audio_model_tests)
 pulsar_apply_compiler_warnings(pulsar_audio_model_tests)
-target_compile_definitions(pulsar_audio_model_tests PRIVATE PULSAR_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_compile_definitions(pulsar_audio_model_tests PRIVATE PULSAR_SOURCE_DIR="${PULSAR_SOURCE_DIR}")
 
 add_test(NAME pulsar.application.audio_model COMMAND pulsar_audio_model_tests)
 
@@ -351,6 +374,46 @@ pulsar_apply_compiler_warnings(pulsar_audio_mix_session_tests)
 add_test(NAME pulsar.application.audio_mix_session
          COMMAND pulsar_audio_mix_session_tests)
 
+add_executable(pulsar_distant_music_processor_tests
+  application/distant_music_processor_test.cpp
+)
+target_link_libraries(pulsar_distant_music_processor_tests PRIVATE pulsar::application pulsar::domain)
+pulsar_apply_project_options(pulsar_distant_music_processor_tests)
+pulsar_apply_compiler_warnings(pulsar_distant_music_processor_tests)
+add_test(NAME pulsar.application.distant_music_processor COMMAND pulsar_distant_music_processor_tests)
+
+add_executable(pulsar_pulse_map_tests
+  application/pulse_map_test.cpp
+)
+target_link_libraries(pulsar_pulse_map_tests PRIVATE pulsar::application pulsar::domain)
+pulsar_apply_project_options(pulsar_pulse_map_tests)
+pulsar_apply_compiler_warnings(pulsar_pulse_map_tests)
+add_test(NAME pulsar.application.pulse_map COMMAND pulsar_pulse_map_tests)
+
+add_executable(pulsar_audio_recipe_tests
+  application/audio_recipe_test.cpp
+)
+target_link_libraries(pulsar_audio_recipe_tests PRIVATE pulsar::application pulsar::domain)
+pulsar_apply_project_options(pulsar_audio_recipe_tests)
+pulsar_apply_compiler_warnings(pulsar_audio_recipe_tests)
+add_test(NAME pulsar.application.audio_recipe COMMAND pulsar_audio_recipe_tests)
+
+add_executable(pulsar_scene_cards_tests
+  application/scene_cards_test.cpp
+)
+target_link_libraries(pulsar_scene_cards_tests PRIVATE pulsar::application pulsar::domain)
+pulsar_apply_project_options(pulsar_scene_cards_tests)
+pulsar_apply_compiler_warnings(pulsar_scene_cards_tests)
+add_test(NAME pulsar.application.scene_cards COMMAND pulsar_scene_cards_tests)
+
+add_executable(pulsar_srt_tests
+  application/srt_test.cpp
+)
+target_link_libraries(pulsar_srt_tests PRIVATE pulsar::application pulsar::domain)
+pulsar_apply_project_options(pulsar_srt_tests)
+pulsar_apply_compiler_warnings(pulsar_srt_tests)
+add_test(NAME pulsar.application.srt COMMAND pulsar_srt_tests)
+
 add_executable(pulsar_editor_session_tests
   application/editor_session_test.cpp
   ${CMAKE_SOURCE_DIR}/apps/pulsar-desktop/src/editor_session.cpp
@@ -367,7 +430,35 @@ if(NOT PULSAR_BUILD_FFMPEG)
   return()
 endif()
 
-find_program(PULSAR_TEST_FFMPEG_CLI ffmpeg REQUIRED)
+# Integration tests need the ffmpeg command-line tool built with libx264.
+# The vcpkg ffmpeg package ships libraries only (no CLI, no x264), so the CI
+# installs a separate CLI and passes its path explicitly. Accept a cache
+# override, then fall back to a PATH search with an actionable error.
+set(PULSAR_TEST_FFMPEG_CLI "" CACHE FILEPATH
+    "Path to an ffmpeg executable with libx264 support for media integration tests")
+
+if(NOT PULSAR_TEST_FFMPEG_CLI)
+  # find_program() does not search when the cache entry already exists, even
+  # when its value is empty, so drop the placeholder first.
+  unset(PULSAR_TEST_FFMPEG_CLI CACHE)
+  find_program(PULSAR_TEST_FFMPEG_CLI NAMES ffmpeg ffmpeg.exe)
+endif()
+
+if(NOT PULSAR_TEST_FFMPEG_CLI)
+  message(FATAL_ERROR
+    "PULSAR_TEST_FFMPEG_CLI was not found. Media integration tests require the "
+    "ffmpeg command-line tool with libx264 (the vcpkg port provides libraries, "
+    "not the CLI). Install ffmpeg or configure with "
+    "-DPULSAR_TEST_FFMPEG_CLI=/path/to/ffmpeg.")
+endif()
+
+if(NOT EXISTS "${PULSAR_TEST_FFMPEG_CLI}")
+  message(FATAL_ERROR
+    "PULSAR_TEST_FFMPEG_CLI='${PULSAR_TEST_FFMPEG_CLI}' does not exist.")
+endif()
+
+# The path is embedded in a C string literal, so backslashes must be avoided.
+file(TO_CMAKE_PATH "${PULSAR_TEST_FFMPEG_CLI}" PULSAR_TEST_FFMPEG_CLI)
 
 add_executable(pulsar_ffmpeg_offline_video_renderer_tests
   media/ffmpeg_offline_video_renderer_test.cpp
@@ -375,7 +466,7 @@ add_executable(pulsar_ffmpeg_offline_video_renderer_tests
 
 target_compile_definitions(pulsar_ffmpeg_offline_video_renderer_tests
   PRIVATE
-    PULSAR_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+    PULSAR_SOURCE_DIR="${PULSAR_SOURCE_DIR}"
     PULSAR_TEST_FFMPEG_CLI="${PULSAR_TEST_FFMPEG_CLI}"
 )
 
@@ -398,7 +489,7 @@ add_executable(pulsar_ffmpeg_offline_audio_renderer_tests
 
 target_compile_definitions(pulsar_ffmpeg_offline_audio_renderer_tests
   PRIVATE
-    PULSAR_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+    PULSAR_SOURCE_DIR="${PULSAR_SOURCE_DIR}"
 )
 
 target_link_libraries(pulsar_ffmpeg_offline_audio_renderer_tests
@@ -421,6 +512,7 @@ add_executable(pulsar_ffmpeg_export_media_writer_tests
 target_link_libraries(pulsar_ffmpeg_export_media_writer_tests
   PRIVATE
     pulsar::media_ffmpeg
+    pulsar::ffmpeg_dependencies
     pulsar::application
     pulsar::domain
 )
@@ -437,7 +529,7 @@ add_executable(pulsar_ffmpeg_export_job_smoke_tests
 
 target_compile_definitions(pulsar_ffmpeg_export_job_smoke_tests
   PRIVATE
-    PULSAR_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+    PULSAR_SOURCE_DIR="${PULSAR_SOURCE_DIR}"
 )
 
 target_link_libraries(pulsar_ffmpeg_export_job_smoke_tests
@@ -460,12 +552,13 @@ add_executable(pulsar_ffmpeg_export_e2e_tests
 
 target_compile_definitions(pulsar_ffmpeg_export_e2e_tests
   PRIVATE
-    PULSAR_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+    PULSAR_SOURCE_DIR="${PULSAR_SOURCE_DIR}"
 )
 
 target_link_libraries(pulsar_ffmpeg_export_e2e_tests
   PRIVATE
     pulsar::media_ffmpeg
+    pulsar::ffmpeg_dependencies
     pulsar::project_file
     pulsar::application
     pulsar::domain
@@ -528,12 +621,13 @@ add_executable(pulsar_ffmpeg_audio_decode_session_tests
 
 target_compile_definitions(pulsar_ffmpeg_audio_decode_session_tests
   PRIVATE
-    PULSAR_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+    PULSAR_SOURCE_DIR="${PULSAR_SOURCE_DIR}"
 )
 
 target_link_libraries(pulsar_ffmpeg_audio_decode_session_tests
   PRIVATE
     pulsar::media_ffmpeg
+    pulsar::ffmpeg_dependencies
     pulsar::application
     pulsar::domain
 )
@@ -548,7 +642,7 @@ add_executable(pulsar_ffmpeg_waveform_source_tests
   media/ffmpeg_waveform_source_test.cpp
 )
 target_compile_definitions(pulsar_ffmpeg_waveform_source_tests
-  PRIVATE PULSAR_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+  PRIVATE PULSAR_SOURCE_DIR="${PULSAR_SOURCE_DIR}"
 )
 target_link_libraries(pulsar_ffmpeg_waveform_source_tests
   PRIVATE pulsar::media_ffmpeg pulsar::application pulsar::domain
@@ -569,6 +663,7 @@ target_compile_definitions(pulsar_ffmpeg_video_decode_session_tests
 target_link_libraries(pulsar_ffmpeg_video_decode_session_tests
   PRIVATE
     pulsar::media_ffmpeg
+    pulsar::ffmpeg_dependencies
     pulsar::domain
 )
 
@@ -618,7 +713,7 @@ add_test(NAME pulsar.application.still_media COMMAND pulsar_still_tests)
 add_executable(pulsar_ffmpeg_still_tests
   media/ffmpeg_still_test.cpp
 )
-target_compile_definitions(pulsar_ffmpeg_still_tests PRIVATE PULSAR_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_compile_definitions(pulsar_ffmpeg_still_tests PRIVATE PULSAR_SOURCE_DIR="${PULSAR_SOURCE_DIR}")
 target_link_libraries(pulsar_ffmpeg_still_tests PRIVATE pulsar::media_ffmpeg pulsar::application pulsar::domain)
 pulsar_apply_project_options(pulsar_ffmpeg_still_tests)
 pulsar_apply_compiler_warnings(pulsar_ffmpeg_still_tests)

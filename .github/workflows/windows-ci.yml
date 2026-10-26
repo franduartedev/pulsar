@@ -1,0 +1,127 @@
+name: Windows CI
+
+on:
+  push:
+    branches: [main, feature/pulsar-audio-fx, "claude/**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    runs-on: windows-2022
+    timeout-minutes: 90
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Configure MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: 6.8.3
+          arch: win64_msvc2022_64
+          modules: qtmultimedia
+          cache: true
+
+      - name: Install Ninja
+        shell: pwsh
+        run: choco install ninja --no-progress --yes
+
+      - name: Cache vcpkg FFmpeg artifacts
+        id: vcpkg-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            C:\vcpkg\installed
+            C:\vcpkg\packages
+            C:\vcpkg\downloads
+          key: windows-vcpkg-ffmpeg-x264-zlib-v1-${{ runner.os }}-${{ hashFiles('src/media/ffmpeg/CMakeLists.txt') }}
+          restore-keys: |
+            windows-vcpkg-ffmpeg-x264-zlib-v1-${{ runner.os }}-
+
+      - name: Install FFmpeg port
+        id: vcpkg-install
+        shell: pwsh
+        run: |
+          $vcpkg = (Get-Command vcpkg.exe).Source
+          $vcpkgRoot = Split-Path -Parent $vcpkg
+          vcpkg install ffmpeg[x264,zlib]:x64-windows --disable-metrics
+          "PULSAR_VCPKG_TOOLCHAIN=$vcpkgRoot/scripts/buildsystems/vcpkg.cmake" >> $env:GITHUB_ENV
+          "PULSAR_VCPKG_ROOT=$vcpkgRoot" >> $env:GITHUB_ENV
+
+      # Persist the expensive port build before the test gate. A failing test
+      # must not force the next Windows iteration to rebuild FFmpeg from zero.
+      - name: Save vcpkg FFmpeg artifacts
+        if: ${{ steps.vcpkg-install.outcome == 'success' && steps.vcpkg-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            C:\vcpkg\installed
+            C:\vcpkg\packages
+            C:\vcpkg\downloads
+          key: ${{ steps.vcpkg-cache.outputs.cache-primary-key }}
+
+      # Test-only dependency: the vcpkg ffmpeg port ships libraries without the
+      # CLI, so integration tests use a separately installed CLI. It is never
+      # linked into the product.
+      - name: Install FFmpeg CLI for tests
+        shell: pwsh
+        run: |
+          choco install ffmpeg --no-progress --yes
+          $ffmpeg = Join-Path $env:ProgramData 'chocolatey\bin\ffmpeg.exe'
+          if (-not (Test-Path $ffmpeg)) {
+            $ffmpeg = (Get-Command ffmpeg -ErrorAction Stop).Source
+          }
+          "PULSAR_TEST_FFMPEG_CLI=$ffmpeg" >> $env:GITHUB_ENV
+
+      - name: Configure
+        shell: pwsh
+        run: >-
+          cmake -S . -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_TOOLCHAIN_FILE="$env:PULSAR_VCPKG_TOOLCHAIN"
+          -DPULSAR_BUILD_DESKTOP=ON
+          -DPULSAR_TEST_FFMPEG_CLI="$env:PULSAR_TEST_FFMPEG_CLI"
+
+      - name: Build
+        # vcpkg's z-applocal post-link step copies the same FFmpeg DLLs into
+        # the shared test directory. Parallel Ninja links race on those files
+        # and intermittently fail with ERROR_SHARING_VIOLATION.
+        run: cmake --build build --parallel 1
+
+      - name: Test
+        id: tests
+        continue-on-error: true
+        shell: pwsh
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: ctest --test-dir build -C Release --output-on-failure
+
+      # Packaging must not depend on the test gate: a runnable .exe is
+      # needed to try the editor while individual tests are being fixed.
+      - name: Package portable bundle
+        shell: pwsh
+        run: .\packaging\windows\build-release.ps1 -BuildDir build -OutputDir dist -VcpkgRoot "$env:PULSAR_VCPKG_ROOT"
+
+      - name: Upload portable bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: pulsar-windows-portable
+          path: dist/*.zip
+
+      - name: Fail job if tests failed
+        if: ${{ steps.tests.outcome == 'failure' }}
+        shell: pwsh
+        run: |
+          Write-Error "ctest failed; the portable bundle was still uploaded."
+          exit 1

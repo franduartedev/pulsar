@@ -1,6 +1,7 @@
 #pragma once
 
 #include <pulsar/application/project/media_asset.hpp>
+#include <pulsar/application/subtitle/srt.hpp>
 #include <pulsar/domain/ids/ids.hpp>
 #include <pulsar/domain/timeline/timeline.hpp>
 #include <pulsar/domain/timeline/title.hpp>
@@ -50,6 +51,7 @@ struct ProjectSnapshot {
   std::vector<domain::TrackId> visual_track_ids{video_track_id};
   std::optional<ProjectCanvas> canvas{};
   std::vector<domain::Transition> transitions{};
+  std::vector<SubtitleCue> subtitles{};
 };
 
 // Throws on incomplete, duplicate, non-video, or missing-primary stack entries.

@@ -3,6 +3,7 @@
 #include "duration_sample_ring.hpp"
 
 #include <pulsar/application/commands/command_processor.hpp>
+#include <pulsar/application/audio/audio_recipe.hpp>
 #include <pulsar/application/audio/audio_output.hpp>
 #include <pulsar/application/playback/audio_playback_session.hpp>
 #include <pulsar/application/playback/timeline_playback_coordinator.hpp>
@@ -252,6 +253,15 @@ public:
   void set_clip_muted(domain::ClipId clip, bool muted);
   // Linear audio fades of a clip with sound (zero = none). One undo step.
   void set_clip_fades(domain::ClipId clip, domain::MediaTime fade_in, domain::MediaTime fade_out);
+  void set_clip_distant_music(domain::ClipId clip, domain::DistantMusicSettings settings);
+  void set_clip_telephone(domain::ClipId clip, domain::TelephoneSettings settings);
+  void set_clip_underwater(domain::ClipId clip, domain::UnderwaterSettings settings);
+  void set_clip_audio_effect_order(domain::ClipId clip,
+                                   std::vector<domain::AudioEffectType> order);
+  void reset_audio_effects(domain::ClipId clip);
+  void apply_audio_recipe(domain::ClipId clip, const application::AudioRecipe& recipe);
+  void relink_asset(domain::MediaId media, const std::filesystem::path& source_locator,
+                    const application::MediaProbe& probe);
   // Visual transform of a clip (position/scale/rotation/opacity). One undo step.
   void set_clip_visual_transform(domain::ClipId clip, domain::VisualTransform transform);
   void reset_clip_visual_transform(domain::ClipId clip);
@@ -263,6 +273,7 @@ public:
   void remove_selected_clip_transition();
   [[nodiscard]] bool selected_clip_has_transition() const;
   void set_track_audio_state(domain::TrackId track, domain::AudioTrackState state);
+  void set_project_canvas(application::ProjectCanvas canvas);
   // "Duplicar": a copy of the selected clip (or title) right after the original, on the same
   // track, with the same source range, gain, mute and fades. One undo step; the copy becomes the
   // selection. Throws DuplicateException{NoSpace} (nothing changes) when the room is taken.
@@ -280,6 +291,10 @@ public:
   domain::TitleId add_title_at_playhead();
   void replace_title(domain::Title title);                    // text / time / style: ONE undo step
   void delete_selected_title();
+  [[nodiscard]] const std::vector<application::SubtitleCue>& subtitles() const noexcept {
+    return document_.subtitles();
+  }
+  void replace_subtitles(std::vector<application::SubtitleCue> subtitles);
   // "Eliminar y cerrar hueco": removes the selected clip (t0..t1) and moves EVERY clip of
   // any track that starts at or after t1 earlier by exactly t1 - t0. Clips that start
   // before t1 stay, nothing is trimmed, nothing may overlap afterwards (otherwise

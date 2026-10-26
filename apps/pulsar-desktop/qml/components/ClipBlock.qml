@@ -13,6 +13,8 @@ Rectangle {
     property string clipName: ""
     property string startText: ""
     property string endText: ""
+    property real durationSeconds: 0
+    property var gainKeyframes: []
     property bool missing: false
     property bool selected: false
     property bool muted: false
@@ -175,6 +177,86 @@ Rectangle {
         Component.onDestruction: controller.detachWaveformItem(waveform)
     }
 
+    // Distant Music automation is visible directly on the clip, so the
+    // editor can read the intended entrance without opening the Inspector.
+    Canvas {
+        id: gainEnvelope
+        visible: block.gainKeyframes.length > 0 && waveform.visible
+        x: waveform.x; y: waveform.y; width: waveform.width; height: waveform.height
+        z: 3
+        onVisibleChanged: requestPaint()
+        onWidthChanged: requestPaint(); onHeightChanged: requestPaint()
+        Connections {
+            target: block
+            function onGainKeyframesChanged() { gainEnvelope.requestPaint() }
+            function onDurationSecondsChanged() { gainEnvelope.requestPaint() }
+        }
+        function pointX(time) {
+            return Math.max(0, Math.min(width, Number(time) / block.durationSeconds * width))
+        }
+        function pointY(value) {
+            var level = Math.max(0, Math.min(1, (Number(value) + 60) / 60))
+            return height - 4 - level * Math.max(4, height - 8)
+        }
+        function shapedProgress(progress, interpolation) {
+            if (Number(interpolation) === 0) return 0 // Hold
+            if (Number(interpolation) === 2) return progress * progress * (3 - 2 * progress) // Smooth
+            return progress // Linear
+        }
+        onPaint: {
+            var ctx = getContext("2d")
+            ctx.reset()
+            var keys = block.gainKeyframes
+            if (keys.length === 0 || block.durationSeconds <= 0) return
+            ctx.strokeStyle = Theme.focus
+            ctx.lineWidth = 1.5
+            ctx.beginPath()
+            ctx.moveTo(pointX(keys[0].time), pointY(keys[0].value))
+            for (var i = 0; i + 1 < keys.length; ++i) {
+                var left = keys[i]
+                var right = keys[i + 1]
+                var samples = 12
+                for (var sample = 1; sample <= samples; ++sample) {
+                    var progress = sample / samples
+                    var shaped = shapedProgress(progress, right.interpolation)
+                    var value = Number(left.value) + (Number(right.value) - Number(left.value)) * shaped
+                    var time = Number(left.time) + (Number(right.time) - Number(left.time)) * progress
+                    ctx.lineTo(pointX(time), pointY(value))
+                }
+            }
+            ctx.stroke()
+            ctx.fillStyle = Theme.focus
+            for (var j = 0; j < keys.length; ++j) {
+                var point = keys[j]
+                var px = pointX(point.time)
+                var py = pointY(point.value)
+                ctx.beginPath(); ctx.arc(px, py, 2.5, 0, 2 * Math.PI); ctx.fill()
+            }
+        }
+        MouseArea {
+            anchors.fill: parent
+            enabled: block.selected && block.audioClip && block.gainKeyframes.length > 0
+            acceptedButtons: Qt.LeftButton
+            cursorShape: enabled ? Qt.CrossCursor : Qt.ArrowCursor
+            onPressed: function(mouse) {
+                // Alt+click adds a point; regular clicks continue to the clip body.
+                mouse.accepted = (mouse.modifiers & Qt.AltModifier) !== 0
+            }
+            onClicked: function(mouse) {
+                if ((mouse.modifiers & Qt.AltModifier) === 0 || block.durationSeconds <= 0) return
+                var time = Math.max(0, Math.min(block.durationSeconds, mouse.x / width * block.durationSeconds))
+                var level = Math.max(0, Math.min(1, (height - 4 - mouse.y) / Math.max(4, height - 8)))
+                var value = -60 + level * 60
+                var next = controller.selectedDistantMusicGainKeyframes.slice()
+                for (var existing = 0; existing < next.length; ++existing)
+                    if (Math.abs(Number(next[existing].time) - time) < 0.01) return
+                next.push({time: time, value: value, interpolation: 1})
+                next.sort(function(a, b) { return Number(a.time) - Number(b.time) })
+                controller.setSelectedDistantMusicGainKeyframes(next)
+            }
+        }
+    }
+
     // Fades: translucent ramps over the clip's sound, drawn only when a fade exists.
     Canvas {
         id: fadeCanvas
@@ -205,10 +287,10 @@ Rectangle {
         }
     }
 
-    // Only states that are not the default: mute, offline.
+    // Only states that are not the default: mute, offline, or automated audio.
     Row {
         id: chips
-        visible: block.width > 90 && (block.muted || block.missing || speakerMouse.containsMouse)
+        visible: block.width > 90 && (block.muted || block.missing || block.gainKeyframes.length > 0 || speakerMouse.containsMouse)
         anchors.right: speaker.visible ? speaker.left : parent.right; anchors.rightMargin: speaker.visible ? 2 : 6
         anchors.top: parent.top; anchors.topMargin: 2
         spacing: 4
@@ -216,6 +298,8 @@ Rectangle {
             Text { id: offlineText; anchors.centerIn: parent; text: "Sin conexión"; color: Theme.textOnAccent; font.pixelSize: 10; font.bold: true } }
         Rectangle { visible: block.muted && !speakerMouse.containsMouse; height: 14; width: muteText.implicitWidth + 10; radius: 3; color: Theme.warning
             Text { id: muteText; anchors.centerIn: parent; text: "Silenciado"; color: Theme.textOnWarning; font.pixelSize: 10; font.bold: true } }
+        Rectangle { visible: block.gainKeyframes.length > 0 && !speakerMouse.containsMouse; height: 14; width: automationText.implicitWidth + 10; radius: 3; color: Theme.focus
+            Text { id: automationText; anchors.centerIn: parent; text: "Autom."; color: Theme.textOnAccent; font.pixelSize: 10; font.bold: true } }
         // Hover hint for the speaker (inside the clip: a floating tooltip would be clipped).
         Rectangle { visible: speakerMouse.containsMouse; height: 14; width: hintText.implicitWidth + 10; radius: 3; color: Theme.chipOverlay
             Text { id: hintText; anchors.centerIn: parent; text: block.muted ? "Activar audio (M)" : "Silenciar audio (M)"; color: Theme.textPrimary; font.pixelSize: 10; font.bold: true } }

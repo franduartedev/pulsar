@@ -548,6 +548,11 @@ void EditorSession::set_clip_audio_gain(domain::ClipId clip_id, double gain_db) 
   synchronize_document_state();
 }
 
+void EditorSession::set_project_canvas(application::ProjectCanvas canvas) {
+  processor_.set_project_canvas(std::move(canvas));
+  synchronize_document_state();
+}
+
 void EditorSession::set_clip_muted(domain::ClipId clip_id, bool muted) {
   processor_.set_clip_muted(clip_id, muted);
   synchronize_document_state();
@@ -620,6 +625,58 @@ void EditorSession::set_clip_fades(domain::ClipId clip, domain::MediaTime fade_i
     throw FadeException{FadeError::TooLong, "fade out of range"};
   }
   processor_.set_clip_fades(clip, fade_in, fade_out);
+  synchronize_document_state();
+}
+
+void EditorSession::set_clip_distant_music(domain::ClipId clip, domain::DistantMusicSettings settings) {
+  if (document_.timeline().find_clip(clip) == nullptr) throw std::invalid_argument{"unknown clip"};
+  processor_.set_clip_distant_music(clip, settings);
+  synchronize_document_state();
+}
+
+void EditorSession::set_clip_telephone(domain::ClipId clip, domain::TelephoneSettings settings) {
+  processor_.set_clip_telephone(clip, std::move(settings));
+  synchronize_document_state();
+}
+
+void EditorSession::set_clip_underwater(domain::ClipId clip, domain::UnderwaterSettings settings) {
+  processor_.set_clip_underwater(clip, std::move(settings));
+  synchronize_document_state();
+}
+
+void EditorSession::set_clip_audio_effect_order(
+    domain::ClipId clip, std::vector<domain::AudioEffectType> order) {
+  processor_.set_clip_audio_effect_order(clip, std::move(order));
+  synchronize_document_state();
+}
+
+void EditorSession::reset_audio_effects(domain::ClipId clip) {
+  if (document_.timeline().find_clip(clip) == nullptr) throw std::invalid_argument{"unknown clip"};
+  processor_.run_as_one_edit([&] {
+    processor_.set_clip_distant_music(clip, {});
+    processor_.set_clip_telephone(clip, {});
+    processor_.set_clip_underwater(clip, {});
+  });
+  synchronize_document_state();
+}
+
+void EditorSession::apply_audio_recipe(domain::ClipId clip,
+                                       const application::AudioRecipe& recipe) {
+  if (document_.timeline().find_clip(clip) == nullptr) throw std::invalid_argument{"unknown clip"};
+  processor_.run_as_one_edit([&] {
+    processor_.set_clip_distant_music(clip, recipe.distant_music);
+    processor_.set_clip_telephone(clip, recipe.telephone);
+    processor_.set_clip_underwater(clip, recipe.underwater);
+  });
+  synchronize_document_state();
+}
+
+void EditorSession::relink_asset(domain::MediaId media, const std::filesystem::path& source_locator,
+                                 const application::MediaProbe& probe) {
+  if (!document_.find_asset(media).has_value()) {
+    throw std::invalid_argument{"unknown media asset"};
+  }
+  processor_.relink_asset(media, source_locator, probe);
   synchronize_document_state();
 }
 
@@ -702,6 +759,11 @@ void EditorSession::remove_selected_clip_transition() {
 
 void EditorSession::set_track_audio_state(domain::TrackId track, domain::AudioTrackState state) {
   processor_.set_track_audio_state(track, state);
+  synchronize_document_state();
+}
+
+void EditorSession::replace_subtitles(std::vector<application::SubtitleCue> subtitles) {
+  processor_.replace_subtitles(std::move(subtitles));
   synchronize_document_state();
 }
 

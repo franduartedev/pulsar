@@ -2,8 +2,8 @@ import QtQuick
 import "../theme/Theme.js" as Theme
 
 // Contextual Inspector. VIDEO owns visual/title/transition controls, AUDIO
-// owns audible clip controls, and EFFECTS is an honest implemented-state
-// placeholder rather than a catalogue of non-functional controls.
+// owns audible clip controls, and EFFECTS exposes the currently supported
+// non-destructive audio processors.
 Panel {
     id: inspector
 
@@ -11,6 +11,14 @@ Panel {
     property string selRange: ""
     property bool detailsExpanded: false
     property int currentTab: 0 // 0 video, 1 audio, 2 effects
+
+    function setFx(gain, duration, startCutoff, endCutoff, reverb, curve, enabled) {
+        controller.setSelectedDistantMusic(gain, duration, startCutoff, endCutoff, reverb, curve, enabled)
+    }
+    function fxInput(value, fallback) {
+        var n = Number(value)
+        return isFinite(n) ? n : fallback
+    }
 
     function metaValue(key) {
         var text = controller.metadata
@@ -172,6 +180,76 @@ Panel {
             id: body
             width: parent.width
             spacing: Theme.spaceM
+
+            // ---- Pulse Map / Scene Cards ---------------------------------
+            InspectorSection {
+                id: pulseSection
+                first: true
+                heading: "PULSE MAP"
+                Text {
+                    width: parent.width
+                    wrapMode: Text.WordWrap
+                    text: controller.analysisRunning ? "Leyendo energía, transitorios y golpes…" :
+                          (controller.sceneCards.length > 0 ? "Mapa editorial listo: " + controller.sceneCards.length + " escenas" :
+                           "Detectá impactos y cambios de energía para encontrar cortes con intención.")
+                    color: Theme.textSecondary; font.pixelSize: Theme.fontSizeS
+                }
+                Canvas {
+                    id: pulseCanvas
+                    width: parent.width; height: 58
+                    visible: controller.pulseMap.length > 0
+                    onPaint: {
+                        var ctx = getContext("2d")
+                        ctx.clearRect(0, 0, width, height)
+                        ctx.fillStyle = Theme.bgInput
+                        ctx.fillRect(0, 0, width, height)
+                        var points = controller.pulseMap
+                        if (points.length < 1) return
+                        ctx.beginPath()
+                        for (var i = 0; i < points.length; ++i) {
+                            var x = points[i].time / Math.max(0.001, points[points.length - 1].time) * width
+                            var y = height - Math.min(1, Number(points[i].energy) * 2.0) * (height - 8) - 4
+                            if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y)
+                        }
+                        ctx.strokeStyle = Theme.accent; ctx.lineWidth = 1.5; ctx.stroke()
+                        ctx.fillStyle = Theme.warning
+                        for (var j = 0; j < points.length; ++j) {
+                            if (!points[j].pulse) continue
+                            var px = points[j].time / Math.max(0.001, points[points.length - 1].time) * width
+                            ctx.fillRect(px - 1, 2, 2, height - 4)
+                        }
+                    }
+                    Connections {
+                        target: controller
+                        function onAnalysisChanged() { pulseCanvas.requestPaint() }
+                    }
+                }
+                Row {
+                    width: parent.width; spacing: Theme.spaceS
+                    PButton {
+                        text: controller.analysisRunning ? "Cancelar análisis" : "Analizar clip"
+                        enabled: controller.analysisRunning || controller.selectedClipHasAudio
+                        onClicked: controller.analysisRunning ? controller.cancelAudioAnalysis() : controller.analyzeSelectedAudio()
+                    }
+                    Text { visible: controller.pulseMap.length > 0; anchors.verticalCenter: parent.verticalCenter; text: controller.pulseMap.length + " puntos"; color: Theme.textMuted; font.pixelSize: Theme.fontSizeXS }
+                }
+                Flow {
+                    width: parent.width; spacing: Theme.spaceS
+                    Repeater {
+                        model: controller.sceneCards
+                        delegate: Rectangle {
+                            required property var modelData
+                            width: Math.max(76, Math.min(112, pulseSection.width / 3 - 8)); height: 34
+                            radius: Theme.radiusS; color: Theme.bgInput; border.color: modelData.label === "Impact" ? Theme.warning : Theme.borderSubtle
+                            Column {
+                                anchors.centerIn: parent
+                                Text { anchors.horizontalCenter: parent.horizontalCenter; text: modelData.label; color: Theme.textPrimary; font.pixelSize: Theme.fontSizeXS; font.bold: true }
+                                Text { anchors.horizontalCenter: parent.horizontalCenter; text: modelData.pulses + " pulsos"; color: Theme.textMuted; font.pixelSize: 10 }
+                            }
+                        }
+                    }
+                }
+            }
 
             // ---- Nothing selected ------------------------------------------
             Column {
@@ -524,8 +602,109 @@ Panel {
             Column {
                 visible: inspector.currentTab === 2
                 width: parent.width; spacing: Theme.spaceS
-                Text { width: parent.width; text: "Sin efectos aplicados"; color: Theme.textSecondary; font.pixelSize: Theme.fontSizeM }
-                Text { width: parent.width; wrapMode: Text.WordWrap; text: "Los controles de efectos compatibles aparecerán acá."; color: Theme.textMuted; font.pixelSize: Theme.fontSizeS }
+                Text { width: parent.width; text: "PULSAR Audio FX"; color: Theme.textSecondary; font.pixelSize: Theme.fontSizeM; font.bold: true }
+                Text { width: parent.width; wrapMode: Text.WordWrap; text: "Distant Music: música que se acerca con volumen y agudos progresivos."; color: Theme.textMuted; font.pixelSize: Theme.fontSizeS }
+                FieldRow { visible: inspector.clipSelected && controller.selectedClipHasAudio; label: "Cadena"; Row { spacing: 4
+                        Repeater { model: controller.selectedAudioFxChain
+                            delegate: Row { spacing: 2
+                                Rectangle { width: chainLabel.implicitWidth + 16; height: Theme.controlHeightSmall; radius: Theme.radiusS; color: Theme.bgInput; border.width: 1; border.color: Theme.borderStrong
+                                    Text { id: chainLabel; anchors.centerIn: parent; text: modelData.name; color: Theme.textSecondary; font.pixelSize: Theme.fontSizeXS }
+                                }
+                                PButton { width: 18; height: Theme.controlHeightSmall; text: "↑"; onClicked: controller.moveSelectedAudioFx(modelData.id, -1) }
+                                PButton { width: 18; height: Theme.controlHeightSmall; text: "↓"; onClicked: controller.moveSelectedAudioFx(modelData.id, 1) }
+                            }
+                        }
+                        Text { visible: controller.selectedAudioFxChain.length === 0; text: "Sin efectos"; color: Theme.textMuted; font.pixelSize: Theme.fontSizeXS; verticalAlignment: Text.AlignVCenter; height: Theme.controlHeightSmall }
+                    } }
+                PButton { width: parent.width; height: Theme.controlHeightSmall; primary: true; text: "Aplicar preset Distant Music"; enabled: inspector.clipSelected && controller.selectedClipHasAudio; onClicked: controller.applySelectedDistantMusicPreset() }
+                FieldRow { visible: inspector.clipSelected && controller.selectedClipHasAudio; label: "Recetas"; Flow { width: parent.width; spacing: 4
+                        Repeater { model: controller.cinematicRecipes
+                            delegate: PButton { width: Math.max(58, implicitWidth + 14); height: Theme.controlHeightSmall; text: modelData.name; onClicked: controller.applySelectedCinematicRecipe(modelData.id) }
+                        }
+                    } }
+                FieldRow { visible: inspector.clipSelected && controller.selectedClipHasAudio; label: "Estado"; PButton { width: 90; height: Theme.controlHeightSmall; text: controller.selectedDistantMusicEnabled ? "Activado" : "Bypass"; onClicked: inspector.setFx(controller.selectedDistantMusicGainDb, controller.selectedDistantMusicDuration, controller.selectedDistantMusicStartCutoff, controller.selectedDistantMusicEndCutoff, controller.selectedDistantMusicReverb, controller.selectedDistantMusicCurve, !controller.selectedDistantMusicEnabled) } }
+                FieldRow { visible: inspector.clipSelected && controller.selectedClipHasAudio; label: "Distancia"; Rectangle { width: 72; height: Theme.controlHeightSmall; color: Theme.bgInput; radius: Theme.radiusM; border.width: 1; border.color: fxGain.activeFocus ? Theme.focus : Theme.borderStrong; TextInput { id: fxGain; anchors.fill: parent; anchors.leftMargin: 6; anchors.rightMargin: 22; verticalAlignment: TextInput.AlignVCenter; horizontalAlignment: TextInput.AlignRight; color: Theme.textPrimary; font.pixelSize: Theme.fontSizeS; font.family: Theme.mono; validator: DoubleValidator { bottom: -60; top: 0; decimals: 1 } text: Number(controller.selectedDistantMusicGainDb).toFixed(1); selectByMouse: true; onEditingFinished: { inspector.setFx(fxInput(text, -30), controller.selectedDistantMusicDuration, controller.selectedDistantMusicStartCutoff, controller.selectedDistantMusicEndCutoff, controller.selectedDistantMusicReverb, controller.selectedDistantMusicCurve, true); focus = false } } Text { anchors.right: parent.right; anchors.rightMargin: 6; anchors.verticalCenter: parent.verticalCenter; text: "dB"; color: Theme.textMuted; font.pixelSize: Theme.fontSizeXS } } }
+                FieldRow { visible: inspector.clipSelected && controller.selectedClipHasAudio; label: "Duración"; Rectangle { width: 72; height: Theme.controlHeightSmall; color: Theme.bgInput; radius: Theme.radiusM; border.width: 1; border.color: fxDuration.activeFocus ? Theme.focus : Theme.borderStrong; TextInput { id: fxDuration; anchors.fill: parent; anchors.leftMargin: 6; anchors.rightMargin: 22; verticalAlignment: TextInput.AlignVCenter; horizontalAlignment: TextInput.AlignRight; color: Theme.textPrimary; font.pixelSize: Theme.fontSizeS; font.family: Theme.mono; validator: DoubleValidator { bottom: 0.1; top: 60; decimals: 2 } text: Number(controller.selectedDistantMusicDuration).toFixed(1); selectByMouse: true; onEditingFinished: { inspector.setFx(controller.selectedDistantMusicGainDb, fxInput(text, 4), controller.selectedDistantMusicStartCutoff, controller.selectedDistantMusicEndCutoff, controller.selectedDistantMusicReverb, controller.selectedDistantMusicCurve, true); focus = false } } Text { anchors.right: parent.right; anchors.rightMargin: 6; anchors.verticalCenter: parent.verticalCenter; text: "s"; color: Theme.textMuted; font.pixelSize: Theme.fontSizeXS } } }
+                FieldRow { visible: inspector.clipSelected && controller.selectedClipHasAudio; label: "Filtro inicial"; PSlider { width: 130; value: Math.log(Math.max(20, controller.selectedDistantMusicStartCutoff) / 20) / Math.log(1000); onMoved: function(v) { inspector.setFx(controller.selectedDistantMusicGainDb, controller.selectedDistantMusicDuration, 20 * Math.pow(1000, v), controller.selectedDistantMusicEndCutoff, controller.selectedDistantMusicReverb, controller.selectedDistantMusicCurve, true) } } Text { text: Math.round(controller.selectedDistantMusicStartCutoff) + " Hz"; color: Theme.textMuted; font.pixelSize: Theme.fontSizeXS } }
+                FieldRow { visible: inspector.clipSelected && controller.selectedClipHasAudio; label: "Filtro final"; PSlider { width: 130; value: Math.log(Math.max(20, controller.selectedDistantMusicEndCutoff) / 20) / Math.log(1000); onMoved: function(v) { inspector.setFx(controller.selectedDistantMusicGainDb, controller.selectedDistantMusicDuration, controller.selectedDistantMusicStartCutoff, 20 * Math.pow(1000, v), controller.selectedDistantMusicReverb, controller.selectedDistantMusicCurve, true) } } Text { text: Math.round(controller.selectedDistantMusicEndCutoff) + " Hz"; color: Theme.textMuted; font.pixelSize: Theme.fontSizeXS } }
+                FieldRow { visible: inspector.clipSelected && controller.selectedClipHasAudio; label: "Reverb"; Segmented { width: 150; model: ["Sin", "Ligera", "Más"]; current: controller.selectedDistantMusicReverb < 0.05 ? 0 : controller.selectedDistantMusicReverb < 0.3 ? 1 : 2; onActivated: function(index) { controller.setSelectedDistantMusic(controller.selectedDistantMusicGainDb, controller.selectedDistantMusicDuration, controller.selectedDistantMusicStartCutoff, controller.selectedDistantMusicEndCutoff, [0, 0.18, 0.45][index], controller.selectedDistantMusicCurve, true) } } }
+                FieldRow { visible: inspector.clipSelected && controller.selectedClipHasAudio; label: "Curva"; Segmented { width: 180; model: ["Suave", "Progresiva", "Explosiva"]; current: controller.selectedDistantMusicCurve; onActivated: function(index) { controller.setSelectedDistantMusic(controller.selectedDistantMusicGainDb, controller.selectedDistantMusicDuration, controller.selectedDistantMusicStartCutoff, controller.selectedDistantMusicEndCutoff, controller.selectedDistantMusicReverb, index, true) } } }
+                FieldRow { visible: inspector.clipSelected && controller.selectedClipHasAudio; label: "Automatización"; Text { text: controller.selectedDistantMusicKeyframeCount + " keyframes"; color: Theme.textSecondary; font.pixelSize: Theme.fontSizeS } }
+                Text { visible: inspector.clipSelected && controller.selectedClipHasAudio && controller.selectedDistantMusicKeyframeCount > 0; width: parent.width; wrapMode: Text.WordWrap; text: "Tip: Alt + clic en la curva de la timeline agrega un keyframe."; color: Theme.textMuted; font.pixelSize: Theme.fontSizeXS }
+                Row { visible: inspector.clipSelected && controller.selectedClipHasAudio; width: parent.width; spacing: Theme.spaceS
+                    PButton { width: (parent.width - Theme.spaceS) / 2; height: Theme.controlHeightSmall; text: "Crear entrada/salida"; onClicked: controller.setSelectedDistantMusicGainKeyframes([{time: 0, value: controller.selectedDistantMusicGainDb, interpolation: 0}, {time: controller.selectedDistantMusicDuration, value: 0, interpolation: 2}]) }
+                    PButton { width: (parent.width - Theme.spaceS) / 2; height: Theme.controlHeightSmall; text: "Limpiar"; onClicked: controller.setSelectedDistantMusicGainKeyframes([]) }
+                }
+                Column { visible: inspector.clipSelected && controller.selectedClipHasAudio && controller.selectedDistantMusicKeyframeCount > 0; width: parent.width; spacing: 4
+                    Repeater { model: controller.selectedDistantMusicGainKeyframes
+                        delegate: Row { width: parent.width; spacing: 4
+                            Text { width: 16; text: (index + 1); color: Theme.textMuted; font.pixelSize: Theme.fontSizeXS; anchors.verticalCenter: parent.verticalCenter }
+                            Rectangle { width: 54; height: Theme.controlHeightSmall; color: Theme.bgInput; radius: Theme.radiusM; border.width: 1; border.color: keyTime.activeFocus ? Theme.focus : Theme.borderStrong
+                                TextInput { id: keyTime; anchors.fill: parent; anchors.margins: 5; text: Number(modelData.time).toFixed(2); color: Theme.textPrimary; font.family: Theme.mono; font.pixelSize: Theme.fontSizeXS; validator: DoubleValidator { bottom: 0; top: 60; decimals: 2 } onEditingFinished: controller.setSelectedDistantMusicGainKeyframe(index, Number(text), Number(modelData.value), Number(modelData.interpolation)) }
+                            }
+                            Rectangle { width: 54; height: Theme.controlHeightSmall; color: Theme.bgInput; radius: Theme.radiusM; border.width: 1; border.color: keyValue.activeFocus ? Theme.focus : Theme.borderStrong
+                                TextInput { id: keyValue; anchors.fill: parent; anchors.margins: 5; text: Number(modelData.value).toFixed(1); color: Theme.textPrimary; font.family: Theme.mono; font.pixelSize: Theme.fontSizeXS; validator: DoubleValidator { bottom: -60; top: 0; decimals: 1 } onEditingFinished: controller.setSelectedDistantMusicGainKeyframe(index, Number(modelData.time), Number(text), Number(modelData.interpolation)) }
+                            }
+                            Segmented { width: 92; model: ["H", "L", "S"]; current: Number(modelData.interpolation); onActivated: function(choice) { controller.setSelectedDistantMusicGainKeyframe(index, Number(modelData.time), Number(modelData.value), choice) } }
+                            PButton { width: 24; height: Theme.controlHeightSmall; text: "×"; onClicked: controller.removeSelectedDistantMusicGainKeyframe(index) }
+                        }
+                    }
+                }
+                Canvas { visible: inspector.clipSelected && controller.selectedClipHasAudio; width: parent.width; height: 54; antialiasing: true; onPaint: { var p = getContext("2d"); p.clearRect(0, 0, width, height); p.strokeStyle = Theme.borderStrong; p.lineWidth = 1; p.beginPath(); p.moveTo(0, height - 1); p.lineTo(width, height - 1); p.stroke(); p.strokeStyle = Theme.accent; p.lineWidth = 2; p.beginPath(); for (var i = 0; i <= 40; ++i) { var x = width * i / 40; var q = i / 40; var shaped = controller.selectedDistantMusicCurve === 0 ? q*q*(3-2*q) : controller.selectedDistantMusicCurve === 2 ? Math.sqrt(q) : q*q; var y = height - 4 - shaped * (height - 10); if (i === 0) p.moveTo(x, y); else p.lineTo(x, y); } p.stroke(); var keys = controller.selectedDistantMusicGainKeyframes; for (var k = 0; k < keys.length; ++k) { var key = keys[k]; var kx = width * Math.max(0, Math.min(1, key.time / Math.max(0.1, controller.selectedDistantMusicDuration))); var ky = height - 4 - Math.max(0, Math.min(1, (key.value - controller.selectedDistantMusicGainDb) / Math.max(0.1, 0 - controller.selectedDistantMusicGainDb))) * (height - 10); p.fillStyle = Theme.focus; p.beginPath(); p.arc(kx, ky, 3, 0, 2 * Math.PI); p.fill(); } } Connections { target: controller; function onTimelineChanged() { parent.requestPaint() } } }
+                InspectorSection {
+                    visible: inspector.clipSelected && controller.selectedClipHasAudio
+                    heading: "TELEPHONE"
+                    Text { width: parent.width; wrapMode: Text.WordWrap; text: "Banda estrecha y saturación suave para radio, llamada o memoria sonora."; color: Theme.textMuted; font.pixelSize: Theme.fontSizeS }
+                    Row { width: parent.width; spacing: Theme.spaceS
+                        PButton { width: (parent.width - Theme.spaceS) / 2; height: Theme.controlHeightSmall; primary: true; text: "Aplicar Telephone"; onClicked: controller.applySelectedTelephonePreset() }
+                        PButton { width: (parent.width - Theme.spaceS) / 2; height: Theme.controlHeightSmall; text: controller.selectedTelephoneEnabled ? "Bypass" : "Activar"; onClicked: controller.setSelectedTelephone(controller.selectedTelephoneMix, controller.selectedTelephoneDrive, !controller.selectedTelephoneEnabled) }
+                    }
+                    FieldRow { label: "Mezcla"; PSlider { width: 150; value: controller.selectedTelephoneMix; onMoved: controller.setSelectedTelephone(value, controller.selectedTelephoneDrive, true) } Text { text: Math.round(controller.selectedTelephoneMix * 100) + "%"; color: Theme.textMuted; font.pixelSize: Theme.fontSizeXS } }
+                    FieldRow { label: "Drive"; PSlider { width: 150; value: controller.selectedTelephoneDrive; onMoved: controller.setSelectedTelephone(controller.selectedTelephoneMix, value, true) } Text { text: Math.round(controller.selectedTelephoneDrive * 100) + "%"; color: Theme.textMuted; font.pixelSize: Theme.fontSizeXS } }
+                    Row { width: parent.width; spacing: Theme.spaceS
+                        PButton { width: (parent.width - Theme.spaceS) / 2; height: Theme.controlHeightSmall; text: "Automatizar mezcla"; onClicked: controller.setSelectedTelephoneMixKeyframes([{time: 0, value: 0, interpolation: 0}, {time: 1.5, value: 1, interpolation: 2}]) }
+                        PButton { width: (parent.width - Theme.spaceS) / 2; height: Theme.controlHeightSmall; text: "Limpiar"; enabled: controller.selectedTelephoneMixKeyframeCount > 0; onClicked: controller.setSelectedTelephoneMixKeyframes([]) }
+                    }
+                    Text { width: parent.width; text: controller.selectedTelephoneMixKeyframeCount === 0 ? "Sin automatización: la mezcla es constante." : controller.selectedTelephoneMixKeyframeCount + " puntos de mezcla"; color: Theme.textMuted; font.pixelSize: Theme.fontSizeXS }
+                    Repeater { model: controller.selectedTelephoneMixKeyframes
+                        delegate: Row { width: parent.width; spacing: Theme.spaceXS
+                            Text { text: "t"; color: Theme.textMuted; width: 12; verticalAlignment: Text.AlignVCenter; height: Theme.controlHeightSmall }
+                            TextInput { width: 52; text: Number(modelData.time).toFixed(2); color: Theme.textPrimary; validator: DoubleValidator { bottom: 0; top: 60; decimals: 2 } onEditingFinished: controller.setSelectedTelephoneMixKeyframe(index, Number(text), modelData.value, modelData.interpolation) }
+                            TextInput { width: 42; text: Math.round(Number(modelData.value) * 100).toString(); color: Theme.textPrimary; validator: DoubleValidator { bottom: 0; top: 100; decimals: 1 } onEditingFinished: controller.setSelectedTelephoneMixKeyframe(index, modelData.time, Number(text) / 100, modelData.interpolation) }
+                            Text { text: "%"; color: Theme.textMuted; font.pixelSize: Theme.fontSizeXS; verticalAlignment: Text.AlignVCenter; height: Theme.controlHeightSmall }
+                            PButton { width: 24; height: Theme.controlHeightSmall; text: "×"; onClicked: controller.removeSelectedTelephoneMixKeyframe(index) }
+                        }
+                    }
+                    Canvas { visible: inspector.clipSelected && controller.selectedClipHasAudio; width: parent.width; height: 48; antialiasing: true; onPaint: { var p = getContext("2d"); var keys = controller.selectedTelephoneMixKeyframes; p.clearRect(0, 0, width, height); p.strokeStyle = Theme.borderStrong; p.lineWidth = 1; p.beginPath(); p.moveTo(0, height - 1); p.lineTo(width, height - 1); p.stroke(); p.strokeStyle = Theme.accent; p.lineWidth = 2; p.beginPath(); if (keys.length === 0) { p.moveTo(0, height / 2); p.lineTo(width, height / 2); } else { var maxTime = Math.max(0.1, Number(keys[keys.length - 1].time)); for (var i = 0; i < keys.length; ++i) { var key = keys[i]; var x = width * Math.max(0, Math.min(1, Number(key.time) / maxTime)); var y = height - 4 - Math.max(0, Math.min(1, Number(key.value))) * (height - 10); if (i === 0) p.moveTo(x, y); else p.lineTo(x, y); } } p.stroke(); p.fillStyle = Theme.focus; for (var k = 0; k < keys.length; ++k) { var point = keys[k]; var px = width * Math.max(0, Math.min(1, Number(point.time) / Math.max(0.1, Number(keys[keys.length - 1].time)))); var py = height - 4 - Math.max(0, Math.min(1, Number(point.value))) * (height - 10); p.beginPath(); p.arc(px, py, 3, 0, 2 * Math.PI); p.fill(); } } Connections { target: controller; function onTimelineChanged() { parent.requestPaint() } } }
+                }
+                InspectorSection {
+                    visible: inspector.clipSelected && controller.selectedClipHasAudio
+                    heading: "UNDERWATER"
+                    Text { width: parent.width; wrapMode: Text.WordWrap; text: "Música sumergida: graves suaves, agudos velados y movimiento espacial sutil."; color: Theme.textMuted; font.pixelSize: Theme.fontSizeS }
+                    Row { width: parent.width; spacing: Theme.spaceS
+                        PButton { width: (parent.width - Theme.spaceS) / 2; height: Theme.controlHeightSmall; primary: true; text: "Aplicar Underwater"; onClicked: controller.applySelectedUnderwaterPreset() }
+                        PButton { width: (parent.width - Theme.spaceS) / 2; height: Theme.controlHeightSmall; text: controller.selectedUnderwaterEnabled ? "Bypass" : "Activar"; onClicked: controller.setSelectedUnderwater(controller.selectedUnderwaterMix, controller.selectedUnderwaterDepth, !controller.selectedUnderwaterEnabled) }
+                    }
+                    FieldRow { label: "Mezcla"; PSlider { width: 150; value: controller.selectedUnderwaterMix; onMoved: controller.setSelectedUnderwater(value, controller.selectedUnderwaterDepth, true) } Text { text: Math.round(controller.selectedUnderwaterMix * 100) + "%"; color: Theme.textMuted; font.pixelSize: Theme.fontSizeXS } }
+                    FieldRow { label: "Profundidad"; PSlider { width: 150; value: controller.selectedUnderwaterDepth; onMoved: controller.setSelectedUnderwater(controller.selectedUnderwaterMix, value, true) } Text { text: Math.round(controller.selectedUnderwaterDepth * 100) + "%"; color: Theme.textMuted; font.pixelSize: Theme.fontSizeXS } }
+                    FieldRow { label: "Automatización"; Text { text: controller.selectedUnderwaterDepthKeyframeCount + " keyframes"; color: Theme.textSecondary; font.pixelSize: Theme.fontSizeS } }
+                    Row { width: parent.width; spacing: Theme.spaceS
+                        PButton { width: (parent.width - Theme.spaceS) / 2; height: Theme.controlHeightSmall; text: "Crear movimiento"; onClicked: controller.setSelectedUnderwaterDepthKeyframes([{time: 0, value: controller.selectedUnderwaterDepth, interpolation: 0}, {time: 2, value: 0.2, interpolation: 2}]) }
+                        PButton { width: (parent.width - Theme.spaceS) / 2; height: Theme.controlHeightSmall; text: "Limpiar"; onClicked: controller.setSelectedUnderwaterDepthKeyframes([]) }
+                    }
+                    Column { visible: controller.selectedUnderwaterDepthKeyframeCount > 0; width: parent.width; spacing: 4
+                        Repeater { model: controller.selectedUnderwaterDepthKeyframes
+                            delegate: Row { width: parent.width; spacing: 4
+                                Text { width: 16; text: "#" + (index + 1); color: Theme.textMuted; font.pixelSize: Theme.fontSizeXS; verticalAlignment: Text.AlignVCenter }
+                                TextInput { width: 58; text: Number(modelData.time).toFixed(2); color: Theme.textPrimary; font.family: Theme.mono; font.pixelSize: Theme.fontSizeXS; validator: DoubleValidator { bottom: 0; top: 60; decimals: 2 } onEditingFinished: controller.setSelectedUnderwaterDepthKeyframe(index, Number(text), Number(modelData.value), Number(modelData.interpolation)) }
+                                TextInput { width: 58; text: Number(modelData.value * 100).toFixed(0); color: Theme.textPrimary; font.family: Theme.mono; font.pixelSize: Theme.fontSizeXS; validator: DoubleValidator { bottom: 0; top: 100; decimals: 0 } onEditingFinished: controller.setSelectedUnderwaterDepthKeyframe(index, Number(modelData.time), Number(text) / 100, Number(modelData.interpolation)) }
+                                PButton { width: 24; height: Theme.controlHeightSmall; text: "×"; onClicked: controller.removeSelectedUnderwaterDepthKeyframe(index) }
+                            }
+                        }
+                    }
+                }
+                PButton { visible: inspector.clipSelected && controller.selectedClipHasAudio; width: parent.width; height: Theme.controlHeightSmall; text: "Restablecer todos los efectos"; onClicked: controller.resetSelectedAudioEffects() }
+                Text { visible: inspector.clipSelected && !controller.selectedClipHasAudio; width: parent.width; wrapMode: Text.WordWrap; text: "Seleccioná un clip con audio para aplicar Distant Music."; color: Theme.textMuted; font.pixelSize: Theme.fontSizeS }
             }
 
             // ---- MEDIO (informative) -----------------------------------------

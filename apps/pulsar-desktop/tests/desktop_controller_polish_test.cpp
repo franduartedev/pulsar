@@ -97,7 +97,9 @@ int main(int argc, char** argv) {
   const auto canvas_record = project_text.find("CANVAS 320 180 ");
   REQUIRE(181, canvas_record != std::string::npos);
   project_text.replace(canvas_record, std::string{"CANVAS 320 180 "}.size(), "CANVAS 1920 1080 ");
-  std::ofstream{geometry_project, std::ios::trunc} << project_text;
+  // Project files are canonical LF. Binary mode keeps the fixture identical on
+  // Windows, where text-mode streams otherwise translate LF to CRLF.
+  std::ofstream{geometry_project, std::ios::binary | std::ios::trunc} << project_text;
   REQUIRE(182, controller.openProject(QString::fromStdString(geometry_project.string())));
   REQUIRE(183, wait_until([&] { return controller.hasVideoMedia() && !controller.busy(); }));
   controller.selectTimelineClip(clip_key(controller, 0));

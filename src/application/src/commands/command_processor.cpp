@@ -9,6 +9,13 @@
 namespace pulsar::application {
 namespace {
 
+void validate_project_canvas(const ProjectCanvas& canvas) {
+  if (canvas.width <= 0 || canvas.height <= 0 || canvas.width > 32768 ||
+      canvas.height > 32768 || static_cast<std::int64_t>(canvas.width) * canvas.height > 64'000'000) {
+    throw std::invalid_argument{"invalid project canvas dimensions"};
+  }
+}
+
 struct ClipLocation {
   domain::TrackId track_id;
   domain::Clip clip;
@@ -52,6 +59,11 @@ void CommandProcessor::set_track_audio_state(domain::TrackId track_id,
   const auto* track = document_.timeline().find_track(track_id);
   if (track != nullptr && track->audio_state() == state) return;
   execute(SetTrackAudioStateCommand{track_id, state});
+}
+
+void CommandProcessor::set_project_canvas(ProjectCanvas canvas) {
+  validate_project_canvas(canvas);
+  execute(SetProjectCanvasCommand{std::move(canvas)});
 }
 
 void CommandProcessor::execute(Command command) {
@@ -109,6 +121,11 @@ void CommandProcessor::replace_title(domain::Title title) { execute(ReplaceTitle
 
 void CommandProcessor::remove_title(domain::TitleId id) { execute(RemoveTitleCommand{id}); }
 
+void CommandProcessor::replace_subtitles(std::vector<SubtitleCue> subtitles) {
+  if (subtitles == document_.subtitles()) return;
+  execute(ReplaceSubtitlesCommand{std::move(subtitles)});
+}
+
 void CommandProcessor::add_transition(domain::Transition transition) {
   execute(AddTransitionCommand{std::move(transition)});
 }
@@ -157,6 +174,37 @@ void CommandProcessor::set_clip_fades(domain::ClipId clip_id, domain::MediaTime 
     return;
   }
   execute(SetClipFadesCommand{clip_id, fade_in, fade_out});
+}
+
+void CommandProcessor::set_clip_distant_music(domain::ClipId clip_id,
+                                               domain::DistantMusicSettings settings) {
+  settings.validate();
+  if (const auto* clip = document_.timeline().find_clip(clip_id);
+      clip != nullptr && clip->distant_music() == settings) return;
+  execute(SetClipDistantMusicCommand{clip_id, settings});
+}
+
+void CommandProcessor::set_clip_telephone(domain::ClipId clip_id,
+                                          domain::TelephoneSettings settings) {
+  const auto* clip = document_.timeline().find_clip(clip_id);
+  if (clip != nullptr && clip->telephone() == settings) return;
+  execute(SetClipTelephoneCommand{clip_id, std::move(settings)});
+}
+
+void CommandProcessor::set_clip_underwater(domain::ClipId clip_id,
+                                           domain::UnderwaterSettings settings) {
+  settings.validate();
+  const auto* clip = document_.timeline().find_clip(clip_id);
+  if (clip != nullptr && clip->underwater() == settings) return;
+  execute(SetClipUnderwaterCommand{clip_id, std::move(settings)});
+}
+
+void CommandProcessor::set_clip_audio_effect_order(
+    domain::ClipId clip_id, std::vector<domain::AudioEffectType> order) {
+  domain::validate_audio_effect_order(order);
+  const auto* clip = document_.timeline().find_clip(clip_id);
+  if (clip != nullptr && clip->audio_effect_order() == order) return;
+  execute(SetClipAudioEffectOrderCommand{clip_id, std::move(order)});
 }
 
 void CommandProcessor::set_clip_visual_transform(domain::ClipId clip_id,
@@ -234,6 +282,15 @@ domain::MediaId CommandProcessor::import_asset(const std::filesystem::path& sour
   MediaAsset asset = document_.build_asset(source_locator, probe, id);
   execute(ImportAssetCommand{std::move(asset)});
   return id;
+}
+
+void CommandProcessor::relink_asset(domain::MediaId media_id,
+                                    const std::filesystem::path& source_locator,
+                                    const MediaProbe& probe) {
+  if (!document_.find_asset(media_id).has_value()) {
+    throw std::invalid_argument{"media asset does not exist in document"};
+  }
+  execute(ReplaceAssetCommand{document_.build_asset(source_locator, probe, media_id)});
 }
 
 bool CommandProcessor::can_undo() const noexcept { return !undo_stack_.empty(); }
@@ -385,6 +442,9 @@ void CommandProcessor::apply(ProjectDocument& document, const Command& command, 
                       concrete_command.track_id);
         } else if constexpr (std::is_same_v<CommandType, SetTrackAudioStateCommand>) {
           timeline.set_track_audio_state(concrete_command.track_id, concrete_command.state);
+        } else if constexpr (std::is_same_v<CommandType, SetProjectCanvasCommand>) {
+          if (concrete_command.canvas.has_value()) validate_project_canvas(*concrete_command.canvas);
+          document.canvas_ = concrete_command.canvas;
         } else if constexpr (std::is_same_v<CommandType, AddClipCommand>) {
           bool promote_still_canvas = false;
           if (document.canvas_ && document.canvas_->provisional_still &&
@@ -455,6 +515,14 @@ void CommandProcessor::apply(ProjectDocument& document, const Command& command, 
           timeline.set_clip_muted(concrete_command.clip_id, concrete_command.muted);
         } else if constexpr (std::is_same_v<CommandType, SetClipFadesCommand>) {
           timeline.set_clip_fades(concrete_command.clip_id, concrete_command.fade_in, concrete_command.fade_out);
+        } else if constexpr (std::is_same_v<CommandType, SetClipDistantMusicCommand>) {
+          timeline.set_clip_distant_music(concrete_command.clip_id, concrete_command.settings);
+        } else if constexpr (std::is_same_v<CommandType, SetClipTelephoneCommand>) {
+          timeline.set_clip_telephone(concrete_command.clip_id, concrete_command.settings);
+        } else if constexpr (std::is_same_v<CommandType, SetClipUnderwaterCommand>) {
+          timeline.set_clip_underwater(concrete_command.clip_id, concrete_command.settings);
+        } else if constexpr (std::is_same_v<CommandType, SetClipAudioEffectOrderCommand>) {
+          timeline.set_clip_audio_effect_order(concrete_command.clip_id, concrete_command.order);
         } else if constexpr (std::is_same_v<CommandType, SetClipVisualTransformCommand>) {
           timeline.set_clip_visual_transform(concrete_command.clip_id, concrete_command.transform);
         } else if constexpr (std::is_same_v<CommandType, RestoreClipCommand>) {
@@ -476,6 +544,8 @@ void CommandProcessor::apply(ProjectDocument& document, const Command& command, 
           }
         } else if constexpr (std::is_same_v<CommandType, RemoveAssetCommand>) {
           document.remove_asset_value(concrete_command.media_id);
+        } else if constexpr (std::is_same_v<CommandType, ReplaceAssetCommand>) {
+          document.replace_asset_value(concrete_command.asset);
         } else if constexpr (std::is_same_v<CommandType, AddTitleCommand>) {
           if (mode == ApplyMode::NewEdit) {
             if (concrete_command.title.id() != document.allocator_.next_title()) {
@@ -489,6 +559,8 @@ void CommandProcessor::apply(ProjectDocument& document, const Command& command, 
           document.remove_title_value(concrete_command.title_id);
         } else if constexpr (std::is_same_v<CommandType, ReplaceTitleCommand>) {
           document.replace_title_value(concrete_command.title);
+        } else if constexpr (std::is_same_v<CommandType, ReplaceSubtitlesCommand>) {
+          document.replace_subtitles_value(concrete_command.subtitles);
         } else if constexpr (std::is_same_v<CommandType, AddTransitionCommand>) {
           document.add_transition_value(concrete_command.transition);
         } else if constexpr (std::is_same_v<CommandType, RemoveTransitionCommand>) {
@@ -525,6 +597,8 @@ Command CommandProcessor::build_inverse(const ProjectDocument& document, const C
           const auto* track = document.timeline().find_track(concrete_command.track_id);
           if (track == nullptr) throw std::invalid_argument{"track id does not exist in timeline"};
           return SetTrackAudioStateCommand{concrete_command.track_id, track->audio_state()};
+        } else if constexpr (std::is_same_v<CommandType, SetProjectCanvasCommand>) {
+          return SetProjectCanvasCommand{document.canvas_};
         } else if constexpr (std::is_same_v<CommandType, AddClipCommand>) {
           return RemoveClipCommand{concrete_command.clip.id()};
         } else if constexpr (std::is_same_v<CommandType, RemoveClipCommand>) {
@@ -545,6 +619,10 @@ Command CommandProcessor::build_inverse(const ProjectDocument& document, const C
         } else if constexpr (std::is_same_v<CommandType, SetClipAudioGainCommand> ||
                              std::is_same_v<CommandType, SetClipMutedCommand> ||
                              std::is_same_v<CommandType, SetClipFadesCommand> ||
+                             std::is_same_v<CommandType, SetClipDistantMusicCommand> ||
+                             std::is_same_v<CommandType, SetClipTelephoneCommand> ||
+                             std::is_same_v<CommandType, SetClipUnderwaterCommand> ||
+                             std::is_same_v<CommandType, SetClipAudioEffectOrderCommand> ||
                              std::is_same_v<CommandType, SetClipVisualTransformCommand>) {
           const ClipLocation location = find_clip_location(document, concrete_command.clip_id);
           return RestoreClipCommand{location.track_id, location.clip};
@@ -558,6 +636,8 @@ Command CommandProcessor::build_inverse(const ProjectDocument& document, const C
           const auto* existing = document.find_title(concrete_command.title.id());
           if (existing == nullptr) throw std::invalid_argument{"title does not exist in document"};
           return ReplaceTitleCommand{*existing};
+        } else if constexpr (std::is_same_v<CommandType, ReplaceSubtitlesCommand>) {
+          return ReplaceSubtitlesCommand{document.subtitles()};
         } else if constexpr (std::is_same_v<CommandType, AddTransitionCommand>) {
           return RemoveTransitionCommand{concrete_command.transition};
         } else if constexpr (std::is_same_v<CommandType, RemoveTransitionCommand>) {
@@ -569,6 +649,12 @@ Command CommandProcessor::build_inverse(const ProjectDocument& document, const C
           return AddTransitionCommand{concrete_command.transition};
         } else if constexpr (std::is_same_v<CommandType, ImportAssetCommand>) {
           return RemoveAssetCommand{concrete_command.asset.id()};
+        } else if constexpr (std::is_same_v<CommandType, ReplaceAssetCommand>) {
+          const auto existing = document.find_asset(concrete_command.asset.id());
+          if (!existing.has_value()) {
+            throw std::invalid_argument{"media asset does not exist in document"};
+          }
+          return ReplaceAssetCommand{*existing};
         } else {
           throw std::invalid_argument{"inverse-only command cannot start a new history edit"};
         }

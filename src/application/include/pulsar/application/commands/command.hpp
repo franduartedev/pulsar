@@ -1,10 +1,12 @@
 #pragma once
 
 #include <pulsar/application/project/media_asset.hpp>
+#include <pulsar/application/project/project_snapshot.hpp>
 #include <pulsar/domain/ids/ids.hpp>
 #include <pulsar/domain/time/media_time.hpp>
 #include <pulsar/domain/timeline/clip.hpp>
 #include <pulsar/domain/timeline/title.hpp>
+#include <pulsar/domain/timeline/underwater.hpp>
 #include <pulsar/domain/timeline/transition.hpp>
 #include <pulsar/domain/timeline/track_kind.hpp>
 #include <pulsar/domain/timeline/track.hpp>
@@ -35,6 +37,10 @@ struct ReorderVisualTrackCommand {
 struct SetTrackAudioStateCommand {
   domain::TrackId track_id;
   domain::AudioTrackState state;
+};
+
+struct SetProjectCanvasCommand {
+  std::optional<ProjectCanvas> canvas;
 };
 
 struct AddClipCommand {
@@ -84,6 +90,26 @@ struct SetClipFadesCommand {
   domain::MediaTime fade_out;
 };
 
+struct SetClipDistantMusicCommand {
+  domain::ClipId clip_id;
+  domain::DistantMusicSettings settings;
+};
+
+struct SetClipTelephoneCommand {
+  domain::ClipId clip_id;
+  domain::TelephoneSettings settings;
+};
+
+struct SetClipUnderwaterCommand {
+  domain::ClipId clip_id;
+  domain::UnderwaterSettings settings;
+};
+
+struct SetClipAudioEffectOrderCommand {
+  domain::ClipId clip_id;
+  std::vector<domain::AudioEffectType> order;
+};
+
 struct SetClipVisualTransformCommand {
   domain::ClipId clip_id;
   domain::VisualTransform transform;
@@ -109,6 +135,10 @@ struct RemoveAssetCommand {
   domain::MediaId media_id;
 };
 
+struct ReplaceAssetCommand {
+  MediaAsset asset;
+};
+
 struct AddTitleCommand {
   domain::Title title;
 };
@@ -122,17 +152,28 @@ struct ReplaceTitleCommand {
   domain::Title title;
 };
 
+struct ReplaceSubtitlesCommand {
+  std::vector<SubtitleCue> subtitles;
+};
+
 struct AddTransitionCommand { domain::Transition transition; };
 struct RemoveTransitionCommand { domain::Transition transition; };
 
 using Command = std::variant<AddTrackCommand, RemoveTrackCommand, RestoreEmptyVisualTrackCommand,
                              ReorderVisualTrackCommand, SetTrackAudioStateCommand,
+                             SetProjectCanvasCommand,
                              AddClipCommand, RemoveClipCommand, MoveClipCommand,
                              TrimClipStartCommand, TrimClipEndCommand, SplitClipCommand,
                              SetClipAudioGainCommand, SetClipMutedCommand, SetClipFadesCommand,
+                             SetClipDistantMusicCommand,
+                             SetClipTelephoneCommand,
+                             SetClipUnderwaterCommand,
+                             SetClipAudioEffectOrderCommand,
                              SetClipVisualTransformCommand, RestoreClipCommand,
-                             RestoreSplitCommand, ImportAssetCommand, RemoveAssetCommand,
+                              RestoreSplitCommand, ImportAssetCommand, RemoveAssetCommand,
+                              ReplaceAssetCommand,
                               AddTitleCommand, RemoveTitleCommand, ReplaceTitleCommand,
+                              ReplaceSubtitlesCommand,
                               AddTransitionCommand, RemoveTransitionCommand>;
 
 } // namespace pulsar::application

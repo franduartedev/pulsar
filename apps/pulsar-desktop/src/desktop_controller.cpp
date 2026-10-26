@@ -23,6 +23,7 @@
 #include <pulsar/media/ffmpeg/ffmpeg_export_media_writer.hpp>
 #include <pulsar/application/export/export_job.hpp>
 #include <pulsar/application/composition/visual_compositor.hpp>
+#include <pulsar/application/timeline/timeline_clip_resolver.hpp>
 #if defined(PULSAR_HAS_QT_AUDIO)
 #include <pulsar/media/qt_audio/qt_audio_output.hpp>
 #endif
@@ -31,6 +32,7 @@
 
 #include <QMetaObject>
 #include <QFile>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonParseError>
@@ -39,12 +41,14 @@
 #include <QVariantMap>
 
 #include <algorithm>
+#include <fstream>
 #include <chrono>
 #include <cmath>
 #include <cstring>
 #include <exception>
 #include <iomanip>
 #include <iostream>
+#include <iterator>
 #include <limits>
 #include <sstream>
 #include <stdexcept>
@@ -86,6 +90,25 @@ std::filesystem::path desktop_runtime_media_path(const std::filesystem::path& pr
   return pulsar::desktop::is_builtin_sound_locator(authored)
              ? pulsar::desktop::builtin_sound_runtime_path(authored)
              : pulsar::desktop::resolve_runtime_media_path(project_file, authored);
+}
+
+std::vector<pulsar::domain::Title> subtitle_overlays(
+    const std::vector<pulsar::application::SubtitleCue>& cues) {
+  std::vector<pulsar::domain::Title> result;
+  result.reserve(cues.size());
+  for (const auto& cue : cues) {
+    std::string text = cue.text;
+    if (text.size() > pulsar::domain::Title::maximum_text_bytes) {
+      text.resize(pulsar::domain::Title::maximum_text_bytes - 3);
+      text += "...";
+    }
+    result.emplace_back(
+        pulsar::domain::TitleId{std::numeric_limits<std::uint64_t>::max() - cue.sequence},
+        std::move(text), pulsar::domain::TimeRange{cue.start, cue.end}, 55, 0xFFFFFFFFu,
+        pulsar::domain::TitleHAlign::Center, pulsar::domain::TitleVAlign::Bottom, true,
+        pulsar::domain::TitleBackground::Dark, 92);
+  }
+  return result;
 }
 
 std::filesystem::path normalized_comparison_path(const std::filesystem::path& path) {
@@ -350,6 +373,8 @@ DesktopController::~DesktopController() {
   waveform_timer_.stop();
   export_cancel_requested_.store(true, std::memory_order_release);
   if (export_thread_.joinable()) export_thread_.join();
+  analysis_cancel_requested_.store(true, std::memory_order_release);
+  if (analysis_thread_.joinable()) analysis_thread_.join();
   waveform_items_.clear();
   waveform_item_stamps_.clear();
   { std::lock_guard lock{mutex_}; stop_worker_ = true; import_queue_.clear(); }
@@ -442,6 +467,47 @@ void DesktopController::openPaths(const QStringList& paths) {
     for (auto& file : unique) import_queue_.push_back(WorkerCommand{std::move(file), import_request_generation_, false});
   }
   wake_.notify_one();
+}
+void DesktopController::relinkAsset(const QString& media_id, const QString& path) {
+  if (!active_session_) return;
+  bool ok = false;
+  const auto numeric_id = media_id.toULongLong(&ok);
+  const auto trimmed = path.trimmed();
+  if (!ok || numeric_id == 0 || trimmed.isEmpty()) {
+    setError(QStringLiteral("Elegí un medio y un archivo válidos para relink."));
+    return;
+  }
+  try {
+    pulsar::media::ffmpeg::FFmpegMediaProbe probe;
+    active_session_->relink_asset(pulsar::domain::MediaId{numeric_id},
+                                  std::filesystem::path{trimmed.toStdString()}, probe);
+    refreshAssetsIfChanged();
+    publishTimeline();
+    setStatus(QStringLiteral("Medio relinkeado"));
+    clearError();
+  } catch (const std::exception& error) {
+    setError(QStringLiteral("No se pudo relinkear el medio: %1")
+                 .arg(QString::fromUtf8(error.what())));
+  }
+}
+void DesktopController::setCanvasPreset(const QString& preset) {
+  if (!active_session_ || !active_session_->document().canvas()) return;
+  const auto current = *active_session_->document().canvas();
+  int width = current.width;
+  int height = current.height;
+  if (preset == QStringLiteral("landscape")) { width = 1920; height = 1080; }
+  else if (preset == QStringLiteral("portrait")) { width = 1080; height = 1920; }
+  else if (preset == QStringLiteral("square")) { width = 1080; height = 1080; }
+  else { setError(QStringLiteral("Preset de lienzo desconocido.")); return; }
+  try {
+    active_session_->set_project_canvas(pulsar::application::ProjectCanvas{
+        width, height, current.frame_rate, false});
+    clearError();
+    publishTimeline();
+    emit mediaChanged();
+  } catch (const std::exception&) {
+    setError(QStringLiteral("No se pudo cambiar el formato del lienzo."));
+  }
 }
 void DesktopController::cancelImport() {
   if (import_total_ == 0 && !busy_) return;
@@ -550,7 +616,8 @@ void DesktopController::requestThumbnails() {
 }
 
 void DesktopController::resetThumbnails() {
-  thumb_service_.cancelPending();
+  thumb_refresh_timer_.stop();
+  thumb_service_.cancelPendingAndWait();
   thumb_pending_.clear();
   thumb_failed_.clear();
   thumb_cache_->clear();
@@ -589,7 +656,13 @@ void DesktopController::publishTimeline() {
   }
   timeline_model_.refresh(*active_session_, *timeline_view_start_, *timeline_view_duration_, thumbnailLookup());
   title_model_.refresh(active_session_->titles(), active_session_->selected_title(), *timeline_view_start_, *timeline_view_duration_);
-  requestThumbnails();
+  // Do not hold a media decoder open while the caller is still completing a
+  // project switch or file operation. The queued request runs once the Qt
+  // event loop regains control, after the current operation can release paths.
+  const auto epoch = editor_session_epoch_;
+  QMetaObject::invokeMethod(this, [this, epoch] {
+    if (epoch == editor_session_epoch_) requestThumbnails();
+  }, Qt::QueuedConnection);
   timeline_tracks_.clear();
   int audio_number = 0;
   const auto& visual_ids = active_session_->document().visual_track_ids();
@@ -1498,6 +1571,215 @@ double DesktopController::selectedClipFadeOut() const {
   const auto* clip = active_session_->document().timeline().find_clip(*active_session_->selected_clip());
   return clip ? secondsAsDouble(clip->fade_out()) : 0.0;
 }
+
+bool DesktopController::selectedDistantMusicEnabled() const {
+  const auto* clip = active_session_ && active_session_->selected_clip()
+      ? active_session_->document().timeline().find_clip(*active_session_->selected_clip()) : nullptr;
+  return clip && clip->distant_music().enabled;
+}
+
+double DesktopController::selectedDistantMusicGainDb() const {
+  const auto* clip = active_session_ && active_session_->selected_clip()
+      ? active_session_->document().timeline().find_clip(*active_session_->selected_clip()) : nullptr;
+  return clip ? clip->distant_music().initial_gain_db : -30.0;
+}
+
+double DesktopController::selectedDistantMusicDuration() const {
+  const auto* clip = active_session_ && active_session_->selected_clip()
+      ? active_session_->document().timeline().find_clip(*active_session_->selected_clip()) : nullptr;
+  return clip ? clip->distant_music().duration_seconds : 4.0;
+}
+
+double DesktopController::selectedDistantMusicStartCutoff() const {
+  const auto* clip = active_session_ && active_session_->selected_clip()
+      ? active_session_->document().timeline().find_clip(*active_session_->selected_clip()) : nullptr;
+  return clip ? clip->distant_music().start_cutoff_hz : 900.0;
+}
+
+double DesktopController::selectedDistantMusicEndCutoff() const {
+  const auto* clip = active_session_ && active_session_->selected_clip()
+      ? active_session_->document().timeline().find_clip(*active_session_->selected_clip()) : nullptr;
+  return clip ? clip->distant_music().end_cutoff_hz : 18'000.0;
+}
+
+double DesktopController::selectedDistantMusicReverb() const {
+  const auto* clip = active_session_ && active_session_->selected_clip()
+      ? active_session_->document().timeline().find_clip(*active_session_->selected_clip()) : nullptr;
+  return clip ? clip->distant_music().reverb_amount : 0.18;
+}
+
+int DesktopController::selectedDistantMusicCurve() const {
+  const auto* clip = active_session_ && active_session_->selected_clip()
+      ? active_session_->document().timeline().find_clip(*active_session_->selected_clip()) : nullptr;
+  return clip ? static_cast<int>(clip->distant_music().curve) : 1;
+}
+int DesktopController::selectedDistantMusicKeyframeCount() const {
+  const auto* clip = active_session_ && active_session_->selected_clip()
+      ? active_session_->document().timeline().find_clip(*active_session_->selected_clip()) : nullptr;
+  return clip ? static_cast<int>(clip->distant_music().gain_keyframes.size()) : 0;
+}
+bool DesktopController::selectedTelephoneEnabled() const {
+  const auto* clip = active_session_ && active_session_->selected_clip()
+      ? active_session_->document().timeline().find_clip(*active_session_->selected_clip()) : nullptr;
+  return clip && clip->telephone().enabled;
+}
+double DesktopController::selectedTelephoneMix() const {
+  const auto* clip = active_session_ && active_session_->selected_clip()
+      ? active_session_->document().timeline().find_clip(*active_session_->selected_clip()) : nullptr;
+  return clip ? clip->telephone().mix : 1.0;
+}
+double DesktopController::selectedTelephoneDrive() const {
+  const auto* clip = active_session_ && active_session_->selected_clip()
+      ? active_session_->document().timeline().find_clip(*active_session_->selected_clip()) : nullptr;
+  return clip ? clip->telephone().drive : 0.12;
+}
+int DesktopController::selectedTelephoneMixKeyframeCount() const {
+  const auto* clip = active_session_ && active_session_->selected_clip()
+      ? active_session_->document().timeline().find_clip(*active_session_->selected_clip()) : nullptr;
+  return clip ? static_cast<int>(clip->telephone().mix_keyframes.size()) : 0;
+}
+bool DesktopController::selectedUnderwaterEnabled() const {
+  const auto* clip = active_session_ && active_session_->selected_clip()
+      ? active_session_->document().timeline().find_clip(*active_session_->selected_clip()) : nullptr;
+  return clip && clip->underwater().enabled;
+}
+double DesktopController::selectedUnderwaterMix() const {
+  const auto* clip = active_session_ && active_session_->selected_clip()
+      ? active_session_->document().timeline().find_clip(*active_session_->selected_clip()) : nullptr;
+  return clip ? clip->underwater().mix : 0.72;
+}
+double DesktopController::selectedUnderwaterDepth() const {
+  const auto* clip = active_session_ && active_session_->selected_clip()
+      ? active_session_->document().timeline().find_clip(*active_session_->selected_clip()) : nullptr;
+  return clip ? clip->underwater().depth : 0.68;
+}
+int DesktopController::selectedUnderwaterDepthKeyframeCount() const {
+  const auto* clip = active_session_ && active_session_->selected_clip()
+      ? active_session_->document().timeline().find_clip(*active_session_->selected_clip()) : nullptr;
+  return clip ? static_cast<int>(clip->underwater().depth_keyframes.size()) : 0;
+}
+QVariantList DesktopController::selectedUnderwaterDepthKeyframes() const {
+  QVariantList result;
+  const auto* clip = active_session_ && active_session_->selected_clip()
+      ? active_session_->document().timeline().find_clip(*active_session_->selected_clip()) : nullptr;
+  if (clip == nullptr) return result;
+  for (const auto& keyframe : clip->underwater().depth_keyframes) {
+    result.push_back(QVariantMap{{QStringLiteral("time"), keyframe.time_seconds},
+                                 {QStringLiteral("value"), keyframe.value},
+                                 {QStringLiteral("interpolation"),
+                                  static_cast<int>(keyframe.interpolation)}});
+  }
+  return result;
+}
+QVariantList DesktopController::selectedDistantMusicGainKeyframes() const {
+  QVariantList result;
+  const auto* clip = active_session_ && active_session_->selected_clip()
+      ? active_session_->document().timeline().find_clip(*active_session_->selected_clip()) : nullptr;
+  if (clip == nullptr) return result;
+  for (const auto& keyframe : clip->distant_music().gain_keyframes) {
+    result.push_back(QVariantMap{{QStringLiteral("time"), keyframe.time_seconds},
+                                 {QStringLiteral("value"), keyframe.value},
+                                 {QStringLiteral("interpolation"),
+                                  static_cast<int>(keyframe.interpolation)}});
+  }
+  return result;
+}
+QVariantList DesktopController::selectedTelephoneMixKeyframes() const {
+  QVariantList result;
+  const auto* clip = active_session_ && active_session_->selected_clip()
+      ? active_session_->document().timeline().find_clip(*active_session_->selected_clip()) : nullptr;
+  if (clip == nullptr) return result;
+  for (const auto& keyframe : clip->telephone().mix_keyframes) {
+    result.push_back(QVariantMap{{QStringLiteral("time"), keyframe.time_seconds},
+                                 {QStringLiteral("value"), keyframe.value},
+                                 {QStringLiteral("interpolation"),
+                                  static_cast<int>(keyframe.interpolation)}});
+  }
+  return result;
+}
+QVariantList DesktopController::cinematicRecipes() const {
+  QVariantList result;
+  for (const auto& recipe : pulsar::application::builtin_audio_recipes()) {
+    result.push_back(QVariantMap{{QStringLiteral("id"), QString::fromUtf8(recipe.id.data(), static_cast<int>(recipe.id.size()))},
+                                 {QStringLiteral("name"), QString::fromUtf8(recipe.name.data(), static_cast<int>(recipe.name.size()))}});
+  }
+  return result;
+}
+QVariantList DesktopController::selectedAudioFxChain() const {
+  QVariantList result;
+  const auto* clip = active_session_ && active_session_->selected_clip()
+      ? active_session_->document().timeline().find_clip(*active_session_->selected_clip()) : nullptr;
+  if (clip == nullptr) return result;
+  for (const auto type : clip->audio_effect_order()) {
+    QString id;
+    QString name;
+    bool enabled = false;
+    switch (type) {
+    case pulsar::domain::AudioEffectType::DistantMusic:
+      id = QStringLiteral("distant_music");
+      name = QStringLiteral("Distant Music");
+      enabled = clip->distant_music().enabled;
+      break;
+    case pulsar::domain::AudioEffectType::Telephone:
+      id = QStringLiteral("telephone");
+      name = QStringLiteral("Telephone");
+      enabled = clip->telephone().enabled;
+      break;
+    case pulsar::domain::AudioEffectType::Underwater:
+      id = QStringLiteral("underwater");
+      name = QStringLiteral("Underwater");
+      enabled = clip->underwater().enabled;
+      break;
+    }
+    if (enabled) result.push_back(QVariantMap{{QStringLiteral("id"), id},
+                                               {QStringLiteral("name"), name}});
+  }
+  return result;
+}
+
+void DesktopController::moveSelectedAudioFx(const QString& effect_id, int delta) {
+  if (!active_session_ || !active_session_->selected_clip() || (delta != -1 && delta != 1)) return;
+  const auto* clip = active_session_->document().timeline().find_clip(*active_session_->selected_clip());
+  if (clip == nullptr) return;
+  auto order = clip->audio_effect_order();
+  const auto type_for_id = [&effect_id]() -> std::optional<pulsar::domain::AudioEffectType> {
+    if (effect_id == QStringLiteral("distant_music")) return pulsar::domain::AudioEffectType::DistantMusic;
+    if (effect_id == QStringLiteral("telephone")) return pulsar::domain::AudioEffectType::Telephone;
+    if (effect_id == QStringLiteral("underwater")) return pulsar::domain::AudioEffectType::Underwater;
+    return std::nullopt;
+  };
+  const auto type = type_for_id();
+  if (!type.has_value()) return;
+  const auto is_enabled = [clip](pulsar::domain::AudioEffectType effect) {
+    switch (effect) {
+    case pulsar::domain::AudioEffectType::DistantMusic: return clip->distant_music().enabled;
+    case pulsar::domain::AudioEffectType::Telephone: return clip->telephone().enabled;
+    case pulsar::domain::AudioEffectType::Underwater: return clip->underwater().enabled;
+    }
+    return false;
+  };
+  std::vector<pulsar::domain::AudioEffectType> enabled_order;
+  for (const auto effect : order) {
+    if (is_enabled(effect)) enabled_order.push_back(effect);
+  }
+  const auto visible_iterator = std::find(enabled_order.begin(), enabled_order.end(), *type);
+  if (visible_iterator == enabled_order.end()) return;
+  const auto visible_index = static_cast<int>(std::distance(enabled_order.begin(), visible_iterator));
+  const auto target_index = visible_index + delta;
+  if (target_index < 0 || target_index >= static_cast<int>(enabled_order.size())) return;
+  const auto target_type = enabled_order[static_cast<std::size_t>(target_index)];
+  const auto iterator = std::find(order.begin(), order.end(), *type);
+  const auto target_iterator = std::find(order.begin(), order.end(), target_type);
+  if (iterator == order.end() || target_iterator == order.end()) return;
+  std::iter_swap(iterator, target_iterator);
+  try {
+    active_session_->set_clip_audio_effect_order(*active_session_->selected_clip(), std::move(order));
+    clearError();
+    publishTimeline();
+  } catch (const std::exception& error) {
+    setError(QString::fromUtf8(error.what()));
+  }
+}
 void DesktopController::setSelectedClipFades(double fade_in_seconds, double fade_out_seconds) {
   if (!active_session_ || !active_session_->selected_clip() || !std::isfinite(fade_in_seconds) || !std::isfinite(fade_out_seconds)) return;
   try {
@@ -1511,6 +1793,295 @@ void DesktopController::setSelectedClipFades(double fade_in_seconds, double fade
     logCause("edit failed", error);
     setError(QStringLiteral("No se pudo aplicar el cambio."));
   }
+}
+
+void DesktopController::applySelectedDistantMusicPreset() {
+  setSelectedDistantMusic(-30.0, 4.0, 900.0, 18'000.0, 0.18, 1, true);
+}
+
+void DesktopController::applySelectedTelephonePreset() {
+  setSelectedTelephone(1.0, 0.12, true);
+}
+
+void DesktopController::applySelectedUnderwaterPreset() {
+  setSelectedUnderwater(0.78, 0.82, true);
+}
+
+void DesktopController::resetSelectedAudioEffects() {
+  if (!active_session_ || !active_session_->selected_clip()) return;
+  try {
+    active_session_->reset_audio_effects(*active_session_->selected_clip());
+    clearError();
+    publishTimeline();
+  } catch (const std::exception&) {
+    setError(QStringLiteral("No se pudieron restablecer los efectos de audio."));
+  }
+}
+
+void DesktopController::setSelectedUnderwaterDepthKeyframes(const QVariantList& keyframes) {
+  if (!active_session_ || !active_session_->selected_clip()) return;
+  if (keyframes.size() > 128) {
+    setError(QStringLiteral("Hay demasiados keyframes para este efecto."));
+    return;
+  }
+  const auto* selected = active_session_->document().timeline().find_clip(*active_session_->selected_clip());
+  if (selected == nullptr) return;
+  auto settings = selected->underwater();
+  settings.depth_keyframes.clear();
+  for (const auto& item : keyframes) {
+    const auto map = item.toMap();
+    bool time_ok = false;
+    bool value_ok = false;
+    const double time = map.value(QStringLiteral("time")).toDouble(&time_ok);
+    const double value = map.value(QStringLiteral("value")).toDouble(&value_ok);
+    const int interpolation = map.value(QStringLiteral("interpolation"), 1).toInt();
+    if (!time_ok || !value_ok || interpolation < 0 || interpolation > 2) {
+      setError(QStringLiteral("Keyframe Underwater inválido."));
+      return;
+    }
+    settings.depth_keyframes.push_back({time, value,
+        static_cast<pulsar::domain::KeyframeInterpolation>(interpolation)});
+  }
+  try {
+    active_session_->set_clip_underwater(*active_session_->selected_clip(), settings);
+    clearError();
+    publishTimeline();
+  } catch (const std::exception&) {
+    setError(QStringLiteral("Los keyframes Underwater deben estar ordenados y entre 0 y 100%."));
+  }
+}
+void DesktopController::setSelectedUnderwaterDepthKeyframe(int index, double time_seconds,
+                                                              double value, int interpolation) {
+  if (!active_session_ || !active_session_->selected_clip()) return;
+  const auto* selected = active_session_->document().timeline().find_clip(*active_session_->selected_clip());
+  if (selected == nullptr || index < 0 || static_cast<std::size_t>(index) >=
+      selected->underwater().depth_keyframes.size() || interpolation < 0 || interpolation > 2) return;
+  auto settings = selected->underwater();
+  settings.depth_keyframes[static_cast<std::size_t>(index)] = {
+      time_seconds, value, static_cast<pulsar::domain::KeyframeInterpolation>(interpolation)};
+  try {
+    active_session_->set_clip_underwater(*active_session_->selected_clip(), settings);
+    clearError();
+    publishTimeline();
+  } catch (const std::exception&) {
+    setError(QStringLiteral("El keyframe Underwater debe mantener el orden y los límites permitidos."));
+  }
+}
+void DesktopController::removeSelectedUnderwaterDepthKeyframe(int index) {
+  if (!active_session_ || !active_session_->selected_clip()) return;
+  const auto* selected = active_session_->document().timeline().find_clip(*active_session_->selected_clip());
+  if (selected == nullptr || index < 0 || static_cast<std::size_t>(index) >=
+      selected->underwater().depth_keyframes.size()) return;
+  auto settings = selected->underwater();
+  settings.depth_keyframes.erase(settings.depth_keyframes.begin() + index);
+  active_session_->set_clip_underwater(*active_session_->selected_clip(), settings);
+  clearError();
+  publishTimeline();
+}
+
+void DesktopController::setSelectedUnderwater(double mix, double depth, bool enabled) {
+  if (!active_session_ || !active_session_->selected_clip() || !std::isfinite(mix) ||
+      !std::isfinite(depth)) return;
+  pulsar::domain::UnderwaterSettings settings;
+  settings.enabled = enabled;
+  settings.mix = mix;
+  settings.depth = depth;
+  try {
+    active_session_->set_clip_underwater(*active_session_->selected_clip(), settings);
+    clearError();
+    publishTimeline();
+  } catch (const std::exception&) {
+    setError(QStringLiteral("Los parámetros de Underwater no son válidos."));
+  }
+}
+
+void DesktopController::setSelectedTelephone(double mix, double drive, bool enabled) {
+  if (!active_session_ || !active_session_->selected_clip() || !std::isfinite(mix) ||
+      !std::isfinite(drive)) return;
+  const auto* selected = active_session_->document().timeline().find_clip(*active_session_->selected_clip());
+  if (selected == nullptr) return;
+  auto settings = selected->telephone();
+  settings.enabled = enabled;
+  settings.mix = mix;
+  settings.drive = drive;
+  try {
+    active_session_->set_clip_telephone(*active_session_->selected_clip(), settings);
+    clearError();
+    publishTimeline();
+  } catch (const std::exception&) {
+    setError(QStringLiteral("Los parámetros de Telephone no son válidos."));
+  }
+}
+
+void DesktopController::setSelectedTelephoneMixKeyframes(const QVariantList& keyframes) {
+  if (!active_session_ || !active_session_->selected_clip()) return;
+  if (keyframes.size() > 128) {
+    setError(QStringLiteral("Hay demasiados keyframes para este efecto."));
+    return;
+  }
+  const auto* selected = active_session_->document().timeline().find_clip(*active_session_->selected_clip());
+  if (selected == nullptr) return;
+  auto settings = selected->telephone();
+  settings.mix_keyframes.clear();
+  for (const auto& item : keyframes) {
+    const auto map = item.toMap();
+    bool time_ok = false;
+    bool value_ok = false;
+    const double time = map.value(QStringLiteral("time")).toDouble(&time_ok);
+    const double value = map.value(QStringLiteral("value")).toDouble(&value_ok);
+    const int interpolation = map.value(QStringLiteral("interpolation"), 1).toInt();
+    if (!time_ok || !value_ok || interpolation < 0 || interpolation > 2) {
+      setError(QStringLiteral("Keyframe inválido: usá tiempo, valor e interpolación válidos."));
+      return;
+    }
+    settings.mix_keyframes.push_back({time, value,
+        static_cast<pulsar::domain::KeyframeInterpolation>(interpolation)});
+  }
+  try {
+    active_session_->set_clip_telephone(*active_session_->selected_clip(), settings);
+    clearError();
+    publishTimeline();
+  } catch (const std::exception&) {
+    setError(QStringLiteral("Los keyframes deben estar ordenados y entre 0% y 100%."));
+  }
+}
+
+void DesktopController::setSelectedTelephoneMixKeyframe(int index, double time_seconds,
+                                                          double value, int interpolation) {
+  if (!active_session_ || !active_session_->selected_clip()) return;
+  const auto* selected = active_session_->document().timeline().find_clip(*active_session_->selected_clip());
+  if (selected == nullptr || index < 0 || static_cast<std::size_t>(index) >=
+      selected->telephone().mix_keyframes.size() || interpolation < 0 || interpolation > 2) return;
+  auto settings = selected->telephone();
+  settings.mix_keyframes[static_cast<std::size_t>(index)] = {
+      time_seconds, value, static_cast<pulsar::domain::KeyframeInterpolation>(interpolation)};
+  try {
+    active_session_->set_clip_telephone(*active_session_->selected_clip(), settings);
+    clearError();
+    publishTimeline();
+  } catch (const std::exception&) {
+    setError(QStringLiteral("El keyframe debe mantener el orden y el rango 0..1."));
+  }
+}
+
+void DesktopController::removeSelectedTelephoneMixKeyframe(int index) {
+  if (!active_session_ || !active_session_->selected_clip()) return;
+  const auto* selected = active_session_->document().timeline().find_clip(*active_session_->selected_clip());
+  if (selected == nullptr || index < 0 || static_cast<std::size_t>(index) >=
+      selected->telephone().mix_keyframes.size()) return;
+  auto settings = selected->telephone();
+  settings.mix_keyframes.erase(settings.mix_keyframes.begin() + index);
+  active_session_->set_clip_telephone(*active_session_->selected_clip(), settings);
+  clearError();
+  publishTimeline();
+}
+
+void DesktopController::applySelectedCinematicRecipe(const QString& recipe) {
+  if (!active_session_ || !active_session_->selected_clip()) return;
+  const auto* selected = pulsar::application::find_audio_recipe(recipe.toStdString());
+  if (selected == nullptr) {
+    setError(QStringLiteral("Receta cinematográfica desconocida."));
+    return;
+  }
+  try {
+    active_session_->apply_audio_recipe(*active_session_->selected_clip(), *selected);
+    clearError();
+    publishTimeline();
+  } catch (const std::exception&) {
+    setError(QStringLiteral("No se pudo aplicar la receta de audio."));
+  }
+}
+
+void DesktopController::setSelectedDistantMusic(double gain_db, double duration,
+                                                 double start_cutoff, double end_cutoff,
+                                                 double reverb, int curve, bool enabled) {
+  if (!active_session_ || !active_session_->selected_clip()) return;
+  if (curve < 0 || curve > 2) { setError(QStringLiteral("Curva de Audio FX inválida.")); return; }
+  const auto* selected = active_session_->document().timeline().find_clip(*active_session_->selected_clip());
+  if (selected == nullptr) return;
+  pulsar::domain::DistantMusicSettings settings = selected->distant_music();
+  settings.enabled = enabled;
+  settings.initial_gain_db = gain_db;
+  settings.duration_seconds = duration;
+  settings.start_cutoff_hz = start_cutoff;
+  settings.end_cutoff_hz = end_cutoff;
+  settings.reverb_amount = reverb;
+  settings.curve = static_cast<pulsar::domain::DistantMusicCurve>(curve);
+  try {
+    active_session_->set_clip_distant_music(*active_session_->selected_clip(), settings);
+    clearError();
+    publishTimeline();
+  } catch (const std::exception&) {
+    setError(QStringLiteral("Los parámetros de Distant Music no son válidos."));
+  }
+}
+void DesktopController::setSelectedDistantMusicGainKeyframes(const QVariantList& keyframes) {
+  if (!active_session_ || !active_session_->selected_clip()) return;
+  if (keyframes.size() > 128) {
+    setError(QStringLiteral("Hay demasiados keyframes para este efecto."));
+    return;
+  }
+  const auto* selected = active_session_->document().timeline().find_clip(*active_session_->selected_clip());
+  if (selected == nullptr) return;
+  const double clip_duration = static_cast<double>(selected->duration().seconds());
+  auto settings = selected->distant_music();
+  settings.gain_keyframes.clear();
+  for (const auto& item : keyframes) {
+    const auto map = item.toMap();
+    bool time_ok = false;
+    bool value_ok = false;
+    const double time = map.value(QStringLiteral("time")).toDouble(&time_ok);
+    const double value = map.value(QStringLiteral("value")).toDouble(&value_ok);
+    const int interpolation = map.value(QStringLiteral("interpolation"), 1).toInt();
+    if (!time_ok || !value_ok || !std::isfinite(time) || !std::isfinite(value) ||
+        time < 0.0 || time > clip_duration || interpolation < 0 || interpolation > 2) {
+      setError(QStringLiteral("Keyframe inválido: usá tiempo, valor e interpolación válidos."));
+      return;
+    }
+    settings.gain_keyframes.push_back({time, value,
+        static_cast<pulsar::domain::KeyframeInterpolation>(interpolation)});
+  }
+  try {
+    active_session_->set_clip_distant_music(*active_session_->selected_clip(), settings);
+    clearError();
+    publishTimeline();
+  } catch (const std::exception&) {
+    setError(QStringLiteral("Los keyframes deben estar ordenados y dentro del rango permitido."));
+  }
+}
+void DesktopController::setSelectedDistantMusicGainKeyframe(int index, double time_seconds,
+                                                              double value, int interpolation) {
+  if (!active_session_ || !active_session_->selected_clip()) return;
+  const auto* selected = active_session_->document().timeline().find_clip(*active_session_->selected_clip());
+  if (selected == nullptr || index < 0 || static_cast<std::size_t>(index) >=
+      selected->distant_music().gain_keyframes.size() || interpolation < 0 || interpolation > 2) return;
+  const double clip_duration = static_cast<double>(selected->duration().seconds());
+  if (!std::isfinite(time_seconds) || !std::isfinite(value) || time_seconds < 0.0 ||
+      time_seconds > clip_duration) {
+    setError(QStringLiteral("El keyframe debe estar dentro de la duración del clip."));
+    return;
+  }
+  auto settings = selected->distant_music();
+  settings.gain_keyframes[static_cast<std::size_t>(index)] = {
+      time_seconds, value, static_cast<pulsar::domain::KeyframeInterpolation>(interpolation)};
+  try {
+    active_session_->set_clip_distant_music(*active_session_->selected_clip(), settings);
+    clearError();
+    publishTimeline();
+  } catch (const std::exception&) {
+    setError(QStringLiteral("El keyframe debe mantener el orden y los límites permitidos."));
+  }
+}
+void DesktopController::removeSelectedDistantMusicGainKeyframe(int index) {
+  if (!active_session_ || !active_session_->selected_clip()) return;
+  const auto* selected = active_session_->document().timeline().find_clip(*active_session_->selected_clip());
+  if (selected == nullptr || index < 0 || static_cast<std::size_t>(index) >=
+      selected->distant_music().gain_keyframes.size()) return;
+  auto settings = selected->distant_music();
+  settings.gain_keyframes.erase(settings.gain_keyframes.begin() + index);
+  active_session_->set_clip_distant_music(*active_session_->selected_clip(), settings);
+  clearError();
+  publishTimeline();
 }
 double DesktopController::selectedClipPosX() const {
   if (!active_session_ || !active_session_->selected_clip()) return 0.0;
@@ -2015,6 +2586,157 @@ bool DesktopController::saveProject(const QString& path) {
 }
 bool DesktopController::openProject(const QString& path) { return openProjectImpl(path, std::nullopt); }
 
+bool DesktopController::importSubtitles(const QString& path) {
+  if (!active_session_ || path.trimmed().isEmpty()) return false;
+  std::ifstream input{std::filesystem::path{path.toStdString()}, std::ios::binary};
+  if (!input) {
+    setError(QStringLiteral("No se pudo abrir el archivo SRT."));
+    return false;
+  }
+  const std::string bytes{std::istreambuf_iterator<char>{input}, {}};
+  try {
+    active_session_->replace_subtitles(pulsar::application::parse_srt(bytes));
+    clearError();
+    setStatus(QStringLiteral("Subtítulos importados"));
+    emit timelineChanged();
+    emit projectDirtyChanged();
+    return true;
+  } catch (const std::exception& error) {
+    logCause("subtitle import failed", error);
+    setError(QStringLiteral("SRT inválido: %1").arg(QString::fromUtf8(error.what())));
+    return false;
+  }
+}
+
+bool DesktopController::exportSubtitles(const QString& path) {
+  if (!active_session_ || path.trimmed().isEmpty()) return false;
+  std::ofstream output{std::filesystem::path{path.toStdString()}, std::ios::binary | std::ios::trunc};
+  if (!output) {
+    setError(QStringLiteral("No se pudo crear el archivo SRT."));
+    return false;
+  }
+  try {
+    output << pulsar::application::encode_srt(active_session_->subtitles());
+    if (!output) throw std::runtime_error{"failed to write subtitle file"};
+    clearError();
+    setStatus(QStringLiteral("Subtítulos exportados"));
+    return true;
+  } catch (const std::exception& error) {
+    logCause("subtitle export failed", error);
+    setError(QStringLiteral("No se pudieron exportar los subtítulos."));
+    return false;
+  }
+}
+
+void DesktopController::cancelAudioAnalysis() {
+  analysis_cancel_requested_.store(true, std::memory_order_release);
+  ++analysis_generation_;
+  if (analysis_running_) {
+    analysis_running_ = false;
+    setStatus(QStringLiteral("Análisis cancelado"));
+    emit analysisChanged();
+  }
+}
+
+void DesktopController::analyzeSelectedAudio() {
+  if (analysis_running_) return;
+  if (analysis_thread_.joinable()) analysis_thread_.join();
+  if (!active_session_ || !active_session_->selected_clip()) {
+    setError(QStringLiteral("Seleccioná un clip con audio para analizarlo."));
+    return;
+  }
+  const auto resolved = pulsar::application::resolve_clip_by_id(
+      active_session_->document(), *active_session_->selected_clip());
+  if (!resolved || !resolved->audio) {
+    setError(QStringLiteral("El clip seleccionado no tiene audio utilizable."));
+    return;
+  }
+  std::filesystem::path runtime_path;
+  try {
+    runtime_path = desktop_runtime_media_path(active_project_file_, resolved->audio->source_locator);
+  } catch (const std::exception& error) {
+    setError(QString::fromUtf8(error.what()));
+    return;
+  }
+  const auto source_creator = waveform_source_creator_;
+  if (!source_creator) {
+    setError(QStringLiteral("El analizador de audio no está disponible."));
+    return;
+  }
+  const int stream_index = resolved->audio->metadata.stream_index;
+  const auto generation = ++analysis_generation_;
+  analysis_cancel_requested_.store(false, std::memory_order_release);
+  analysis_running_ = true;
+  emit analysisChanged();
+  clearError();
+  setStatus(QStringLiteral("Analizando audio…"));
+  analysis_thread_ = std::thread{[this, generation, source_creator, runtime_path, stream_index] {
+    try {
+      auto source = source_creator(runtime_path, stream_index);
+      if (!source) throw std::runtime_error{"audio analysis source could not be created"};
+      pulsar::application::PulseMap map;
+      map.window_frames = 1024;
+      map.points.reserve(100'000);
+      double offset_seconds = 0.0;
+      while (!analysis_cancel_requested_.load(std::memory_order_acquire)) {
+        auto block = source->next_block();
+        if (!block) break;
+        const auto partial = pulsar::application::analyze_pulse_map(*block);
+        if (map.sample_rate == 0) {
+          map.sample_rate = partial.sample_rate;
+          map.channel_count = partial.channel_count;
+          map.window_frames = partial.window_frames;
+        }
+        for (const auto& point : partial.points) {
+          if (map.points.size() >= 100'000) break;
+          auto shifted = point;
+          shifted.time_seconds += offset_seconds;
+          map.points.push_back(shifted);
+        }
+        offset_seconds += partial.duration_seconds;
+        map.duration_seconds = offset_seconds;
+        if (map.points.size() >= 100'000) break;
+      }
+      if (analysis_cancel_requested_.load(std::memory_order_acquire)) return;
+      const auto cards = pulsar::application::build_scene_cards(map);
+      QMetaObject::invokeMethod(this, [this, generation, map = std::move(map), cards] {
+        if (generation != analysis_generation_) return;
+        pulse_map_.clear();
+        for (const auto& point : map.points) {
+          pulse_map_.push_back(QVariantMap{{QStringLiteral("time"), point.time_seconds},
+                                           {QStringLiteral("energy"), point.energy},
+                                           {QStringLiteral("peak"), point.peak},
+                                           {QStringLiteral("transient"), point.transient},
+                                           {QStringLiteral("pulse"), point.pulse}});
+        }
+        scene_cards_.clear();
+        for (const auto& card : cards) {
+          QString label = QStringLiteral("Quiet");
+          if (card.label == pulsar::application::SceneCardLabel::Build) label = QStringLiteral("Build");
+          else if (card.label == pulsar::application::SceneCardLabel::Sustained) label = QStringLiteral("Sustained");
+          else if (card.label == pulsar::application::SceneCardLabel::Impact) label = QStringLiteral("Impact");
+          scene_cards_.push_back(QVariantMap{{QStringLiteral("start"), card.start_seconds},
+                                             {QStringLiteral("end"), card.end_seconds},
+                                             {QStringLiteral("energy"), card.average_energy},
+                                             {QStringLiteral("peak"), card.maximum_peak},
+                                             {QStringLiteral("pulses"), static_cast<qulonglong>(card.pulse_count)},
+                                             {QStringLiteral("label"), label}});
+        }
+        analysis_running_ = false;
+        setStatus(QStringLiteral("Pulse Map listo · %1 escenas").arg(scene_cards_.size()));
+        emit analysisChanged();
+      }, Qt::QueuedConnection);
+    } catch (const std::exception& error) {
+      QMetaObject::invokeMethod(this, [this, generation, message = QString::fromUtf8(error.what())] {
+        if (generation != analysis_generation_) return;
+        analysis_running_ = false;
+        setError(QStringLiteral("No se pudo analizar el audio: %1").arg(message));
+        emit analysisChanged();
+      }, Qt::QueuedConnection);
+    }
+  }};
+}
+
 bool DesktopController::openProjectImpl(const QString& path, std::optional<pulsar::application::ProjectRestoreState> restored) {
   const bool recovered = restored.has_value();
   const QString trimmed = path.trimmed();
@@ -2044,6 +2766,10 @@ bool DesktopController::openProjectImpl(const QString& path, std::optional<pulsa
         std::move(restore_state), makeWorkerFactory(candidate_mailbox, project_path),
         makeAudioSourceFactory(project_path), std::unique_ptr<pulsar::application::AudioOutput>{}, makeCompositionPreview(project_path));
 #endif
+    // Release all handles owned by the old project before committing the new
+    // session.  This matters on Windows, where an in-flight thumbnail decode
+    // must finish before the media file can be replaced or removed.
+    resetThumbnails();
     resetImportQueue();
     active_session_ = std::move(candidate);
     visual_mailbox_ = std::move(candidate_mailbox);
@@ -2056,6 +2782,11 @@ bool DesktopController::openProjectImpl(const QString& path, std::optional<pulsa
     ++editor_session_epoch_; selected_asset_id_.clear(); resetThumbnails();
   } catch (const std::exception& error) {
     // Candidate-first: the current session, mailbox and workers were never touched.
+    // A failed open must still release decoration-only thumbnail decoders. On
+    // Windows callers may remove or replace a media file immediately after a
+    // rejected open, and an old thumbnail handle would otherwise keep it
+    // locked even though the current project remains active.
+    resetThumbnails();
     logCause("open project failed", error);
     setBusy(false);
     setError(projectOpenMessage(error));
@@ -2625,8 +3356,10 @@ std::optional<std::pair<int, int>> DesktopController::projectCanvasSize() const 
 }
 
 void DesktopController::composeTitlesOnPreview(pulsar::media::ffmpeg::FFmpegPreviewFrame& frame, MediaTime time) {
-  if (!active_session_ || active_session_->titles().empty() ||
-      pulsar::application::composition::active_title(active_session_->titles(), time) == nullptr) return;
+  if (!active_session_) return;
+  auto overlays = subtitle_overlays(active_session_->subtitles());
+  overlays.insert(overlays.end(), active_session_->titles().begin(), active_session_->titles().end());
+  if (overlays.empty()) return;
   const auto canvas = projectCanvasSize();
   if (!canvas) return;
   if (frame.width != canvas->first || frame.height != canvas->second) {
@@ -2648,7 +3381,7 @@ void DesktopController::composeTitlesOnPreview(pulsar::media::ffmpeg::FFmpegPrev
     frame.pixels = std::move(pixels);
   }
   title_compositor_.composite(pulsar::application::composition::RgbaCanvas{frame.width, frame.height, frame.stride_bytes, frame.pixels.data()},
-                              active_session_->titles(), time);
+                              overlays, time);
 }
 
 // A title over a gap in VIDEO 1 (or before the first clip): black canvas + title. Rebuilt only
@@ -2769,6 +3502,8 @@ void DesktopController::exportLoop(pulsar::application::ProjectSnapshot snapshot
     auto profile = pulsar::application::exporting::ExportProfile::beta_v01();
     if (preset == QStringLiteral("1080p")) profile = profile.with_max_output(1920, 1080);
     else if (preset == QStringLiteral("720p")) profile = profile.with_max_output(1280, 720);
+    auto subtitle_titles = subtitle_overlays(snapshot.subtitles);
+    snapshot.titles.insert(snapshot.titles.end(), subtitle_titles.begin(), subtitle_titles.end());
     // Export-quality scaler + a compositor of its own (same rasteriser as the preview).
     pulsar::media::ffmpeg::FFmpegOfflineFrameScaler scaler;
     pulsar::application::composition::TitleCompositor export_titles{title_rasterizer_};
@@ -2989,7 +3724,7 @@ void DesktopController::updateDiagnostics(){
   const auto submitted = audio.output.device_frames_submitted;
   const auto processed = audio.output.device_frames_processed;
   const auto in_flight = submitted >= processed ? submitted - processed : 0;
-  debug_metrics_=QString("program_frames=%1 visual_misses=%2 conversion_ms=%3 waveform_queries=%4 waveform_segments=%5 audio_underruns=%6 audio_buffered=%7 audio_in_flight=%8 audio_render_p50_us=%9 audio_render_p95_us=%10 audio_render_max_us=%11 audio_source_opens=%12 audio_live_sources=%13 audio_clock_transitions=%14 audio_ts_obs=%15 audio_ts_silence=%16 audio_ts_trim=%17")
+  debug_metrics_=QString("program_frames=%1 visual_misses=%2 conversion_ms=%3 waveform_queries=%4 waveform_segments=%5 audio_underruns=%6 audio_buffered=%7 audio_in_flight=%8 audio_render_p50_us=%9 audio_render_p95_us=%10 audio_render_max_us=%11 audio_source_opens=%12 audio_live_sources=%13 audio_clock_transitions=%14 audio_ts_obs=%15 audio_ts_silence=%16 audio_ts_trim=%17 audio_peak_db=%18 audio_rms_db=%19 audio_limited_samples=%20")
       .arg(displayed_frames_).arg(visual_misses_)
       .arg(std::chrono::duration_cast<std::chrono::milliseconds>(last_conversion_time_).count())
       .arg(waveform_query_count_).arg(waveform_segment_count_)
@@ -2998,8 +3733,27 @@ void DesktopController::updateDiagnostics(){
       .arg(audio.mixer.source_opens).arg(audio.mixer.live_sources).arg(audio.clock_transitions)
       .arg(audio.mixer.timestamp_observations)
       .arg(audio.mixer.timestamp_inserted_silence_frames)
-      .arg(audio.mixer.timestamp_trimmed_frames);
+      .arg(audio.mixer.timestamp_trimmed_frames)
+      .arg(previewPeakDb(), 0, 'f', 1).arg(previewRmsDb(), 0, 'f', 1)
+      .arg(static_cast<qulonglong>(audio.last_level.limited_samples));
   emit diagnosticsChanged();
+}
+double DesktopController::previewPeakDb() const {
+  const auto audio = active_session_ != nullptr ? active_session_->audio_metrics()
+                                                 : pulsar::application::AudioMixPlaybackMetrics{};
+  return audio.last_level.peak > 0.0F
+             ? std::max(-120.0, 20.0 * std::log10(static_cast<double>(audio.last_level.peak)))
+             : -120.0;
+}
+double DesktopController::previewRmsDb() const {
+  const auto audio = active_session_ != nullptr ? active_session_->audio_metrics()
+                                                 : pulsar::application::AudioMixPlaybackMetrics{};
+  return audio.last_level.rms > 0.0F
+             ? std::max(-120.0, 20.0 * std::log10(static_cast<double>(audio.last_level.rms)))
+             : -120.0;
+}
+qulonglong DesktopController::previewLimitedSamples() const {
+  return active_session_ ? active_session_->audio_metrics().last_level.limited_samples : 0;
 }
 QString DesktopController::performanceSnapshot() const {
   auto summarize = [](const DurationSampleRing& ring) {
@@ -3094,3 +3848,4 @@ void DesktopController::setBusy(bool value){if(busy_==value)return;busy_=value;e
 QString DesktopController::formatTime(MediaTime time){auto sec=time.seconds();auto whole=sec.numerator()/sec.denominator();auto rem=sec.numerator()%sec.denominator();auto ms=static_cast<std::int64_t>(std::llround(static_cast<long double>(rem)*1000.0L/static_cast<long double>(sec.denominator())));if(ms>=1000){++whole;ms=0;}return QString("%1:%2:%3.%4").arg(whole/3600,2,10,QChar('0')).arg((whole/60)%60,2,10,QChar('0')).arg(whole%60,2,10,QChar('0')).arg(ms,3,10,QChar('0'));}
 MediaTime DesktopController::mediaTimeFromSeconds(double seconds){if(!std::isfinite(seconds)||seconds<=0)return MediaTime::zero();const auto q=std::llround(seconds*1'000'000.0);return MediaTime{q,Rational{1,1'000'000}};}
 double DesktopController::secondsAsDouble(MediaTime time){const auto sec=time.seconds();return static_cast<double>(sec.numerator())/static_cast<double>(sec.denominator());}
+

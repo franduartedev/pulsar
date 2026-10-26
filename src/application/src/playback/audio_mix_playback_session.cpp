@@ -234,6 +234,7 @@ bool AudioMixPlaybackSession::fill_until(std::uint64_t target_frames) {
       return false;
     }
     auto result = std::move(*rendered);
+    metrics_.last_level = result.level;
     const auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(
         std::chrono::steady_clock::now() - start).count();
     record_render(static_cast<std::uint64_t>(std::max<std::int64_t>(0, elapsed)));

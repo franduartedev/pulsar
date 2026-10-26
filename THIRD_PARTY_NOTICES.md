@@ -27,6 +27,15 @@ It is an inventory made for compliance, not legal advice.
 There is **no non-free code** in the packages: FFmpeg is **not** configured with `--enable-nonfree`, and `libfdk-aac`
 and similar are not used. AAC uses FFmpeg's native encoder. **`libzvbi` (GPL-2.0-only), x265 and Xvid are not included.**
 
+### Windows portable bundle
+
+The Windows bundle is built by `packaging/windows/build-release.ps1` against the vcpkg `ffmpeg[x264,zlib]` port, which
+enables the same GPL components as the Linux build: FFmpeg (GPL-2.0-or-later as built with `--enable-gpl`) and x264
+(GPL-2.0-or-later, shipped as a separate DLL beside `pulsar-desktop.exe`). The exact FFmpeg and x264 versions are the
+ones resolved by the vcpkg baseline recorded in the CI logs for the release commit; their unmodified upstream sources
+are available from <https://ffmpeg.org/releases/> and <https://code.videolan.org/videolan/x264>. The written offer in
+section 4 also covers these Windows components.
+
 Patents: copyright licences do not grant patent licences. H.264 and AAC are patent-encumbered formats in some
 countries; whoever redistributes or uses PULSAR is responsible for any licence they need.
 

@@ -2,10 +2,13 @@
 
 #include <pulsar/application/audio/audio_converter.hpp>
 #include <pulsar/application/audio/clip_gain.hpp>
+#include <pulsar/application/audio/audio_effect_chain.hpp>
 #include <pulsar/application/audio/output_stage.hpp>
+#include <pulsar/domain/support/wide_integer.hpp>
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <cstdlib>
 #include <iostream>
 #include <limits>
@@ -28,13 +31,13 @@ namespace {
     return 0;
   }
   const auto seconds = duration.seconds();
-  const auto numerator = static_cast<__int128_t>(seconds.numerator()) * sample_rate;
-  const auto denominator = static_cast<__int128_t>(seconds.denominator());
+  const auto numerator = domain::WideInteger{seconds.numerator()} * sample_rate;
+  const auto denominator = domain::WideInteger{seconds.denominator()};
   const auto frames = (numerator + denominator - 1) / denominator;
-  if (frames > static_cast<__int128_t>(std::numeric_limits<std::size_t>::max())) {
+  if (frames > domain::WideInteger::from_unsigned(std::numeric_limits<std::size_t>::max())) {
     throw std::overflow_error{"audio mix frame conversion overflow"};
   }
-  return static_cast<std::size_t>(frames);
+  return static_cast<std::size_t>(static_cast<std::uint64_t>(frames));
 }
 
 [[nodiscard]] std::size_t frames_floor(domain::MediaTime duration, int sample_rate) {
@@ -42,13 +45,13 @@ namespace {
     return 0;
   }
   const auto seconds = duration.seconds();
-  const auto numerator = static_cast<__int128_t>(seconds.numerator()) * sample_rate;
-  const auto denominator = static_cast<__int128_t>(seconds.denominator());
+  const auto numerator = domain::WideInteger{seconds.numerator()} * sample_rate;
+  const auto denominator = domain::WideInteger{seconds.denominator()};
   const auto frames = numerator / denominator;
-  if (frames > static_cast<__int128_t>(std::numeric_limits<std::size_t>::max())) {
+  if (frames > domain::WideInteger::from_unsigned(std::numeric_limits<std::size_t>::max())) {
     throw std::overflow_error{"audio source frame conversion overflow"};
   }
-  return static_cast<std::size_t>(frames);
+  return static_cast<std::size_t>(static_cast<std::uint64_t>(frames));
 }
 
 [[nodiscard]] bool same_identity(const AudioContributor& lhs,
@@ -200,6 +203,7 @@ public:
   bool eof{false};
   bool tail_flushed{false};
   bool failed{false};
+  std::unique_ptr<AudioEffectChain> effects;
 };
 
 AudioMixSession::AudioMixSession(AudioPlaybackSourceFactory source_factory, AudioMixFormat format)
@@ -243,7 +247,18 @@ void AudioMixSession::configure(ProjectSnapshot snapshot) {
             return same_identity(source->contributor, contributor);
           });
       if (replacement != contributors_.end()) {
+        const bool effect_changed = source->contributor.distant_music != replacement->distant_music ||
+                                     source->contributor.telephone != replacement->telephone ||
+                                     source->contributor.underwater != replacement->underwater ||
+                                     source->contributor.audio_effect_order != replacement->audio_effect_order;
         source->contributor = *replacement;
+        if (effect_changed) {
+          source->effects = std::make_unique<AudioEffectChain>(AudioEffectChain::from_clip_effects(
+              replacement->distant_music, replacement->telephone, replacement->underwater,
+              replacement->audio_effect_order,
+              format_.sample_rate,
+              format_.channel_count));
+        }
       }
     }
     select_range(*next_timeline_position_, *next_timeline_position_, true);
@@ -350,6 +365,12 @@ AudioMixSession::SourceState* AudioMixSession::open_source(
   auto state = std::make_unique<SourceState>(contributor, std::move(source),
                                              std::move(converter), timeline_position, target,
                                              origin);
+  if (contributor.distant_music.enabled || contributor.telephone.enabled || contributor.underwater.enabled) {
+    state->effects = std::make_unique<AudioEffectChain>(AudioEffectChain::from_clip_effects(
+        contributor.distant_music, contributor.telephone, contributor.underwater,
+        contributor.audio_effect_order, format_.sample_rate,
+        format_.channel_count));
+  }
   auto* result = state.get();
   sources_.push_back(std::move(state));
   ++metrics_.source_opens;
@@ -444,7 +465,8 @@ AudioMixRenderResult AudioMixSession::render(domain::MediaTime timeline_position
       AudioBlock{format_.sample_rate, format_.channel_count, frame_count,
                  std::vector<float>(checked_sample_count(frame_count, format_.channel_count), 0.0F),
                  domain::Rational{1, format_.sample_rate}, std::nullopt},
-      timeline_position, {}, 0, 0, 0, AudioMixClockRecommendation::Software};
+      timeline_position, {}, 0, 0, 0, AudioLevel{},
+      AudioMixClockRecommendation::Software};
   result.resolved_contributors = active_contributors_.size();
   for (const auto& missing : active_unavailable_) {
     result.issues.push_back({missing.track_id, missing.clip_id, missing.media_id,
@@ -636,6 +658,10 @@ AudioMixRenderResult AudioMixSession::render(domain::MediaTime timeline_position
                                              contributor.timeline_range.duration(), format_.sample_rate);
       const auto first_clip_frame = static_cast<std::int64_t>(
           frames_ceil(source_timeline - contributor.timeline_range.start(), format_.sample_rate));
+      if (state->effects) {
+        state->effects->process_interleaved(
+            state->pcm.data() + state->pcm_offset, available, first_clip_frame);
+      }
       for (std::size_t frame = 0; frame < available; ++frame) {
         const float frame_gain = fade.active()
                                      ? gain.linear * fade.gain_at(first_clip_frame + static_cast<std::int64_t>(frame))
@@ -657,9 +683,11 @@ AudioMixRenderResult AudioMixSession::render(domain::MediaTime timeline_position
   // Master output stage after summation (shared with the exporter): untouched below the knee,
   // a soft bend above it. There is no hidden per-track normalization, AGC or
   // contributor-count attenuation.
-  for (float& sample : result.block.samples_mutable()) {
-    sample = soft_output_stage(sample);
-  }
+  const auto stage_stats = apply_soft_output_stage(result.block.samples_mutable().data(),
+                                                    result.block.samples().size());
+  result.level = measure_audio_level(result.block.samples().data(), result.block.samples().size());
+  result.level.pre_stage_peak = stage_stats.input_peak;
+  result.level.limited_samples = stage_stats.limited_samples;
   result.clock = result.usable_contributors == 0 ? AudioMixClockRecommendation::Software
                                                   : AudioMixClockRecommendation::Device;
   prune_sources(active_contributors_);

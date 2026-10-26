@@ -56,6 +56,7 @@ Window {
     property bool allowClose: false
 
     property string pendingProjectPath: ""
+    property string relinkMediaId: ""
     function perform(action) {
         if (action === "close") { allowClose = true; root.close() }
         else if (action === "open") openProjectDialog.open()
@@ -101,11 +102,12 @@ Window {
         }
         pathPrompt.openWith(controller.suggestedPath(purpose))
     }
+    function localFilePath(url) { return decodeURIComponent(url.toString().replace(/^file:\/\//, "")) }
 
     // No editing shortcut fires behind a dialog (a file dialog swallows typing and the keys used
     // to reach the timeline), and single-key ones never fire while typing in a field.
     readonly property bool dialogOpen: pathPrompt.visible || unsavedDialog.visible || recoveryDialog.visible || aboutDialog.visible ||
-                                       importDialog.visible || openProjectDialog.visible || colorMenu.visible
+                                       importDialog.visible || openProjectDialog.visible || importSubtitleDialog.visible || exportSubtitleDialog.visible || colorMenu.visible
     readonly property bool typing: !!root.activeFocusItem && typeof root.activeFocusItem.cursorPosition !== "undefined"
     readonly property bool shortcutsBlocked: typing || dialogOpen
     Shortcut { sequence: "Space"; enabled: !root.shortcutsBlocked; onActivated: controller.togglePlayback() }
@@ -143,6 +145,30 @@ Window {
         nameFilters: ["Proyectos PULSAR (*.pulsar)", "Todos los archivos (*)"]
         onAccepted: controller.openProject(decodeURIComponent(selectedFile.toString().replace(/^file:\/\//, "")))
     }
+    FileDialog {
+        id: importSubtitleDialog
+        title: "Importar subtítulos"
+        fileMode: FileDialog.OpenFile
+        nameFilters: ["SubRip (*.srt)", "Todos los archivos (*)"]
+        onAccepted: controller.importSubtitles(root.localFilePath(selectedFile))
+    }
+    FileDialog {
+        id: exportSubtitleDialog
+        title: "Exportar subtítulos"
+        fileMode: FileDialog.SaveFile
+        nameFilters: ["SubRip (*.srt)", "Todos los archivos (*)"]
+        onAccepted: controller.exportSubtitles(root.localFilePath(selectedFile))
+    }
+    FileDialog {
+        id: relinkDialog
+        title: "Relinkear medio"
+        fileMode: FileDialog.OpenFile
+        nameFilters: ["Medios compatibles (*.mp4 *.mov *.mkv *.avi *.webm *.m4v *.wav *.mp3 *.m4a *.aac *.flac *.png *.jpg *.jpeg *.webp)", "Todos los archivos (*)"]
+        onAccepted: {
+            controller.relinkAsset(root.relinkMediaId, decodeURIComponent(selectedFile.toString().replace(/^file:\/\//, "")))
+            root.relinkMediaId = ""
+        }
+    }
 
     DropArea {
         anchors.fill: parent
@@ -171,6 +197,8 @@ Window {
         onSaveProjectRequested: controller.activeProjectPath.length > 0 ? controller.saveProject(controller.activeProjectPath) : root.askSavePath("project")
         onSaveProjectAsRequested: root.askSavePath("project")
         onImportMediaRequested: importDialog.openFiles()
+        onImportSubtitlesRequested: importSubtitleDialog.open()
+        onExportSubtitlesRequested: exportSubtitleDialog.open()
         onExportRequested: root.askSavePath("export")
         onAboutRequested: aboutDialog.open()
     }
@@ -187,6 +215,7 @@ Window {
         width: root.mediaWidth
         onImportRequested: importDialog.openFiles()
         onImportFolderRequested: importDialog.openFolder()
+        onRelinkRequested: function(mediaId) { root.relinkMediaId = mediaId; relinkDialog.open() }
         onCreateColorRequested: function(sx, sy) { var p = root.contentItem.mapFromItem(null, sx, sy); colorMenu.openAt(p.x, p.y) }
         onAssetDragStarted: function(mediaId, name, isVideo) { dragGhost.label = name; dragGhost.visible = true }
         onAssetDragMoved: function(mediaId, sx, sy) {

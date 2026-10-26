@@ -9,6 +9,7 @@ extern "C" {
 }
 
 #include <array>
+#include <cctype>
 #include <filesystem>
 #include <stdexcept>
 #include <system_error>
@@ -19,9 +20,32 @@ namespace {
 using application::MediaProbeError;
 using application::MediaProbeErrorCode;
 
+[[nodiscard]] std::string ffmpeg_path_text(const std::filesystem::path& path) {
+#if defined(_WIN32)
+  // libavformat's Windows URL parser recognizes a fully-qualified DOS path
+  // (`C:/...`) as a local file. Use generic UTF-8 separators instead of the
+  // native `C:\\...` form; this also keeps non-ASCII paths intact.
+  const auto value = path.generic_u8string();
+  std::string text{reinterpret_cast<const char*>(value.data()), value.size()};
+  if (text.starts_with("//?/")) text.erase(0, 4);
+  return text;
+#else
+  return path.generic_string();
+#endif
+}
+
 [[nodiscard]] bool is_explicit_protocol_like_input(const std::filesystem::path& path) {
-  const std::string text = path_to_utf8(path);
-  return text.find("://") != std::string::npos || text.rfind("file:", 0) == 0;
+  const std::string text = path.generic_string();
+  if (text.rfind("file:", 0) == 0 || text.find("://") != std::string::npos) return true;
+
+  // std::filesystem normalization collapses the two slashes of a URI scheme
+  // on every platform ("https://..." becomes "https:/..."). Treat any
+  // non-drive-letter scheme as a protocol while keeping ordinary local paths
+  // such as "C:/media/file.mp4" local.
+  const auto colon = text.find(':');
+  return colon != std::string::npos && colon + 1 < text.size() &&
+         text[colon + 1] == '/' &&
+         (colon != 1 || !std::isalpha(static_cast<unsigned char>(text[0])));
 }
 
 } // namespace
@@ -134,7 +158,7 @@ std::string codec_name(const AVCodecParameters& codec_parameters) {
 
 FormatContextPtr open_input_with_stream_info(const std::filesystem::path& path) {
   AVFormatContext* raw_context = nullptr;
-  const std::string path_text = path_to_utf8(path);
+  const std::string path_text = ffmpeg_path_text(path);
   const int open_result = avformat_open_input(&raw_context, path_text.c_str(), nullptr, nullptr);
   if (open_result < 0) {
     throw MediaProbeError{MediaProbeErrorCode::UnsupportedMedia,

@@ -30,6 +30,8 @@ extern "C" {
 #include <string>
 #include <vector>
 
+#include "../support/shell_command.hpp"
+
 namespace {
 using namespace pulsar;
 namespace exporting = application::exporting;
@@ -79,7 +81,8 @@ struct VideoSample {
 
 std::vector<VideoSample> decode_video_samples(const std::filesystem::path& path) {
   AVFormatContext* format = nullptr;
-  assert(avformat_open_input(&format, path.c_str(), nullptr, nullptr) == 0);
+  const auto path_text = pulsar::test_support::ffmpeg_path(path);
+  assert(avformat_open_input(&format, path_text.c_str(), nullptr, nullptr) == 0);
   assert(avformat_find_stream_info(format, nullptr) >= 0);
   const int stream_index = av_find_best_stream(format, AVMEDIA_TYPE_VIDEO, -1, -1, nullptr, 0);
   assert(stream_index >= 0);
@@ -196,7 +199,8 @@ void export_snapshot(const application::ProjectSnapshot& snapshot,
 
 int codec_profile(const std::filesystem::path& path, AVMediaType type) {
   AVFormatContext* format = nullptr;
-  assert(avformat_open_input(&format, path.c_str(), nullptr, nullptr) == 0);
+  const auto path_text = pulsar::test_support::ffmpeg_path(path);
+  assert(avformat_open_input(&format, path_text.c_str(), nullptr, nullptr) == 0);
   assert(avformat_find_stream_info(format, nullptr) >= 0);
   const int stream_index = av_find_best_stream(format, type, -1, -1, nullptr, 0);
   assert(stream_index >= 0);
@@ -419,8 +423,8 @@ void export_reference_project_and_inspect() {
   assert_monotonic_progress(progress);
   assert(std::filesystem::exists(destination));
   assert(std::filesystem::file_size(destination) > std::string{"old destination"}.size());
-  assert(codec_profile(destination, AVMEDIA_TYPE_AUDIO) == FF_PROFILE_AAC_LOW);
-  assert(codec_profile(destination, AVMEDIA_TYPE_VIDEO) == FF_PROFILE_H264_HIGH);
+  assert(codec_profile(destination, AVMEDIA_TYPE_AUDIO) == AV_PROFILE_AAC_LOW);
+  assert(codec_profile(destination, AVMEDIA_TYPE_VIDEO) == AV_PROFILE_H264_HIGH);
 
   media::ffmpeg::FFmpegMediaProbe probe;
   const auto output = probe.probe(destination);
@@ -470,6 +474,7 @@ void export_reference_project_and_inspect() {
   std::ifstream cancelled_destination{destination};
   const std::string cancelled_bytes{std::istreambuf_iterator<char>{cancelled_destination}, {}};
   assert(cancelled_bytes == sentinel);
+  cancelled_destination.close();  // Windows cannot delete a file that is still open.
   for (const auto& entry : std::filesystem::directory_iterator(root)) {
     assert(entry.path().filename().string().find("reference.mp4.pulsar-") == std::string::npos);
   }
@@ -492,6 +497,7 @@ void export_reference_project_and_inspect() {
   std::ifstream unchanged{destination};
   const std::string preserved{std::istreambuf_iterator<char>{unchanged}, {}};
   assert(preserved == sentinel);
+  unchanged.close();
   gain_evidence(a, root);
   overlap_evidence(a, b, root);
   sound_and_sync_evidence(a, root);
@@ -524,7 +530,7 @@ void export_unaligned_source_range_succeeds() {
   export_snapshot(document.snapshot(), destination);
 
   assert(std::filesystem::exists(destination));
-  assert(codec_profile(destination, AVMEDIA_TYPE_AUDIO) == FF_PROFILE_AAC_LOW);
+  assert(codec_profile(destination, AVMEDIA_TYPE_AUDIO) == AV_PROFILE_AAC_LOW);
   const auto output = probe.probe(destination);
   assert(!output.audio_streams.empty() && output.audio_streams.front().sample_rate == 48'000);
   assert(!output.video_streams.empty());

@@ -18,6 +18,7 @@ struct AudioMixPlaybackMetrics {
   std::uint64_t clock_transitions{0};
   AudioMixMetrics mixer;
   AudioOutputMetrics output;
+  AudioLevel last_level{};
 };
 
 // Drives one AudioMixSession into one AudioOutput.  It deliberately owns no

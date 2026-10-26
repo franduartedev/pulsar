@@ -3,10 +3,18 @@ add_library(pulsar_application
   src/commands/command_processor.cpp
   src/audio/audio_converter.cpp
   src/audio/audio_contributor_resolver.cpp
+  src/audio/audio_effect_chain.cpp
+  src/audio/audio_recipe.cpp
+  src/audio/telephone_processor.cpp
+  src/audio/underwater_processor.cpp
   src/audio/audio_mix_session.cpp
   src/audio/clip_gain.cpp
+  src/audio/distant_music_processor.cpp
+  src/audio/pulse_map.cpp
+  src/audio/scene_cards.cpp
   src/audio/audio_output_engine.cpp
   src/media/audio_block.cpp
+  src/subtitle/srt.cpp
   src/waveform/waveform_cache.cpp
   src/waveform/waveform_cache_manager.cpp
   src/waveform/waveform_renderer.cpp

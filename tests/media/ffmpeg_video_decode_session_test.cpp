@@ -34,6 +34,8 @@ extern "C" {
 #include <variant>
 #include <vector>
 
+#include "../support/shell_command.hpp"
+
 namespace {
 
 using pulsar::application::MediaProbeError;
@@ -183,18 +185,8 @@ void write_ppm_fixture(const std::filesystem::path& path) {
   }
 }
 
-std::string shell_quote(const std::filesystem::path& path) {
-  std::string quoted{"'"};
-  for (const char character : path.string()) {
-    if (character == '\'') {
-      quoted += "'\\''";
-    } else {
-      quoted += character;
-    }
-  }
-  quoted += "'";
-  return quoted;
-}
+using pulsar::test_support::null_device;
+using pulsar::test_support::shell_quote;
 
 std::filesystem::path fixture_root() {
   const auto run_id = std::chrono::steady_clock::now().time_since_epoch().count();
@@ -207,8 +199,8 @@ std::filesystem::path fixture_root() {
 void write_non_zero_start_h264_fixture(const std::filesystem::path& path) {
   const std::string encoder_check_command =
       shell_quote(PULSAR_TEST_FFMPEG_CLI) +
-      " -hide_banner -loglevel error -h encoder=libx264 >/dev/null 2>&1";
-  if (std::system(encoder_check_command.c_str()) != 0) {
+      " -hide_banner -loglevel error -h encoder=libx264 >" + null_device() + " 2>&1";
+  if (pulsar::test_support::run_shell(encoder_check_command) != 0) {
     throw std::runtime_error{
         "ffmpeg CLI is available, but the required libx264 encoder is not"};
   }
@@ -222,7 +214,7 @@ void write_non_zero_start_h264_fixture(const std::filesystem::path& path) {
       "-sc_threshold 0 -preset veryfast -f matroska " +
       shell_quote(path);
 
-  if (std::system(command.c_str()) != 0) {
+  if (pulsar::test_support::run_shell(command) != 0) {
     throw std::runtime_error{
         "ffmpeg CLI could not create the required non-zero start-time H.264/B-frame fixture"};
   }
@@ -230,7 +222,7 @@ void write_non_zero_start_h264_fixture(const std::filesystem::path& path) {
 
 NonZeroStartFixtureInfo inspect_non_zero_start_fixture(const std::filesystem::path& path) {
   AVFormatContext* raw_context = nullptr;
-  const std::string path_text = path.string();
+  const std::string path_text = pulsar::test_support::ffmpeg_path(path);
   if (avformat_open_input(&raw_context, path_text.c_str(), nullptr, nullptr) < 0) {
     throw std::runtime_error{"could not open generated non-zero start-time fixture"};
   }

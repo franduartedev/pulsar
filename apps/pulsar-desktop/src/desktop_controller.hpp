@@ -9,6 +9,8 @@
 #include <pulsar/application/media/media_probe_result.hpp>
 #include <pulsar/application/playback/timeline_playback_coordinator.hpp>
 #include <pulsar/application/waveform/waveform_cache.hpp>
+#include <pulsar/application/audio/pulse_map.hpp>
+#include <pulsar/application/audio/scene_cards.hpp>
 #include <pulsar/media/ffmpeg/ffmpeg_playback_visual_mailbox.hpp>
 
 #include <QElapsedTimer>
@@ -76,6 +78,9 @@ class DesktopController final : public QObject {
   Q_PROPERTY(QString activeProjectPath READ activeProjectPath NOTIFY activeProjectPathChanged)
   Q_PROPERTY(bool previewLate READ previewLate NOTIFY technicalStatusChanged)
   Q_PROPERTY(QString debugMetrics READ debugMetrics NOTIFY diagnosticsChanged)
+  Q_PROPERTY(double previewPeakDb READ previewPeakDb NOTIFY diagnosticsChanged)
+  Q_PROPERTY(double previewRmsDb READ previewRmsDb NOTIFY diagnosticsChanged)
+  Q_PROPERTY(qulonglong previewLimitedSamples READ previewLimitedSamples NOTIFY diagnosticsChanged)
   Q_PROPERTY(bool recoveryAvailable READ recoveryAvailable NOTIFY recoveryChanged)
   Q_PROPERTY(QString recoveryDescription READ recoveryDescription NOTIFY recoveryChanged)
   Q_PROPERTY(QAbstractItemModel* timelineClips READ timelineClips NOTIFY timelineChanged)
@@ -98,6 +103,27 @@ class DesktopController final : public QObject {
   Q_PROPERTY(bool selectedClipMuted READ selectedClipMuted NOTIFY timelineChanged)
   Q_PROPERTY(double selectedClipFadeIn READ selectedClipFadeIn NOTIFY timelineChanged)    // seconds
   Q_PROPERTY(double selectedClipFadeOut READ selectedClipFadeOut NOTIFY timelineChanged)  // seconds
+  Q_PROPERTY(bool selectedDistantMusicEnabled READ selectedDistantMusicEnabled NOTIFY timelineChanged)
+  Q_PROPERTY(double selectedDistantMusicGainDb READ selectedDistantMusicGainDb NOTIFY timelineChanged)
+  Q_PROPERTY(double selectedDistantMusicDuration READ selectedDistantMusicDuration NOTIFY timelineChanged)
+  Q_PROPERTY(double selectedDistantMusicStartCutoff READ selectedDistantMusicStartCutoff NOTIFY timelineChanged)
+  Q_PROPERTY(double selectedDistantMusicEndCutoff READ selectedDistantMusicEndCutoff NOTIFY timelineChanged)
+  Q_PROPERTY(double selectedDistantMusicReverb READ selectedDistantMusicReverb NOTIFY timelineChanged)
+  Q_PROPERTY(int selectedDistantMusicCurve READ selectedDistantMusicCurve NOTIFY timelineChanged)
+  Q_PROPERTY(int selectedDistantMusicKeyframeCount READ selectedDistantMusicKeyframeCount NOTIFY timelineChanged)
+  Q_PROPERTY(bool selectedTelephoneEnabled READ selectedTelephoneEnabled NOTIFY timelineChanged)
+  Q_PROPERTY(double selectedTelephoneMix READ selectedTelephoneMix NOTIFY timelineChanged)
+  Q_PROPERTY(double selectedTelephoneDrive READ selectedTelephoneDrive NOTIFY timelineChanged)
+  Q_PROPERTY(int selectedTelephoneMixKeyframeCount READ selectedTelephoneMixKeyframeCount NOTIFY timelineChanged)
+  Q_PROPERTY(QVariantList selectedTelephoneMixKeyframes READ selectedTelephoneMixKeyframes NOTIFY timelineChanged)
+  Q_PROPERTY(bool selectedUnderwaterEnabled READ selectedUnderwaterEnabled NOTIFY timelineChanged)
+  Q_PROPERTY(double selectedUnderwaterMix READ selectedUnderwaterMix NOTIFY timelineChanged)
+  Q_PROPERTY(double selectedUnderwaterDepth READ selectedUnderwaterDepth NOTIFY timelineChanged)
+  Q_PROPERTY(int selectedUnderwaterDepthKeyframeCount READ selectedUnderwaterDepthKeyframeCount NOTIFY timelineChanged)
+  Q_PROPERTY(QVariantList selectedUnderwaterDepthKeyframes READ selectedUnderwaterDepthKeyframes NOTIFY timelineChanged)
+  Q_PROPERTY(QVariantList selectedDistantMusicGainKeyframes READ selectedDistantMusicGainKeyframes NOTIFY timelineChanged)
+  Q_PROPERTY(QVariantList cinematicRecipes READ cinematicRecipes CONSTANT)
+  Q_PROPERTY(QVariantList selectedAudioFxChain READ selectedAudioFxChain NOTIFY timelineChanged)
   Q_PROPERTY(double selectedClipPosX READ selectedClipPosX NOTIFY timelineChanged)
   Q_PROPERTY(double selectedClipPosY READ selectedClipPosY NOTIFY timelineChanged)
   Q_PROPERTY(double selectedClipScale READ selectedClipScale NOTIFY timelineChanged)
@@ -119,6 +145,9 @@ class DesktopController final : public QObject {
   Q_PROPERTY(bool canUndo READ canUndo NOTIFY timelineChanged)
   Q_PROPERTY(bool canRedo READ canRedo NOTIFY timelineChanged)
   Q_PROPERTY(QVariantList soundLibrary READ soundLibrary NOTIFY soundLibraryChanged)
+  Q_PROPERTY(QVariantList pulseMap READ pulseMap NOTIFY analysisChanged)
+  Q_PROPERTY(QVariantList sceneCards READ sceneCards NOTIFY analysisChanged)
+  Q_PROPERTY(bool analysisRunning READ analysisRunning NOTIFY analysisChanged)
 public:
   using WaveformSourceCreator = std::function<std::unique_ptr<pulsar::application::WaveformSource>(
       const std::filesystem::path&, int)>;
@@ -158,6 +187,9 @@ public:
   }
   [[nodiscard]] bool previewLate() const { return preview_late_; }
   [[nodiscard]] QString debugMetrics() const { return debug_metrics_; }
+  [[nodiscard]] double previewPeakDb() const;
+  [[nodiscard]] double previewRmsDb() const;
+  [[nodiscard]] qulonglong previewLimitedSamples() const;
   // On-demand desktop performance snapshot for D3 evidence. Calculates
   // percentiles from copied ring samples; call only for explicit reporting,
   // never on a hot path. Not a Q_PROPERTY, emits no signals.
@@ -188,6 +220,28 @@ public:
   [[nodiscard]] QString selectedClipKind() const;
   [[nodiscard]] double selectedClipFadeIn() const;
   [[nodiscard]] double selectedClipFadeOut() const;
+  [[nodiscard]] bool selectedDistantMusicEnabled() const;
+  [[nodiscard]] double selectedDistantMusicGainDb() const;
+  [[nodiscard]] double selectedDistantMusicDuration() const;
+  [[nodiscard]] double selectedDistantMusicStartCutoff() const;
+  [[nodiscard]] double selectedDistantMusicEndCutoff() const;
+  [[nodiscard]] double selectedDistantMusicReverb() const;
+  [[nodiscard]] int selectedDistantMusicCurve() const;
+  [[nodiscard]] int selectedDistantMusicKeyframeCount() const;
+  [[nodiscard]] bool selectedTelephoneEnabled() const;
+  [[nodiscard]] double selectedTelephoneMix() const;
+  [[nodiscard]] double selectedTelephoneDrive() const;
+  [[nodiscard]] int selectedTelephoneMixKeyframeCount() const;
+  [[nodiscard]] QVariantList selectedTelephoneMixKeyframes() const;
+  [[nodiscard]] bool selectedUnderwaterEnabled() const;
+  [[nodiscard]] double selectedUnderwaterMix() const;
+  [[nodiscard]] double selectedUnderwaterDepth() const;
+  [[nodiscard]] int selectedUnderwaterDepthKeyframeCount() const;
+  [[nodiscard]] QVariantList selectedUnderwaterDepthKeyframes() const;
+  [[nodiscard]] QVariantList selectedDistantMusicGainKeyframes() const;
+  [[nodiscard]] QVariantList cinematicRecipes() const;
+  [[nodiscard]] QVariantList selectedAudioFxChain() const;
+  Q_INVOKABLE void moveSelectedAudioFx(const QString& effect_id, int delta);
   [[nodiscard]] double selectedClipPosX() const;
   [[nodiscard]] double selectedClipPosY() const;
   [[nodiscard]] double selectedClipScale() const;
@@ -215,6 +269,9 @@ public:
   [[nodiscard]] bool canUndo() const { return active_session_ && active_session_->can_undo(); }
   [[nodiscard]] bool canRedo() const { return active_session_ && active_session_->can_redo(); }
   [[nodiscard]] QVariantList soundLibrary() const { return sound_library_; }
+  [[nodiscard]] QVariantList pulseMap() const { return pulse_map_; }
+  [[nodiscard]] QVariantList sceneCards() const { return scene_cards_; }
+  [[nodiscard]] bool analysisRunning() const noexcept { return analysis_running_; }
   [[nodiscard]] int importPending() const { return std::max(0, import_total_ - import_done_); }
   [[nodiscard]] int importTotal() const { return import_total_; }
   [[nodiscard]] QString appVersion() const;
@@ -225,6 +282,8 @@ public:
   // Batch import: every file is probed in order by the single import worker; assets appear
   // one by one, a bad file never costs the others. Duplicates (same file) are skipped.
   Q_INVOKABLE void openPaths(const QStringList& paths);
+  Q_INVOKABLE void relinkAsset(const QString& media_id, const QString& path);
+  Q_INVOKABLE void setCanvasPreset(const QString& preset);
   Q_INVOKABLE void openUrls(const QList<QUrl>& urls);
   Q_INVOKABLE void cancelImport();
   Q_INVOKABLE void importRequested();
@@ -265,6 +324,28 @@ public:
   Q_INVOKABLE void setSelectedClipGainDb(double gain_db);
   Q_INVOKABLE void toggleSelectedClipMute();
   Q_INVOKABLE void setSelectedClipFades(double fade_in_seconds, double fade_out_seconds);
+  Q_INVOKABLE void applySelectedDistantMusicPreset();
+  Q_INVOKABLE void setSelectedTelephone(double mix, double drive, bool enabled);
+  Q_INVOKABLE void applySelectedTelephonePreset();
+  Q_INVOKABLE void setSelectedTelephoneMixKeyframes(const QVariantList& keyframes);
+  Q_INVOKABLE void setSelectedTelephoneMixKeyframe(int index, double time_seconds,
+                                                    double value, int interpolation);
+  Q_INVOKABLE void removeSelectedTelephoneMixKeyframe(int index);
+  Q_INVOKABLE void setSelectedUnderwater(double mix, double depth, bool enabled);
+  Q_INVOKABLE void applySelectedUnderwaterPreset();
+  Q_INVOKABLE void resetSelectedAudioEffects();
+  Q_INVOKABLE void setSelectedUnderwaterDepthKeyframes(const QVariantList& keyframes);
+  Q_INVOKABLE void setSelectedUnderwaterDepthKeyframe(int index, double time_seconds,
+                                                       double value, int interpolation);
+  Q_INVOKABLE void removeSelectedUnderwaterDepthKeyframe(int index);
+  Q_INVOKABLE void applySelectedCinematicRecipe(const QString& recipe);
+  Q_INVOKABLE void setSelectedDistantMusic(double gain_db, double duration, double start_cutoff,
+                                            double end_cutoff, double reverb, int curve, bool enabled);
+  // Each item is {time: seconds, value: dB, interpolation: 0 hold, 1 linear, 2 smooth}.
+  Q_INVOKABLE void setSelectedDistantMusicGainKeyframes(const QVariantList& keyframes);
+  Q_INVOKABLE void setSelectedDistantMusicGainKeyframe(int index, double time_seconds,
+                                                       double value, int interpolation);
+  Q_INVOKABLE void removeSelectedDistantMusicGainKeyframe(int index);
   Q_INVOKABLE void setSelectedClipTransform(double pos_x, double pos_y, double scale,
                                              double rotation_degrees, double opacity);
   Q_INVOKABLE void resetSelectedClipTransform();
@@ -331,6 +412,10 @@ public:
   Q_INVOKABLE bool saveProject(const QString& path);
   // Returns false (and keeps the current project untouched) if the file cannot be opened.
   Q_INVOKABLE bool openProject(const QString& path);
+  Q_INVOKABLE bool importSubtitles(const QString& path);
+  Q_INVOKABLE bool exportSubtitles(const QString& path);
+  Q_INVOKABLE void analyzeSelectedAudio();
+  Q_INVOKABLE void cancelAudioAnalysis();
   // Library actions on imported media. Video assets go to VIDEO 1 as one
   // undoable edit; overlap is refused without changing the project.
   Q_INVOKABLE void selectAsset(const QString& media_id);
@@ -357,6 +442,7 @@ signals:
   void projectDirtyChanged(); void activeProjectPathChanged();
   void diagnosticsChanged(); void timelineChanged(); void timelinePlayheadChanged(); void timelineViewChanged(); void snapEnabledChanged(); void recoveryChanged(); void importProgressChanged(); void waveformPolicyChanged(); void editActionStateChanged(); void focusImportPathRequested();
   void soundLibraryChanged(); void assetsChanged();
+  void analysisChanged();
 private:
   struct WorkerCommand { std::filesystem::path path; std::uint64_t generation; bool auto_place{true}; };
   static constexpr std::size_t kMaxQueuedImports = 500;
@@ -457,6 +543,9 @@ private:
   QString import_first_failure_;
   std::thread worker_; mutable std::mutex mutex_; std::condition_variable wake_; bool stop_worker_{false}; std::deque<WorkerCommand> import_queue_;
   std::thread export_thread_;
+  std::thread analysis_thread_;
+  std::atomic_bool analysis_cancel_requested_{false};
+  std::uint64_t analysis_generation_{0};
   std::atomic_bool export_cancel_requested_{false};
   std::uint64_t export_generation_{0};
   QString status_{"Vacío"}; QString technical_status_{"Preview CPU"}; QString media_name_; QString metadata_; QString error_message_; QString preview_source_; QString viewer_state_{"empty"}; QString position_text_{"00:00:00.000"}; QString duration_text_{"--:--:--.---"}; QString debug_metrics_; QVariantList timeline_ruler_ticks_; QVariantList timeline_tracks_; QString timeline_duration_text_{"00:00:00.000"}; QString selected_clip_key_; QString selected_visual_track_key_;
@@ -493,6 +582,9 @@ private:
   std::uint64_t asset_model_revision_{~std::uint64_t{0}};
   double timeline_playhead_progress_{0.0}; double progress_{0.0}; double export_progress_{0.0}; bool has_media_{false}; bool has_video_media_{false}; bool playing_{false}; bool busy_{false}; bool export_running_{false}; bool preview_late_{false}; bool published_project_dirty_{false};
   QString export_status_{""}; QString export_destination_;
+  QVariantList pulse_map_;
+  QVariantList scene_cards_;
+  bool analysis_running_{false};
   std::optional<pulsar::domain::MediaTime> timeline_view_start_;
   std::optional<pulsar::domain::MediaTime> timeline_view_duration_;
   double timeline_zoom_{1.0};

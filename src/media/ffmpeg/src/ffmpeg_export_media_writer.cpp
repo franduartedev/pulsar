@@ -100,6 +100,39 @@ using FramePtr = std::unique_ptr<AVFrame, FrameDeleter>;
 using PacketPtr = std::unique_ptr<AVPacket, PacketDeleter>;
 using SwsPtr = std::unique_ptr<SwsContext, SwsDeleter>;
 
+// FFmpeg 7.1 added avcodec_get_supported_config(); FFmpeg 8 removed the public
+// AVCodec::sample_fmts and AVCodec::pix_fmts arrays. Keep both worlds working.
+#if LIBAVCODEC_VERSION_INT >= AV_VERSION_INT(61, 13, 100)
+[[nodiscard]] bool supports_sample_format(const AVCodec& codec, AVSampleFormat format) {
+  const void* configs = nullptr;
+  int count = 0;
+  if (avcodec_get_supported_config(nullptr, &codec, AV_CODEC_CONFIG_SAMPLE_FORMAT, 0, &configs,
+                                   &count) < 0 ||
+      configs == nullptr) {
+    return false;
+  }
+  const auto* formats = static_cast<const AVSampleFormat*>(configs);
+  for (int index = 0; index < count; ++index) {
+    if (formats[index] == format) return true;
+  }
+  return false;
+}
+
+[[nodiscard]] bool advertises_pixel_format(const AVCodec& codec, AVPixelFormat format) {
+  const void* configs = nullptr;
+  int count = 0;
+  if (avcodec_get_supported_config(nullptr, &codec, AV_CODEC_CONFIG_PIX_FORMAT, 0, &configs,
+                                   &count) < 0 ||
+      configs == nullptr) {
+    return true;
+  }
+  const auto* formats = static_cast<const AVPixelFormat*>(configs);
+  for (int index = 0; index < count; ++index) {
+    if (formats[index] == format) return true;
+  }
+  return false;
+}
+#else
 [[nodiscard]] bool supports_sample_format(const AVCodec& codec, AVSampleFormat format) {
   if (codec.sample_fmts == nullptr) return false;
   for (const auto* current = codec.sample_fmts; *current != AV_SAMPLE_FMT_NONE; ++current) {
@@ -107,6 +140,15 @@ using SwsPtr = std::unique_ptr<SwsContext, SwsDeleter>;
   }
   return false;
 }
+
+[[nodiscard]] bool advertises_pixel_format(const AVCodec& codec, AVPixelFormat format) {
+  if (codec.pix_fmts == nullptr) return true;
+  for (const auto* current = codec.pix_fmts; *current != AV_PIX_FMT_NONE; ++current) {
+    if (*current == format) return true;
+  }
+  return false;
+}
+#endif
 
 } // namespace
 
@@ -169,8 +211,16 @@ void FFmpegExportMediaWriter::Impl::open_output() {
   if (!packet) fail(ExportMediaWriterErrorCode::InternalInvariant,
                     "FFmpeg could not allocate an output packet");
   AVFormatContext* raw_format = nullptr;
+#if defined(_WIN32)
+  const auto output_path_utf8 = output_path.generic_u8string();
+  std::string output_path_text{reinterpret_cast<const char*>(output_path_utf8.data()),
+                               output_path_utf8.size()};
+  if (output_path_text.starts_with("//?/")) output_path_text.erase(0, 4);
+#else
+  const std::string output_path_text = output_path.generic_string();
+#endif
   const auto result = avformat_alloc_output_context2(
-      &raw_format, nullptr, "mp4", internal::path_to_utf8(output_path).c_str());
+      &raw_format, nullptr, "mp4", output_path_text.c_str());
   if (result < 0 || raw_format == nullptr) {
     fail(ExportMediaWriterErrorCode::MuxerUnavailable,
          "MP4 muxer is unavailable: " + ffmpeg_error_text(result));
@@ -183,7 +233,7 @@ void FFmpegExportMediaWriter::Impl::open_output() {
                                         video_stream->time_base);
   audio_stream->duration = plan.audio_sample_count();
   if ((format->oformat->flags & AVFMT_NOFILE) == 0 &&
-      avio_open(&format->pb, internal::path_to_utf8(output_path).c_str(), AVIO_FLAG_WRITE) < 0) {
+      avio_open(&format->pb, output_path_text.c_str(), AVIO_FLAG_WRITE) < 0) {
     fail(ExportMediaWriterErrorCode::OutputOpenFailed,
          "could not open MP4 output path for writing");
   }
@@ -216,14 +266,8 @@ void FFmpegExportMediaWriter::Impl::setup_video() {
                                     "video frame rate numerator is invalid");
   const int denominator = checked_int(rate.denominator(), ExportMediaWriterErrorCode::InternalInvariant,
                                       "video frame rate denominator is invalid");
-  if (encoder->pix_fmts != nullptr) {
-    bool yuv420p = false;
-    for (const auto* format_value = encoder->pix_fmts; *format_value != AV_PIX_FMT_NONE;
-         ++format_value) {
-      yuv420p |= *format_value == AV_PIX_FMT_YUV420P;
-    }
-    if (!yuv420p) fail(ExportMediaWriterErrorCode::EncoderUnavailable,
-                       "libx264 does not advertise yuv420p");
+  if (!advertises_pixel_format(*encoder, AV_PIX_FMT_YUV420P)) {
+    fail(ExportMediaWriterErrorCode::EncoderUnavailable, "libx264 does not advertise yuv420p");
   }
   video_stream = avformat_new_stream(format.get(), nullptr);
   if (video_stream == nullptr) fail(ExportMediaWriterErrorCode::InternalInvariant,
@@ -293,7 +337,7 @@ void FFmpegExportMediaWriter::Impl::setup_audio() {
   audio_codec->sample_fmt = audio_sample_format;
   audio_codec->sample_rate = plan.audio_sample_rate();
   audio_codec->bit_rate = plan.profile().audio_bitrate();
-  audio_codec->profile = FF_PROFILE_AAC_LOW;
+  audio_codec->profile = AV_PROFILE_AAC_LOW;
   av_channel_layout_default(&audio_codec->ch_layout, plan.audio_channels());
   audio_codec->time_base = AVRational{1, plan.audio_sample_rate()};
   if ((format->oformat->flags & AVFMT_GLOBALHEADER) != 0) audio_codec->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
@@ -304,21 +348,24 @@ void FFmpegExportMediaWriter::Impl::setup_audio() {
     fail(ExportMediaWriterErrorCode::EncoderUnavailable,
          "AAC encoder did not accept the required 48 kHz stereo profile");
   }
-  if (audio_codec->profile != FF_PROFILE_AAC_LOW) {
+  if (audio_codec->profile != AV_PROFILE_AAC_LOW) {
     fail(ExportMediaWriterErrorCode::EncoderUnavailable,
          "AAC encoder did not accept the required AAC-LC profile");
   }
+  // The encoder may report its codec-delay as initial padding after open2().
+  // The export contract writes the priming samples explicitly, so this metadata
+  // must be cleared before copying codec parameters to the MP4 stream.
+  audio_codec->initial_padding = 0;
+  audio_codec->trailing_padding = 0;
   const auto parameters_result = avcodec_parameters_from_context(audio_stream->codecpar,
                                                                   audio_codec.get());
   if (parameters_result < 0) fail(ExportMediaWriterErrorCode::InternalInvariant,
                                   "could not copy AAC parameters");
   audio_stream->time_base = audio_codec->time_base;
-  if (audio_stream->codecpar->profile != FF_PROFILE_AAC_LOW) {
+  if (audio_stream->codecpar->profile != AV_PROFILE_AAC_LOW) {
     fail(ExportMediaWriterErrorCode::EncoderUnavailable,
          "AAC stream parameters are not AAC-LC");
   }
-  audio_codec->initial_padding = 0;
-  audio_codec->trailing_padding = 0;
   audio_stream->codecpar->initial_padding = 0;
   audio_stream->codecpar->trailing_padding = 0;
   audio_frame_size = audio_codec->frame_size > 0 ? audio_codec->frame_size : 1024;

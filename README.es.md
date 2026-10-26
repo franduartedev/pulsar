@@ -34,13 +34,24 @@ exportación en la que podés confiar.**
 | 🎞️ **Timeline multipista** | Insertar en el cabezal o agregar al final (sin huecos), cortar, recortar, mover con imán, duplicar, deshacer / rehacer, avance por fotograma |
 | 🖼️ **Edición directa en el Viewer** | Mover y escalar clips sobre la vista previa, imagen en imagen, modos *Ajustar* / *100%* |
 | 🔤 **Títulos** | Texto estático en su propia pista, caja de fondo y opacidad opcionales, idéntico en vista previa y exportación |
-| 🔊 **Audio** | Separar audio, ganancia / silencio / solo por clip y por pista, fundidos, formas de onda, 37 efectos de sonido originales con previsualización |
+| 🔊 **Audio** | Separar audio, ganancia / silencio / solo por clip y por pista, fundidos, formas de onda, medidores, limitación segura y 37 efectos de sonido originales con previsualización |
+| 🎬 **PULSAR Audio FX** | Distant Music, Telephone y Underwater con presets, controles editables, keyframes y paridad entre vista previa y exportación |
+| 🧭 **Análisis creativo** | Pulse Map, Scene Cards y Cinematic Recipes para encontrar y construir el ritmo emocional de un corte |
 | 🗂️ **Biblioteca de medios** | Filtros y búsqueda, importación de varios archivos o carpetas, arrastrar y soltar al timeline |
 | 💾 **Proyectos seguros** | Guardado atómico de proyectos `.pulsar`, autoguardado y recuperación tras un cierre inesperado |
 | 📤 **Exportación** | MP4 H.264 / AAC con presets Original / 1080p / 720p; se niega a sobrescribir medios que usa el proyecto |
 | 🎯 **Vista previa = exportación** | Ambas usan el mismo plan de composición: lo que ves es lo que exportás |
 
 Además: imágenes PNG / JPEG / WebP y placas de color como clips, y una transición de fundido cruzado.
+
+### PULSAR Audio FX
+
+Los Audio FX son efectos por clip, editables, deshacibles y guardados dentro del proyecto.
+`Distant Music` acerca la música recuperando progresivamente el volumen y los agudos;
+`Telephone` crea una banda sonora de radio o teléfono; y `Underwater` agrega una atmósfera
+sumergida con filtro móvil. Se pueden combinar y automatizar con keyframes Hold / Linear /
+Smooth; Telephone también puede entrar progresivamente desde seco a procesado. Las recetas incluyen `Revelación`, `Suspenso`, `Memoria`, `Radio`, `Sumergido`,
+`Inmersión Profunda` y `Señal Perdida`.
 
 ## 📦 Requisitos
 
@@ -70,8 +81,8 @@ chmod +x PULSAR-0.2.0-beta.1-x86_64.AppImage
 - **Solo Linux x86_64.** Sin versiones para Windows, macOS ni móviles.
 - **Interfaz solo en español**; el selector de archivos de *Abrir proyecto* es el del toolkit (claro y en inglés).
 - **La vista previa puede ir lenta** con composición transformada o multicapa (solo CPU, sin GPU ni proxies). La exportación es la referencia. No probado con 4K / HEVC / material largo.
-- Sin títulos animados, subtítulos, keyframes, máscaras, herramientas de color ni control de velocidad; el fundido cruzado es la única transición.
-- Sin limitador ni medidores de audio: sumar varias pistas fuertes puede saturar.
+- Sin títulos animados, máscaras, herramientas de color ni control de velocidad; el fundido cruzado es por ahora la única transición.
+- Los Audio FX son por clip; todavía no existe un rack de efectos para buses/master. La cadena integrada por clip sí puede reordenarse y queda guardada en el proyecto.
 - Sin reenlace de medios faltantes, lista de proyectos recientes ni selección múltiple.
 - La exportación es solo MP4 / H.264 / AAC; sin presets verticales (9:16): el lienzo sigue al primer clip.
 - Imágenes: solo PNG, JPEG y WebP. Un proyecto solo de audio no se puede exportar.

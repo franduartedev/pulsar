@@ -1,6 +1,7 @@
 #include <pulsar/application/export/offline_audio_renderer.hpp>
 
 #include <pulsar/application/audio/clip_gain.hpp>
+#include <pulsar/application/audio/audio_effect_chain.hpp>
 #include <pulsar/application/audio/output_stage.hpp>
 
 #include <algorithm>
@@ -75,6 +76,7 @@ struct OfflineAudioRenderer::ContributorState {
   // Interpolation taps are clamped to [first_valid_index, last_valid_index].
   std::int64_t first_valid_index{0};
   std::int64_t last_valid_index{-1};
+  std::unique_ptr<AudioEffectChain> effects;
 };
 
 OfflineAudioRenderer::OfflineAudioRenderer(const ExportPlan& plan,
@@ -127,6 +129,11 @@ OfflineAudioRenderer::ContributorState& OfflineAudioRenderer::state_for(
     const domain::FrameRate source_grid{state->source->sample_rate(), 1};
     state->fade = ClipFade::from_times(contributor.fade_in, contributor.fade_out,
                                        contributor.timeline_range.duration(), 48'000);
+    if (contributor.distant_music.enabled || contributor.telephone.enabled || contributor.underwater.enabled) {
+      state->effects = std::make_unique<AudioEffectChain>(AudioEffectChain::from_clip_effects(
+          contributor.distant_music, contributor.telephone, contributor.underwater,
+          contributor.audio_effect_order, 48'000, 2));
+    }
     state->first_clip_frame = domain::frame_at(contributor.timeline_range.start(),
                                                domain::FrameRate{48'000, 1}, domain::RoundingMode::Ceil).value();
     state->first_valid_index = domain::frame_at(contributor.source_range.start(), source_grid,
@@ -210,6 +217,32 @@ void OfflineAudioRenderer::load_until(ContributorState& state, domain::MediaTime
                                                         static_cast<std::size_t>(decoded->channel_count)),
                               decoded->sample_rate);
     if (state.previous_end.has_value() && effective_start > *state.previous_end) {
+      // Timestamp rounding at a decoded-block boundary can leave one physical
+      // sample of apparent silence on Windows FFmpeg. Keep the source grid
+      // contiguous when the discrepancy is only that rounding residue.
+      const auto one_sample = source_sample_time(1, decoded->sample_rate);
+      if (effective_start - *state.previous_end <= one_sample) {
+        const auto shift = effective_start - *state.previous_end;
+        effective_start = *state.previous_end;
+        end = end - shift;
+      }
+    }
+    if (state.blocks.empty()) {
+      // A seek can land one physical sample after the requested unaligned
+      // source position on some FFmpeg/platform combinations. The decoded
+      // block still contains the requested first sample; normalize that
+      // decoder rounding here instead of manufacturing a one-sample gap.
+      const auto first_valid_time = source_sample_time(state.first_valid_index,
+                                                       decoded->sample_rate);
+      const auto one_sample = source_sample_time(1, decoded->sample_rate);
+      if (effective_start > first_valid_time &&
+          effective_start - first_valid_time <= one_sample) {
+        const auto shift = effective_start - first_valid_time;
+        effective_start = first_valid_time;
+        end = end - shift;
+      }
+    }
+    if (state.previous_end.has_value() && effective_start > *state.previous_end) {
       // The gap is represented by absence between two bounded blocks. It is
       // counted when samples are requested from that interval.
     }
@@ -252,6 +285,22 @@ float OfflineAudioRenderer::sample_at_channel(ContributorState& state,
     const auto index = domain::frame_at(offset, domain::FrameRate{block.sample_rate, 1},
                                         domain::RoundingMode::Floor).value();
     return channel_sample(block, index, channel);
+  }
+
+  // FFmpeg may expose an AAC priming boundary one physical source sample
+  // away from the requested grid on Windows. It is a timestamp quantization
+  // residue, not an editorial gap: use the adjacent decoded sample instead
+  // of manufacturing silence and reporting a source discontinuity.
+  const auto one_sample = source_sample_time(1, state.source->sample_rate());
+  for (const auto& block : state.blocks) {
+    if (relative_time < block.start && block.start - relative_time <= one_sample) {
+      return channel_sample(block, 0, channel);
+    }
+    if (relative_time >= block.end && relative_time - block.end <= one_sample) {
+      const auto frames = static_cast<std::int64_t>(
+          block.samples.size() / static_cast<std::size_t>(block.channel_count));
+      if (frames > 0) return channel_sample(block, frames - 1, channel);
+    }
   }
   if (state.eof && relative_time < state.contributor.source_range.end()) {
     if (channel == 0) {
@@ -298,10 +347,15 @@ std::array<float, 2> OfflineAudioRenderer::contributor_sample(
       const auto first = sample_at_channel(state, first_tap_time, channel);
       const auto second = sample_at_channel(state, second_tap_time, channel);
       result[static_cast<std::size_t>(channel)] = static_cast<float>(
-          (static_cast<long double>(first) * (1.0L - fraction) +
-           static_cast<long double>(second) * fraction) * state.gain.linear *
-          (state.fade.active() ? state.fade.gain_at(output_frame - state.first_clip_frame) : 1.0F));
+          static_cast<long double>(first) * (1.0L - fraction) +
+          static_cast<long double>(second) * fraction);
     }
+    if (state.effects) state.effects->process_interleaved(
+        result.data(), 1, output_frame - state.first_clip_frame);
+    const float level = state.gain.linear *
+        (state.fade.active() ? state.fade.gain_at(output_frame - state.first_clip_frame) : 1.0F);
+    result[0] *= level;
+    result[1] *= level;
   } catch (const OfflineAudioRenderError& error) {
     // Context is built only on the failure path; nothing is formatted per sample.
     throw OfflineAudioRenderError{
@@ -401,12 +455,14 @@ std::optional<OfflineAudioBlock> OfflineAudioRenderer::render_next_block() {
       right += value[1];
     }
     // Same master stage as the preview mixer.
-    samples[offset * 2] = soft_output_stage(static_cast<float>(left));
-    samples[offset * 2 + 1] = soft_output_stage(static_cast<float>(right));
+    samples[offset * 2] = static_cast<float>(left);
+    samples[offset * 2 + 1] = static_cast<float>(right);
   }
+  (void)apply_soft_output_stage(samples.data(), samples.size());
   next_sample_index_ += static_cast<std::int64_t>(frame_count);
   metrics_.output_samples += frame_count;
   return OfflineAudioBlock{first, frame_count, 48'000, 2, std::move(samples)};
 }
 
 } // namespace pulsar::application::exporting
+
