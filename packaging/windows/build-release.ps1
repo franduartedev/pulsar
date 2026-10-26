@@ -36,8 +36,10 @@ if (-not $ffmpegBin -or -not (Test-Path $ffmpegBin)) {
     throw "FFmpeg runtime directory not found. Pass -VcpkgRoot or set VCPKG_INSTALLATION_ROOT."
 }
 
+# The vcpkg bin directory only holds FFmpeg and its own dependencies (zlib "z.dll",
+# bz2, lzma, iconv, x264...). Copy all of them: filtering by name drops the
+# transitive ones and the app then fails to start with "z.dll not found".
 Get-ChildItem $ffmpegBin -File -Filter "*.dll" |
-    Where-Object { $_.Name -match "^(av|sw|postproc|vulkan|zimg|x264|libx264)" } |
     Copy-Item -Destination (Split-Path $exe) -Force
 
 Copy-Item (Join-Path $root "LICENSE") (Join-Path $stage "LICENSE.txt") -Force
