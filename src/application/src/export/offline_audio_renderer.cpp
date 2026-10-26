@@ -286,6 +286,22 @@ float OfflineAudioRenderer::sample_at_channel(ContributorState& state,
                                         domain::RoundingMode::Floor).value();
     return channel_sample(block, index, channel);
   }
+
+  // FFmpeg may expose an AAC priming boundary one physical source sample
+  // away from the requested grid on Windows. It is a timestamp quantization
+  // residue, not an editorial gap: use the adjacent decoded sample instead
+  // of manufacturing silence and reporting a source discontinuity.
+  const auto one_sample = source_sample_time(1, state.source->sample_rate());
+  for (const auto& block : state.blocks) {
+    if (relative_time < block.start && block.start - relative_time <= one_sample) {
+      return channel_sample(block, 0, channel);
+    }
+    if (relative_time >= block.end && relative_time - block.end <= one_sample) {
+      const auto frames = static_cast<std::int64_t>(
+          block.samples.size() / static_cast<std::size_t>(block.channel_count));
+      if (frames > 0) return channel_sample(block, frames - 1, channel);
+    }
+  }
   if (state.eof && relative_time < state.contributor.source_range.end()) {
     if (channel == 0) {
       throw OfflineAudioRenderError{OfflineAudioRenderErrorCode::SourceEndedEarly,
@@ -449,3 +465,4 @@ std::optional<OfflineAudioBlock> OfflineAudioRenderer::render_next_block() {
 }
 
 } // namespace pulsar::application::exporting
+
