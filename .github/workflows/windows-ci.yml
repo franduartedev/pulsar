@@ -86,8 +86,6 @@ jobs:
 
       - name: Configure
         shell: pwsh
-        env:
-          PULSAR_WIN_DIAG: ${{ github.workspace }}/tests/support/win_crash_diagnostics.hpp
         run: >-
           cmake -S . -B build -G Ninja
           -DCMAKE_BUILD_TYPE=Release
