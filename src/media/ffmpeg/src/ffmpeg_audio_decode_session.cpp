@@ -286,6 +286,12 @@ public:
     stream_start_timestamp_ =
         internal::convert_timestamp(stream.start_time, stream_time_base_);
     codec_context_ = allocate_decoder_context(*decoder, *stream.codecpar);
+    // AAC packets carry priming/discard metadata.  FFmpeg can only adjust the
+    // decoded frame timestamps for those discarded samples when the decoder
+    // knows the packet time base; leaving this unset produces a one-sample
+    // discontinuity on the Windows build and makes the renderer synthesize a
+    // source gap.
+    codec_context_->pkt_timebase = stream.time_base;
     sample_rate_ = codec_context_->sample_rate;
     channel_count_ = codec_context_->ch_layout.nb_channels;
     if (sample_rate_ <= 0 || channel_count_ <= 0) {

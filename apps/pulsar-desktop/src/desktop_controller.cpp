@@ -2766,6 +2766,10 @@ bool DesktopController::openProjectImpl(const QString& path, std::optional<pulsa
         std::move(restore_state), makeWorkerFactory(candidate_mailbox, project_path),
         makeAudioSourceFactory(project_path), std::unique_ptr<pulsar::application::AudioOutput>{}, makeCompositionPreview(project_path));
 #endif
+    // Release all handles owned by the old project before committing the new
+    // session.  This matters on Windows, where an in-flight thumbnail decode
+    // must finish before the media file can be replaced or removed.
+    resetThumbnails();
     resetImportQueue();
     active_session_ = std::move(candidate);
     visual_mailbox_ = std::move(candidate_mailbox);
