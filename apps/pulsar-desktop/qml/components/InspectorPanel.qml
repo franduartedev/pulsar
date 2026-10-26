@@ -604,7 +604,7 @@ Panel {
                 width: parent.width; spacing: Theme.spaceS
                 Text { width: parent.width; text: "PULSAR Audio FX"; color: Theme.textSecondary; font.pixelSize: Theme.fontSizeM; font.bold: true }
                 Text { width: parent.width; wrapMode: Text.WordWrap; text: "Distant Music: música que se acerca con volumen y agudos progresivos."; color: Theme.textMuted; font.pixelSize: Theme.fontSizeS }
-                FieldRow { visible: inspector.clipSelected && controller.selectedClipHasAudio; label: "Cadena"; Row { spacing: 4
+                FieldRow { visible: inspector.clipSelected && controller.selectedClipHasAudio; label: "Cadena"; Flow { width: parent.width; spacing: 4
                         Repeater { model: controller.selectedAudioFxChain
                             delegate: Row { spacing: 2
                                 Rectangle { width: chainLabel.implicitWidth + 16; height: Theme.controlHeightSmall; radius: Theme.radiusS; color: Theme.bgInput; border.width: 1; border.color: Theme.borderStrong
