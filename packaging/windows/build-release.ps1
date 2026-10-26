@@ -45,9 +45,13 @@ Copy-Item (Join-Path $root "THIRD_PARTY_NOTICES.md") (Join-Path $stage "THIRD_PA
 Copy-Item (Join-Path $root "CHANGELOG.md") (Join-Path $stage "CHANGELOG.md") -Force
 
 New-Item -ItemType Directory -Force -Path $dist | Out-Null
-$versionLine = & $exe --version | Select-Object -First 1
-$version = ($versionLine -replace "^PULSAR\s+", "").Trim()
-if ([string]::IsNullOrWhiteSpace($version)) { throw "Could not determine PULSAR version." }
+# pulsar-desktop.exe is a GUI-subsystem program: on Windows it prints nothing to
+# a captured console, so read the version from the CMake source of truth instead.
+$cmakeText = Get-Content (Join-Path $root "CMakeLists.txt") -Raw
+$base = if ($cmakeText -match 'VERSION\s+(\d+\.\d+\.\d+)') { $Matches[1] } else { $null }
+$label = if ($cmakeText -match 'PULSAR_VERSION_LABEL\s+"([^"]*)"') { $Matches[1] } else { "" }
+if (-not $base) { throw "Could not determine PULSAR version." }
+$version = if ($label) { "$base-$label" } else { $base }
 $archive = Join-Path $dist ("PULSAR-{0}-windows-x86_64.zip" -f $version)
 if (Test-Path $archive) { Remove-Item -LiteralPath $archive -Force }
 Compress-Archive -Path (Join-Path $stage "*") -DestinationPath $archive -CompressionLevel Optimal
