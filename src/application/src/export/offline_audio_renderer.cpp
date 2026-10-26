@@ -228,7 +228,7 @@ void OfflineAudioRenderer::load_until(ContributorState& state, domain::MediaTime
           effective_start - first_valid_time <= one_sample) {
         const auto shift = effective_start - first_valid_time;
         effective_start = first_valid_time;
-        end -= shift;
+        end = end - shift;
       }
     }
     if (state.previous_end.has_value() && effective_start > *state.previous_end) {
