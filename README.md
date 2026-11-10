@@ -123,6 +123,12 @@ and the ADRs in [`docs/adr`](docs/adr/README.md).
 Run the tests before sending changes and keep modules' dependency direction. The
 engineering rules are in [`docs/development/engineering.md`](docs/development/engineering.md).
 
+## Product vision and AI-assisted implementation
+
+PULSAR is a product conceived and directed by Francisco Duarte under FD Labs. AI tools contributed to a large part of its technical implementation. The project documents its current capabilities, build process, tests, limitations and releases; its presence here should not be read as a claim that one person individually wrote all code or made every architectural decision.
+
+Review the repository, tests and commit history for implementation details.
+
 ## 📄 License
 
 PULSAR is free software, released under the **GNU General Public License v3.0 or later** (`GPL-3.0-or-later`); see
