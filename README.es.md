@@ -123,6 +123,12 @@ y los ADR en [`docs/adr`](docs/adr/README.md).
 Ejecutá las pruebas antes de enviar cambios y respetá la dirección de dependencias entre módulos. Las
 reglas de ingeniería están en [`docs/development/engineering.md`](docs/development/engineering.md).
 
+## Visión del producto e implementación asistida por IA
+
+PULSAR es un producto concebido e impulsado por Francisco Duarte bajo FD Labs. Las herramientas de inteligencia artificial participaron en gran parte de su implementación técnica. El repositorio documenta sus capacidades actuales, compilación, pruebas, limitaciones y versiones; su publicación no significa que una sola persona haya escrito individualmente todo el código o tomado cada decisión de arquitectura.
+
+Consultá el repositorio, las pruebas y el historial de commits para revisar los detalles de implementación.
+
 ## 📄 Licencia
 
 PULSAR es software libre, publicado bajo la **GNU General Public License v3.0 o posterior** (`GPL-3.0-or-later`); ver
