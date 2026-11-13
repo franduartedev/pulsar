@@ -108,7 +108,6 @@ bool is_human(const QString& text) {
 
 int main(int argc, char** argv) {
   QGuiApplication application{argc, argv};
-  qputenv("PULSAR_TRACE_RESOURCE_LIFETIME", QByteArrayLiteral("1"));
   PreviewImageProvider image_provider;
   DesktopController controller{image_provider, {}};
   const auto fixtures = fs::path{PULSAR_SOURCE_DIR} / "tests/fixtures";

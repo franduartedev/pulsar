@@ -25,8 +25,6 @@ extern "C" {
 }
 
 #include <chrono>
-#include <cstdio>
-#include <cstdlib>
 #include <cerrno>
 #include <cmath>
 #include <cstdint>
@@ -1096,20 +1094,9 @@ private:
 
 FFmpegVideoDecodeSession::FFmpegVideoDecodeSession(const std::filesystem::path& path,
                                                    int video_stream_index)
-    : impl_{std::make_unique<Impl>(path, video_stream_index)} {
-  if (std::getenv("PULSAR_TRACE_RESOURCE_LIFETIME") != nullptr) {
-    std::fprintf(stderr, "RESOURCE_TRACE video-session open this=%p path='%s' stream=%d\n",
-                 static_cast<void*>(this), path.string().c_str(), video_stream_index);
-  }
-}
+    : impl_{std::make_unique<Impl>(path, video_stream_index)} {}
 
-FFmpegVideoDecodeSession::~FFmpegVideoDecodeSession() {
-  impl_.reset();
-  if (std::getenv("PULSAR_TRACE_RESOURCE_LIFETIME") != nullptr) {
-    std::fprintf(stderr, "RESOURCE_TRACE video-session close this=%p\n",
-                 static_cast<void*>(this));
-  }
-}
+FFmpegVideoDecodeSession::~FFmpegVideoDecodeSession() = default;
 
 FFmpegVideoDecodeSession::FFmpegVideoDecodeSession(FFmpegVideoDecodeSession&&) noexcept = default;
 
