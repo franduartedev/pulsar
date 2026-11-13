@@ -5,6 +5,8 @@
 #include <pulsar/application/audio/output_stage.hpp>
 
 #include <algorithm>
+#include <cstdio>
+#include <cstdlib>
 #include <cmath>
 #include <limits>
 #include <sstream>
@@ -14,6 +16,10 @@
 
 namespace pulsar::application::exporting {
 namespace {
+
+[[nodiscard]] bool trace_offline_audio() noexcept {
+  return std::getenv("PULSAR_TRACE_OFFLINE_AUDIO") != nullptr;
+}
 
 [[nodiscard]] domain::MediaTime source_sample_time(std::int64_t index, int rate) {
   if (rate <= 0 || index < 0) {
@@ -86,6 +92,10 @@ OfflineAudioRenderer::OfflineAudioRenderer(const ExportPlan& plan,
   if (max_render_frames_ == 0) {
     throw OfflineAudioRenderError{OfflineAudioRenderErrorCode::InternalInvariant,
                                   "offline audio render block size must be positive"};
+  }
+  if (trace_offline_audio()) {
+    std::fprintf(stderr, "AUDIO_TRACE renderer block_size=%zu plan_frames=%lld\n",
+                 max_render_frames_, static_cast<long long>(plan_.audio_sample_count()));
   }
 }
 
@@ -216,6 +226,20 @@ void OfflineAudioRenderer::load_until(ContributorState& state, domain::MediaTime
                               static_cast<std::int64_t>(samples.size() /
                                                         static_cast<std::size_t>(decoded->channel_count)),
                               decoded->sample_rate);
+    if (trace_offline_audio()) {
+      const auto discontinuity = state.previous_end.has_value()
+                                     ? static_cast<double>((start - *state.previous_end).seconds())
+                                     : 0.0;
+      std::fprintf(stderr,
+                   "AUDIO_TRACE block=%llu original_start=%s origin=%s rate=%d frames=%llu "
+                   "effective_start=%s effective_end=%s previous_end=%s delta_samples=%.9f\n",
+                   static_cast<unsigned long long>(metrics_.decoded_blocks),
+                   describe_time(start).c_str(), describe_time(state.stream_origin).c_str(),
+                   decoded->sample_rate, static_cast<unsigned long long>(decoded->frame_count),
+                   describe_time(effective_start).c_str(), describe_time(end).c_str(),
+                   state.previous_end ? describe_time(*state.previous_end).c_str() : "none",
+                   discontinuity * static_cast<double>(decoded->sample_rate));
+    }
     if (state.previous_end.has_value() && effective_start > *state.previous_end) {
       // Timestamp rounding at a decoded-block boundary can leave one physical
       // sample of apparent silence on Windows FFmpeg. Keep the source grid
@@ -313,6 +337,10 @@ float OfflineAudioRenderer::sample_at_channel(ContributorState& state,
     }
   }
   if (channel == 0) ++metrics_.inserted_source_gap_silence;
+  if (channel == 0 && trace_offline_audio()) {
+    std::fprintf(stderr, "AUDIO_TRACE inserted_silence at=%s rate=%d\n",
+                 describe_time(relative_time).c_str(), state.source->sample_rate());
+  }
   return 0.0F;
 }
 

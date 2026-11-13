@@ -8,6 +8,8 @@
 #include <algorithm>
 #include <exception>
 #include <optional>
+#include <cstdio>
+#include <cstdlib>
 
 bool ThumbnailCache::contains(const std::string& key) const {
   std::lock_guard lock{mutex_};
@@ -104,6 +106,9 @@ namespace {
 // Decodes the frame at/after `position` with a private decoder and shrinks it to the cache size.
 std::optional<QImage> decode_thumbnail(const ThumbnailRequest& request) {
   using namespace pulsar::media::ffmpeg;
+  const bool trace = std::getenv("PULSAR_TRACE_RESOURCE_LIFETIME") != nullptr;
+  if (trace) std::fprintf(stderr, "RESOURCE_TRACE thumbnail begin path='%s' key='%s'\n",
+                          request.path.string().c_str(), request.key.c_str());
   FFmpegVideoDecodeSession session{request.path, request.video_stream};
   auto seek = session.seek_to_presentation_timestamp_visual(request.position);
   std::optional<DecodedVisualVideoFrame> frame = std::move(seek.frame);
@@ -114,9 +119,12 @@ std::optional<QImage> decode_thumbnail(const ThumbnailRequest& request) {
   if (converted.width <= 0 || converted.height <= 0) return std::nullopt;
   const QImage wrapped{converted.pixels.data(), converted.width, converted.height, converted.stride_bytes,
                        QImage::Format_RGBA8888};
-  return wrapped.scaled(ThumbnailCache::kWidth, ThumbnailCache::kHeight, Qt::KeepAspectRatio,
-                        Qt::SmoothTransformation)
-      .convertToFormat(QImage::Format_RGBA8888);  // detaches from the temporary pixel buffer
+  auto result = wrapped.scaled(ThumbnailCache::kWidth, ThumbnailCache::kHeight,
+                               Qt::KeepAspectRatio, Qt::SmoothTransformation)
+                    .convertToFormat(QImage::Format_RGBA8888);  // detaches from the temporary pixel buffer
+  if (trace) std::fprintf(stderr, "RESOURCE_TRACE thumbnail end path='%s' key='%s'\n",
+                          request.path.string().c_str(), request.key.c_str());
+  return result;
 }
 }  // namespace
 

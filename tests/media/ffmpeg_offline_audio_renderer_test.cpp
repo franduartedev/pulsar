@@ -7,6 +7,7 @@
 
 #include <cassert>
 #include <cmath>
+#include <cstdlib>
 #include <filesystem>
 #include <utility>
 #include <vector>
@@ -92,6 +93,11 @@ void renders_real_audio_with_unaligned_source_range() {
 } // namespace
 
 int main() {
+#if defined(_WIN32)
+  _putenv_s("PULSAR_TRACE_OFFLINE_AUDIO", "1");
+#else
+  setenv("PULSAR_TRACE_OFFLINE_AUDIO", "1", 1);
+#endif
   renders_real_embedded_audio_sequentially();
   renders_real_audio_with_unaligned_source_range();
 }
