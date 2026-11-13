@@ -56,6 +56,34 @@ bool asset_available(DesktopController& c, int row) {
 bool clip_missing(DesktopController& c, int row) {
   return c.timelineClips()->index(row, 0).data(TimelineClipListModel::MissingRole).toBool();
 }
+bool remove_media_with_diagnostics(DesktopController& controller, const fs::path& path) {
+  std::error_code status_error;
+  const bool exists_before = fs::exists(path, status_error);
+  std::fprintf(stderr,
+               "SAFETY media-remove before path='%s' exists=%d status_error=%d busy=%d playing=%d\n",
+               path.string().c_str(), exists_before ? 1 : 0, status_error.value(),
+               controller.busy() ? 1 : 0, controller.playing() ? 1 : 0);
+  try {
+    const bool removed = fs::remove(path);
+    status_error.clear();
+    const bool exists_after = fs::exists(path, status_error);
+    std::fprintf(stderr,
+                 "SAFETY media-remove after path='%s' removed=%d exists=%d status_error=%d\n",
+                 path.string().c_str(), removed ? 1 : 0, exists_after ? 1 : 0,
+                 status_error.value());
+    return removed && !exists_after && !status_error;
+  } catch (const fs::filesystem_error& error) {
+    std::fprintf(stderr,
+                 "SAFETY media-remove filesystem_error path='%s' code=%d category='%s' what='%s'\n",
+                 path.string().c_str(), error.code().value(), error.code().category().name(),
+                 error.what());
+    return false;
+  } catch (const std::exception& error) {
+    std::fprintf(stderr, "SAFETY media-remove exception path='%s' what='%s'\n",
+                 path.string().c_str(), error.what());
+    return false;
+  }
+}
 bool import_and_wait(DesktopController& c, const fs::path& path, int expected) {
   c.openPath(QString::fromStdString(path.string()));
   return wait_until([&] { return assets(c) == expected && !c.busy(); });
@@ -145,7 +173,10 @@ int main(int argc, char** argv) {
   REQUIRE(21, expect_open_fails(root));                                   // a directory
 
   // ---- Missing media: opens, shows offline, never crashes ------------------
-  fs::remove(root / "media/b.mp4");
+  // Windows refuses to remove an open media file. Keep this operation
+  // observable: a failure has its own exit code instead of becoming a later,
+  // misleading offline-media assertion.
+  if (!remove_media_with_diagnostics(controller, root / "media/b.mp4")) return 220;
   REQUIRE(22, controller.openProject(q(second)));
   REQUIRE(23, controller.errorMessage().isEmpty() && assets(controller) == 2 && clips(controller) == 2);
   REQUIRE(24, asset_available(controller, 0) && !asset_available(controller, 1));

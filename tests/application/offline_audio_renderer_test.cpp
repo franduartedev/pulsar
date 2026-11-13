@@ -228,6 +228,46 @@ void source_timestamp_gaps_and_overlaps_are_explicit() {
   assert(metrics.trimmed_overlap_frames == 6'000);
 }
 
+void exact_one_sample_gap_is_not_hidden_as_decoder_residue() {
+  const auto snapshot = snapshot_with_clip();
+  // The first block ends at source sample 24,000. The second starts at
+  // sample 24,001, leaving one real sample-sized gap at 0.5 s. A decoder
+  // quantization residue is strictly smaller than one source sample and is
+  // handled separately; this exact-grid gap must remain silence.
+  auto first_samples = std::vector<float>(24'000, 0.25F);
+  auto second_samples = std::vector<float>(23'999, 0.75F);
+  auto source = SourceSpec{
+      48'000, 1, domain::MediaTime::zero(),
+      {{48'000, 1, 24'000, std::move(first_samples), domain::MediaTime::zero()},
+       {48'000, 1, 23'999, std::move(second_samples), domain::MediaTime{24'001, {1, 48'000}}}}};
+  auto factory = Factory{std::move(source)};
+  exporting::OfflineAudioRenderMetrics metrics;
+  const auto pcm = render_all(snapshot, 4096, factory, &metrics);
+
+  assert(pcm[24'000 * 2] == 0.0F);
+  assert(pcm[24'001 * 2] == 0.75F);
+  assert(metrics.inserted_source_gap_silence > 0);
+}
+
+void sub_sample_boundary_shift_is_normalized_without_gap() {
+  const auto snapshot = snapshot_with_clip();
+  // A half-sample timestamp residue is not representable on the source grid.
+  // It is the decoder-boundary case that may be normalized without creating
+  // silence, unlike the exact one-sample editorial gap above.
+  auto first_samples = std::vector<float>(24'000, 0.25F);
+  auto second_samples = std::vector<float>(24'000, 0.75F);
+  auto source = SourceSpec{
+      48'000, 1, domain::MediaTime::zero(),
+      {{48'000, 1, 24'000, std::move(first_samples), domain::MediaTime::zero()},
+       {48'000, 1, 24'000, std::move(second_samples), domain::MediaTime{48'001, {96'000}}}}};
+  auto factory = Factory{std::move(source)};
+  exporting::OfflineAudioRenderMetrics metrics;
+  const auto pcm = render_all(snapshot, 4096, factory, &metrics);
+
+  assert(pcm[24'000 * 2] == 0.75F);
+  assert(metrics.inserted_source_gap_silence == 0);
+}
+
 void missing_timestamp_is_not_silence() {
   const auto snapshot = snapshot_with_clip();
   auto samples = std::vector<float>(48'000, 0.5F);
@@ -396,6 +436,8 @@ int main() {
   source_ends_early_as_error();
   errors_carry_render_context();
   source_timestamp_gaps_and_overlaps_are_explicit();
+  exact_one_sample_gap_is_not_hidden_as_decoder_residue();
+  sub_sample_boundary_shift_is_normalized_without_gap();
   missing_timestamp_is_not_silence();
   long_renders_keep_bounded_source_state();
   unaligned_source_start_is_clamped_not_an_error();
