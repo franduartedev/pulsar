@@ -300,7 +300,7 @@ float OfflineAudioRenderer::sample_at_channel(ContributorState& state,
     if (relative_time < block.start && block.start - relative_time < one_sample) {
       return channel_sample(block, 0, channel);
     }
-    if (relative_time >= block.end && relative_time - block.end < one_sample) {
+    if (relative_time > block.end && relative_time - block.end < one_sample) {
       const auto frames = static_cast<std::int64_t>(
           block.samples.size() / static_cast<std::size_t>(block.channel_count));
       if (frames > 0) return channel_sample(block, frames - 1, channel);
