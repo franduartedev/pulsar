@@ -259,7 +259,7 @@ void sub_sample_boundary_shift_is_normalized_without_gap() {
   auto source = SourceSpec{
       48'000, 1, domain::MediaTime::zero(),
       {{48'000, 1, 24'000, std::move(first_samples), domain::MediaTime::zero()},
-       {48'000, 1, 24'000, std::move(second_samples), domain::MediaTime{48'001, {96'000}}}}};
+       {48'000, 1, 24'000, std::move(second_samples), domain::MediaTime{48'001, {1, 96'000}}}}};
   auto factory = Factory{std::move(source)};
   exporting::OfflineAudioRenderMetrics metrics;
   const auto pcm = render_all(snapshot, 4096, factory, &metrics);
