@@ -9,7 +9,7 @@ project(
 
 # Single source of truth for the product version shown to users:
 #   "<major>.<minor>.<patch>[-<label>]", e.g. 0.1.0-beta. Change it here only.
-set(PULSAR_VERSION_LABEL "beta.1" CACHE STRING "Pre-release label appended to the version (empty for a stable release)")
+set(PULSAR_VERSION_LABEL "beta.2" CACHE STRING "Pre-release label appended to the version (empty for a stable release)")
 if(PULSAR_VERSION_LABEL)
   set(PULSAR_VERSION_STRING "${PROJECT_VERSION}-${PULSAR_VERSION_LABEL}")
 else()
