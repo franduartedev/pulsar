@@ -1219,7 +1219,9 @@ bool DesktopController::installTimelineAsset(const pulsar::application::MediaPro
       metadata_ = audioMetadataText(result, stream);
       setTechnicalStatus("Audio listo");
     }
+    const bool was_playing = playing_;
     active_session_->synchronize_document_state();
+    if (!was_playing) active_session_->pause();
     publishTimeline();
     has_media_ = active_session_->timeline_duration() > MediaTime::zero();
     duration_text_ = formatTime(active_session_->timeline_duration());

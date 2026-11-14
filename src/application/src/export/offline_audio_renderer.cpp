@@ -68,6 +68,7 @@ struct OfflineAudioRenderer::ContributorState {
   std::deque<SourceBlock> blocks;
   bool eof{false};
   std::optional<domain::MediaTime> previous_end;
+  std::optional<domain::MediaTime> initial_seek_shift;
   ClipGain gain;
   ClipFade fade;
   std::int64_t first_clip_frame{0};   // output-grid index of the clip's first sample
@@ -122,7 +123,7 @@ OfflineAudioRenderer::ContributorState& OfflineAudioRenderer::state_for(
   const auto clip_gain = ClipGain::from_decibels(contributor.gain_db, contributor.muted);
   const auto track_gain = ClipGain::from_decibels(contributor.track_gain_db, contributor.track_muted);
   auto state = std::make_unique<ContributorState>(ContributorState{
-      contributor, std::move(source), origin, {}, false, std::nullopt,
+      contributor, std::move(source), origin, {}, std::nullopt, false, std::nullopt,
       ClipGain{clip_gain.linear * track_gain.linear, clip_gain.muted || track_gain.muted},
       ClipFade{}, 0, 0, -1});
   {
@@ -216,6 +217,21 @@ void OfflineAudioRenderer::load_until(ContributorState& state, domain::MediaTime
                               static_cast<std::int64_t>(samples.size() /
                                                         static_cast<std::size_t>(decoded->channel_count)),
                               decoded->sample_rate);
+    if (!state.initial_seek_shift.has_value() && state.blocks.empty() &&
+        state.contributor.source_range.start() > domain::MediaTime::zero()) {
+      const auto first_valid_time = source_sample_time(state.first_valid_index,
+                                                       decoded->sample_rate);
+      if (effective_start > first_valid_time) {
+        state.initial_seek_shift = first_valid_time - effective_start;
+      }
+    }
+    if (state.initial_seek_shift.has_value()) {
+      effective_start = start + *state.initial_seek_shift;
+      end = effective_start + source_sample_time(
+                                static_cast<std::int64_t>(samples.size() /
+                                                          static_cast<std::size_t>(decoded->channel_count)),
+                                decoded->sample_rate);
+    }
     if (state.previous_end.has_value() && effective_start > *state.previous_end) {
       // Timestamp rounding at a decoded-block boundary can leave one physical
       // sample of apparent silence on Windows FFmpeg. Keep the source grid
@@ -227,20 +243,6 @@ void OfflineAudioRenderer::load_until(ContributorState& state, domain::MediaTime
       if (effective_start - *state.previous_end < one_sample) {
         const auto shift = effective_start - *state.previous_end;
         effective_start = *state.previous_end;
-        end = end - shift;
-      }
-    }
-    if (state.blocks.empty()) {
-      // A seek can land on the first decoder block after the requested
-      // unaligned source position (AAC priming/seek granularity). There is no
-      // preceding decoded block here, so this is seek residue rather than an
-      // editorial gap. Anchor this first block to the first physical sample
-      // in the requested source range; gaps between later blocks remain real.
-      const auto first_valid_time = source_sample_time(state.first_valid_index,
-                                                       decoded->sample_rate);
-      if (effective_start > first_valid_time) {
-        const auto shift = effective_start - first_valid_time;
-        effective_start = first_valid_time;
         end = end - shift;
       }
     }
