@@ -1,0 +1,12 @@
+{"command":"create_project","name":"round-trip.pulsar"}
+{"command":"create_test_media","path":"fixture.test"}
+{"command":"import_test_media","path":"fixture.test","duration":10,"audio":true}
+{"command":"add_clip","media_id":1,"source_start":0,"source_end":10,"timeline_start":0}
+{"command":"split_clip","clip_id":1,"position":4}
+{"command":"timeline_state"}
+{"command":"save_project","path":"round-trip.pulsar"}
+{"command":"validate_round_trip"}
+{"command":"close_project"}
+{"command":"open_project","path":"round-trip.pulsar"}
+{"command":"timeline_state"}
+{"command":"validate_round_trip"}

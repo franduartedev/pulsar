@@ -1,0 +1,6 @@
+add_library(pulsar_agent_bridge src/agent_bridge.cpp)
+add_library(pulsar::agent_bridge ALIAS pulsar_agent_bridge)
+target_include_directories(pulsar_agent_bridge PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
+target_link_libraries(pulsar_agent_bridge PUBLIC pulsar::application pulsar::project_file)
+pulsar_apply_project_options(pulsar_agent_bridge)
+pulsar_apply_compiler_warnings(pulsar_agent_bridge)
