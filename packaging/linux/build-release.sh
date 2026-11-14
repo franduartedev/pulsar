@@ -27,7 +27,7 @@ declare -A TOOL_URL=(
   [linuxdeploy-plugin-appimage-x86_64.AppImage]=https://github.com/linuxdeploy/linuxdeploy-plugin-appimage/releases/download/continuous/linuxdeploy-plugin-appimage-x86_64.AppImage
 )
 declare -A TOOL_SHA=(
-  [linuxdeploy-x86_64.AppImage]=8aea8da0f7f7039d2a2cecb14657d752a222a5e1d3825caeef186c82f751cdd1
+  [linuxdeploy-x86_64.AppImage]=df908b19f1ed1cdafa79508d415aa12d6c56ce4d56d4149aa8c09286718706e5
   [linuxdeploy-plugin-qt-x86_64.AppImage]=cfc1055b2b9dbc08412b579f20990b7b41a17b61beaa5847dc9477c96c9e9617
   [linuxdeploy-plugin-appimage-x86_64.AppImage]=49d6a17160675a6bd1781699aae6bdf7692d98552e02a3671d2183d10547842e
 )
