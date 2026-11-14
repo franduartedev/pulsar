@@ -1,6 +1,7 @@
 #include <pulsar/application/audio/audio_contributor_resolver.hpp>
 #include <pulsar/application/audio/audio_mix_session.hpp>
 #include <pulsar/application/audio/output_stage.hpp>
+#include <pulsar/application/playback/audio_mix_playback_session.hpp>
 #include <pulsar/application/project/media_asset.hpp>
 #include <pulsar/domain/timeline/clip.hpp>
 #include <pulsar/domain/timeline/timeline.hpp>
@@ -125,6 +126,66 @@ struct SourceBank {
   }
 };
 
+class PlaybackOutput final : public application::AudioOutput {
+public:
+  bool open(const application::AudioSourceFormat& source) override {
+    format_ = application::AudioDeviceFormat{source.sample_rate, source.channel_count,
+                                              application::AudioSampleFormat::Float32};
+    state_ = application::AudioOutputState::Opened;
+    pending_ = 0;
+    metrics_ = {};
+    return true;
+  }
+
+  bool close() override {
+    state_ = application::AudioOutputState::Closed;
+    pending_ = 0;
+    return true;
+  }
+
+  application::AudioEnqueueResult enqueue(const application::AudioBlock& block) override {
+    if (state_ != application::AudioOutputState::Opened &&
+        state_ != application::AudioOutputState::Running) {
+      return application::AudioEnqueueResult::InvalidState;
+    }
+    accepted.push_back(block);
+    pending_ += block.frame_count();
+    metrics_.device_frames_submitted += block.frame_count();
+    metrics_.buffered_device_frames = pending_;
+    return application::AudioEnqueueResult::Accepted;
+  }
+
+  bool start() override {
+    if (state_ != application::AudioOutputState::Opened || pending_ == 0) return false;
+    state_ = application::AudioOutputState::Running;
+    return true;
+  }
+
+  bool request_drain() override { return false; }
+
+  bool stop() override {
+    if (state_ == application::AudioOutputState::Closed) return false;
+    state_ = application::AudioOutputState::Opened;
+    pending_ = 0;
+    metrics_.buffered_device_frames = 0;
+    return true;
+  }
+
+  bool flush() override { return stop(); }
+  application::AudioOutputState state() const override { return state_; }
+  std::optional<application::AudioDeviceFormat> device_format() const override { return format_; }
+  application::AudioOutputMetrics metrics() const override { return metrics_; }
+  std::optional<application::AudioOutputError> error() const override { return std::nullopt; }
+
+  std::vector<application::AudioBlock> accepted;
+
+private:
+  application::AudioOutputState state_{application::AudioOutputState::Closed};
+  std::optional<application::AudioDeviceFormat> format_;
+  application::AudioOutputMetrics metrics_{};
+  std::uint64_t pending_{0};
+};
+
 application::MediaAsset video_asset(std::uint64_t id, std::string path, int rate = kMixRate,
                                     int channels = 1) {
   return {domain::MediaId{id}, path, 0, frames(kMixRate * 4),
@@ -191,6 +252,50 @@ application::ProjectSnapshot snapshot(std::vector<application::MediaAsset> asset
 
 void assert_near(float actual, float expected, float tolerance = 1.0e-4F) {
   assert(std::abs(actual - expected) <= tolerance);
+}
+
+void playback_reconfigure_preserves_editorial_audio_position() {
+  SourceBank bank{{{"video", SignalSpec{.constant = 0.25F}}}};
+  PlaybackOutput output;
+  application::AudioMixPlaybackSession playback{&output, bank.factory()};
+  const auto first = snapshot({video_asset(1, "video")}, ClipSpec{1, 1, 0, 0, 4096}, {}, 10);
+  const auto second = snapshot({video_asset(1, "video")}, ClipSpec{1, 1, 0, 0, 4096}, {}, 11);
+  const auto shifted_source =
+      snapshot({video_asset(1, "video")}, ClipSpec{1, 1, 0, 500, 4096}, {}, 12);
+  const auto editorial_position = frames(2048);
+
+  playback.configure(first, editorial_position);
+  const auto first_generation = playback.generation();
+  assert(playback.render_position().has_value());
+  assert(*playback.render_position() == editorial_position);
+  playback.play();
+  assert(!output.accepted.empty());
+  assert(output.accepted.front().presentation_timestamp().has_value());
+  assert(*output.accepted.front().presentation_timestamp() == editorial_position);
+  assert(playback.clock_position().has_value());
+  assert(*playback.clock_position() == editorial_position);
+
+  output.accepted.clear();
+  // This generation represents adding/changing a V2 visual clip. V1's
+  // embedded audio remains the same and must not restart at timeline zero.
+  playback.configure(second, editorial_position);
+  assert(playback.generation() > first_generation);
+  assert(playback.render_position().has_value());
+  assert(*playback.render_position() == editorial_position);
+  playback.play();
+  assert(!output.accepted.empty());
+  assert(output.accepted.front().presentation_timestamp().has_value());
+  assert(*output.accepted.front().presentation_timestamp() == editorial_position);
+
+  playback.pause();
+  output.accepted.clear();
+  playback.configure(shifted_source, editorial_position);
+  playback.play();
+  assert(!output.accepted.empty());
+  assert(output.accepted.front().presentation_timestamp().has_value());
+  assert(*output.accepted.front().presentation_timestamp() == editorial_position);
+  assert(!bank.seek_targets.empty());
+  assert(bank.seek_targets.back() == frames(2548));
 }
 
 float left(const application::AudioBlock& block, std::size_t frame) {
@@ -564,6 +669,7 @@ void benchmark_mix_scaling() {
 } // namespace
 
 int main() {
+  playback_reconfigure_preserves_editorial_audio_position();
   contributor_resolution_is_complete_and_deterministic();
   mix_alignment_gain_mute_and_clipping();
   fades_ramp_in_the_mixer_across_blocks();
