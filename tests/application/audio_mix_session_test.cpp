@@ -177,6 +177,8 @@ public:
   application::AudioOutputMetrics metrics() const override { return metrics_; }
   std::optional<application::AudioOutputError> error() const override { return std::nullopt; }
 
+  std::uint64_t pending_frames() const noexcept { return pending_; }
+
   std::vector<application::AudioBlock> accepted;
 
 private:
@@ -255,13 +257,14 @@ void assert_near(float actual, float expected, float tolerance = 1.0e-4F) {
 }
 
 void playback_reconfigure_preserves_editorial_audio_position() {
-  SourceBank bank{{{"video", SignalSpec{.constant = 0.25F}}}};
+  SourceBank bank{{{"video", SignalSpec{.constant = 0.25F, .impulse_frame = 2048}},
+                   {"video-shifted", SignalSpec{.constant = 0.25F, .impulse_frame = 2548}}}};
   PlaybackOutput output;
   application::AudioMixPlaybackSession playback{&output, bank.factory()};
   const auto first = snapshot({video_asset(1, "video")}, ClipSpec{1, 1, 0, 0, 4096}, {}, 10);
   const auto second = snapshot({video_asset(1, "video")}, ClipSpec{1, 1, 0, 0, 4096}, {}, 11);
   const auto shifted_source =
-      snapshot({video_asset(1, "video")}, ClipSpec{1, 1, 0, 500, 4096}, {}, 12);
+      snapshot({video_asset(1, "video-shifted")}, ClipSpec{1, 1, 0, 500, 4096}, {}, 12);
   const auto editorial_position = frames(2048);
 
   playback.configure(first, editorial_position);
@@ -270,8 +273,8 @@ void playback_reconfigure_preserves_editorial_audio_position() {
   assert(*playback.render_position() == editorial_position);
   playback.play();
   assert(!output.accepted.empty());
-  assert(output.accepted.front().presentation_timestamp().has_value());
-  assert(*output.accepted.front().presentation_timestamp() == editorial_position);
+  assert(output.accepted.front().samples()[0] > 0.5F);
+  assert(bank.seek_targets.back() == editorial_position);
   assert(playback.clock_position().has_value());
   assert(*playback.clock_position() == editorial_position);
 
@@ -282,18 +285,19 @@ void playback_reconfigure_preserves_editorial_audio_position() {
   assert(playback.generation() > first_generation);
   assert(playback.render_position().has_value());
   assert(*playback.render_position() == editorial_position);
+  assert(output.pending_frames() == 0);
   playback.play();
   assert(!output.accepted.empty());
-  assert(output.accepted.front().presentation_timestamp().has_value());
-  assert(*output.accepted.front().presentation_timestamp() == editorial_position);
+  assert(output.accepted.front().samples()[0] > 0.5F);
+  assert(bank.seek_targets.back() == editorial_position);
 
   playback.pause();
   output.accepted.clear();
   playback.configure(shifted_source, editorial_position);
+  assert(output.pending_frames() == 0);
   playback.play();
   assert(!output.accepted.empty());
-  assert(output.accepted.front().presentation_timestamp().has_value());
-  assert(*output.accepted.front().presentation_timestamp() == editorial_position);
+  assert(output.accepted.front().samples()[0] > 0.5F);
   assert(!bank.seek_targets.empty());
   assert(bank.seek_targets.back() == frames(2548));
 }
