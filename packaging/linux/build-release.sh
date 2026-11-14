@@ -57,6 +57,8 @@ cmake -S "$ROOT" -B "$BUILD" -G Ninja -DCMAKE_BUILD_TYPE=Release -DPULSAR_BUILD_
 cmake --build "$BUILD"
 VERSION="$("$BUILD/apps/pulsar-desktop/pulsar-desktop" --version | awk '{print $2}')"
 [ -n "$VERSION" ] || die "could not read the product version"
+EXPECTED_VERSION="${PULSAR_EXPECTED_VERSION:-$VERSION}"
+[ "$VERSION" = "$EXPECTED_VERSION" ] || die "expected version $EXPECTED_VERSION but binary reports $VERSION"
 NAME="PULSAR-$VERSION"
 echo "== packaging $NAME"
 
@@ -118,6 +120,12 @@ cp "$FFSRC"/ffmpeg-6.1.1/COPYING.GPLv3 "$FFSRC"/ffmpeg-6.1.1/COPYING.GPLv2 "$FFS
 tar -C "$FFSRC" -xzf "$THIRD/x264_0.164.3108+git31e19f9.orig.tar.gz" --wildcards '*/COPYING' --strip-components=1 && mv "$FFSRC/COPYING" "$LIC/X264-COPYING"; rm -rf "$FFSRC"
 # Licence of PULSAR itself, the notices, and the licence texts our dependencies refer to.
 DOC="$APPDIR/usr/share/doc/pulsar"; mkdir -p "$DOC/licenses"
+cat > "$DOC/BUILD-METADATA.txt" <<EOF
+PULSAR_VERSION=$VERSION
+PULSAR_HEAD_SHA=${PULSAR_HEAD_SHA:-unknown}
+PULSAR_WORKFLOW_SHA=${PULSAR_WORKFLOW_SHA:-unknown}
+PULSAR_CHECKOUT_SHA=${PULSAR_CHECKOUT_SHA:-unknown}
+EOF
 cp "$ROOT/LICENSE" "$ROOT/THIRD_PARTY_NOTICES.md" "$DOC/"
 for text in GPL-2 GPL-3 LGPL-2 LGPL-2.1 LGPL-3 Apache-2.0 MPL-2.0 BSD CC0-1.0 Artistic; do cp "/usr/share/common-licenses/$text" "$DOC/licenses/$text"; done
 cp "$ROOT/assets/fonts/"*OFL* "$DOC/licenses/" 2>/dev/null || true
@@ -127,6 +135,7 @@ BUNDLE="$STAGE/$NAME"
 rm -rf "$BUNDLE"; mkdir -p "$BUNDLE"
 cp -a "$APPDIR/usr" "$BUNDLE/usr"
 cp "$ROOT/packaging/linux/pulsar-launcher.sh" "$BUNDLE/pulsar"; chmod +x "$BUNDLE/pulsar"
+cp "$DOC/BUILD-METADATA.txt" "$BUNDLE/BUILD-METADATA.txt"
 cp "$ROOT/docs/release/$VERSION.md" "$BUNDLE/README-BETA.md"
 cp "$ROOT/LICENSE" "$ROOT/THIRD_PARTY_NOTICES.md" "$BUNDLE/"
 cp "$ROOT/CHANGELOG.md" "$BUNDLE/CHANGELOG.md"
