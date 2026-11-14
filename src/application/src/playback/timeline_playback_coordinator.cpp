@@ -98,6 +98,15 @@ void TimelinePlaybackCoordinator::play() {
   if (!snapshot_.has_value()) {
     return;
   }
+  // A paused preview does not retain a decoder handle. Recreate the active
+  // source only when playback actually resumes.
+  if (active_clip_.has_value() && source_session_ == nullptr) {
+    enter_clip(*active_clip_, true);
+    // enter_clip() holds the timeline while a source transition is prepared.
+    // This is a resume of the already active segment, so restore the same
+    // advance permission that was in effect before pause().
+    set_advance_permission(TimelineAdvancePermission::Advance);
+  }
   if (audio_session_ != nullptr && audio_session_->has_device_clock()) {
     clock_source_ = PlaybackClockSource::AudioDevice;
   } else {
@@ -117,6 +126,9 @@ void TimelinePlaybackCoordinator::pause() {
   if (audio_session_ != nullptr) {
     audio_session_->pause();
   }
+  // FFmpeg workers own file handles. A paused timeline must not keep media
+  // files locked; play() recreates the source for the active clip.
+  reset_source();
   clock_source_ = PlaybackClockSource::Paused;
   synchronize_transport();
 }

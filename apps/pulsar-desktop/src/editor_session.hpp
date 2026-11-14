@@ -373,6 +373,7 @@ private:
   std::vector<TimelineTrackView> track_views_;
   std::uint64_t read_model_generation_{0};
   std::optional<std::uint64_t> synchronized_document_generation_;
+  std::size_t synchronized_video_clip_count_{0};
   std::uint64_t sync_performed_count_{0};
   std::uint64_t sync_skipped_count_{0};
   DurationSampleRing sync_durations_;
