@@ -1,0 +1,4 @@
+add_executable(pulsar_agent_bridge_cli main.cpp)
+target_link_libraries(pulsar_agent_bridge_cli PRIVATE pulsar::agent_bridge)
+pulsar_apply_project_options(pulsar_agent_bridge_cli)
+pulsar_apply_compiler_warnings(pulsar_agent_bridge_cli)

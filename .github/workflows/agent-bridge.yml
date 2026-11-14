@@ -1,0 +1,157 @@
+name: Agent Bridge MVP
+
+on:
+  push:
+    branches: [feat/agent-bridge-mvp]
+  pull_request:
+    branches: [feat/agent-bridge-mvp]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: agent-bridge-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    name: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            shell: bash
+            exe: build-agent/apps/agent-bridge/pulsar_agent_bridge_cli
+          - os: windows-2022
+            shell: pwsh
+            exe: build-agent/apps/agent-bridge/Release/pulsar_agent_bridge_cli.exe
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: ${{ matrix.shell }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Record source revision (Linux)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          head="$(git rev-parse HEAD)"
+          test "$head" = "${{ github.event.pull_request.head.sha || github.sha }}"
+
+      - name: Record source revision (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $head = (git rev-parse HEAD).Trim()
+          if ($head -ne "${{ github.event.pull_request.head.sha || github.sha }}") { throw "checkout SHA mismatch" }
+
+      - name: Configure MSVC
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Install Ninja
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: choco install ninja --no-progress --yes
+
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Configure bridge build
+        shell: bash
+        if: runner.os != 'Windows'
+        run: >-
+          cmake -S . -B build-agent -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DPULSAR_BUILD_TESTS=ON
+          -DPULSAR_BUILD_FFMPEG=OFF
+          -DPULSAR_BUILD_DESKTOP=OFF
+          -DPULSAR_BUILD_AGENT_BRIDGE=ON
+
+      - name: Configure bridge build (Windows)
+        shell: pwsh
+        if: runner.os == 'Windows'
+        run: >-
+          cmake -S . -B build-agent -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DPULSAR_BUILD_TESTS=ON
+          -DPULSAR_BUILD_FFMPEG=OFF
+          -DPULSAR_BUILD_DESKTOP=OFF
+          -DPULSAR_BUILD_AGENT_BRIDGE=ON
+
+      - name: Build bridge and tests
+        run: cmake --build build-agent --parallel 2
+
+      - name: Run bridge module tests
+        run: ctest --test-dir build-agent -C Release -R 'pulsar\.application\.agent_bridge' --output-on-failure
+
+      - name: Run JSONL scenario and security checks (Linux)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          workspace="$RUNNER_TEMP/pulsar-agent-workspace"
+          rm -rf "$workspace"
+          mkdir -p "$workspace"
+          build-agent/apps/agent-bridge/pulsar_agent_bridge_cli --root "$workspace" \
+            < examples/agent-bridge-round-trip.jsonl | tee "$RUNNER_TEMP/agent-bridge-output.jsonl"
+          test "$(grep -c '"ok":true' "$RUNNER_TEMP/agent-bridge-output.jsonl")" -eq 12
+          test -f "$workspace/round-trip.pulsar"
+          printf '%s\n' '{"command":"create_test_media","path":"../agent-bridge-escape-sentinel"}' |
+            build-agent/apps/agent-bridge/pulsar_agent_bridge_cli --root "$workspace" > "$RUNNER_TEMP/agent-bridge-negative.jsonl"
+          grep -q '"ok":false' "$RUNNER_TEMP/agent-bridge-negative.jsonl"
+          test ! -e "$RUNNER_TEMP/agent-bridge-escape-sentinel"
+
+      - name: Run JSONL scenario and security checks (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $workspace = Join-Path $env:RUNNER_TEMP 'pulsar-agent-workspace'
+          Remove-Item -Recurse -Force $workspace -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Path $workspace | Out-Null
+          Get-Content examples/agent-bridge-round-trip.jsonl |
+            & build-agent/apps/agent-bridge/Release/pulsar_agent_bridge_cli.exe --root $workspace |
+            Tee-Object (Join-Path $env:RUNNER_TEMP 'agent-bridge-output.jsonl')
+          $outputs = Get-Content (Join-Path $env:RUNNER_TEMP 'agent-bridge-output.jsonl')
+          if (($outputs | Where-Object { $_ -notmatch '"ok":true' }).Count -ne 0) { throw 'JSONL scenario returned an error' }
+          if (-not (Test-Path (Join-Path $workspace 'round-trip.pulsar'))) { throw 'round-trip project missing' }
+          '{"command":"create_test_media","path":"../agent-bridge-escape-sentinel"}' |
+            & build-agent/apps/agent-bridge/Release/pulsar_agent_bridge_cli.exe --root $workspace |
+            Tee-Object (Join-Path $env:RUNNER_TEMP 'agent-bridge-negative.jsonl')
+          if ((Get-Content (Join-Path $env:RUNNER_TEMP 'agent-bridge-negative.jsonl')) -notmatch '"ok":false') { throw 'escape was not rejected' }
+          if (Test-Path (Join-Path $env:RUNNER_TEMP 'agent-bridge-escape-sentinel')) { throw 'escape sentinel was created' }
+
+      - name: Verify normal build keeps bridge disabled
+        shell: bash
+        if: runner.os != 'Windows'
+        run: |
+          cmake -S . -B build-normal -G Ninja -DCMAKE_BUILD_TYPE=Release -DPULSAR_BUILD_TESTS=OFF -DPULSAR_BUILD_FFMPEG=OFF -DPULSAR_BUILD_DESKTOP=OFF -DPULSAR_BUILD_AGENT_BRIDGE=OFF
+          cmake --build build-normal --parallel 2
+          test ! -e build-normal/apps/agent-bridge/pulsar_agent_bridge_cli
+
+      - name: Verify normal build keeps bridge disabled (Windows)
+        shell: pwsh
+        if: runner.os == 'Windows'
+        run: |
+          cmake -S . -B build-normal -G Ninja -DCMAKE_BUILD_TYPE=Release -DPULSAR_BUILD_TESTS=OFF -DPULSAR_BUILD_FFMPEG=OFF -DPULSAR_BUILD_DESKTOP=OFF -DPULSAR_BUILD_AGENT_BRIDGE=OFF
+          cmake --build build-normal --parallel 2
+          if (Test-Path build-normal/apps/agent-bridge/Release/pulsar_agent_bridge_cli.exe) { throw 'bridge was built while disabled' }
+
+      - name: Upload executable and reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: pulsar-agent-bridge-${{ runner.os }}
+          path: |
+            ${{ matrix.exe }}
+            ${{ runner.temp }}/agent-bridge-*.jsonl
+          if-no-files-found: error

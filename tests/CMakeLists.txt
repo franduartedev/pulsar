@@ -710,6 +710,14 @@ pulsar_apply_project_options(pulsar_still_tests)
 pulsar_apply_compiler_warnings(pulsar_still_tests)
 add_test(NAME pulsar.application.still_media COMMAND pulsar_still_tests)
 
+if(TARGET pulsar::agent_bridge)
+  add_executable(pulsar_agent_bridge_tests application/agent_bridge_test.cpp)
+  target_link_libraries(pulsar_agent_bridge_tests PRIVATE pulsar::agent_bridge)
+  pulsar_apply_project_options(pulsar_agent_bridge_tests)
+  pulsar_apply_compiler_warnings(pulsar_agent_bridge_tests)
+  add_test(NAME pulsar.application.agent_bridge COMMAND pulsar_agent_bridge_tests)
+endif()
+
 add_executable(pulsar_ffmpeg_still_tests
   media/ffmpeg_still_test.cpp
 )
