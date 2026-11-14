@@ -64,7 +64,7 @@ void TimelinePlaybackCoordinator::set_snapshot(ProjectSnapshot snapshot) {
     if (uses_composition()) composition_preview_->configure(*snapshot_);
     else composition_preview_->invalidate();
   }
-  audio_session_->configure(*snapshot_);
+  audio_session_->configure(*snapshot_, position);
   segment_kind_ = SegmentKind::None;
   current_presentation_.reset();
   source_creation_error_.reset();
