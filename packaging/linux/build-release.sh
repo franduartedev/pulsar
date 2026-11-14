@@ -69,6 +69,10 @@ DESTDIR="$APPDIR" cmake --install "$BUILD" --prefix /usr
 # --- bundle Qt + FFmpeg runtime ---------------------------------------------------------------
 export QMAKE QML_SOURCES_PATHS="$ROOT/apps/pulsar-desktop/qml:$ROOT/packaging/linux" DEPLOY_PLATFORM_THEMES=0 \
        EXTRA_PLATFORM_PLUGINS="libqwayland-egl.so;libqwayland-generic.so" VERSION
+QT_PLUGIN_DIR="$($QMAKE -query QT_INSTALL_PLUGINS)"
+for plugin in libqwayland-egl.so libqwayland-generic.so; do
+  [ -f "$QT_PLUGIN_DIR/platforms/$plugin" ] || die "missing required Qt Wayland plugin: $QT_PLUGIN_DIR/platforms/$plugin"
+done
 ( cd "$STAGE" && linuxdeploy-x86_64.AppImage --appdir "$APPDIR" \
     --executable "$APPDIR/usr/bin/pulsar-desktop" \
     --desktop-file "$APPDIR/usr/share/applications/pulsar.desktop" \
