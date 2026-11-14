@@ -261,10 +261,10 @@ void playback_reconfigure_preserves_editorial_audio_position() {
                    {"video-shifted", SignalSpec{.constant = 0.25F, .impulse_frame = 2548}}}};
   PlaybackOutput output;
   application::AudioMixPlaybackSession playback{&output, bank.factory()};
-  const auto first = snapshot({video_asset(1, "video")}, ClipSpec{1, 1, 0, 0, 4096}, {}, 10);
-  const auto second = snapshot({video_asset(1, "video")}, ClipSpec{1, 1, 0, 0, 4096}, {}, 11);
+  const auto first = snapshot({video_asset(1, "video")}, ClipSpec{1, 1, 0, 0, 48000}, {}, 10);
+  const auto second = snapshot({video_asset(1, "video")}, ClipSpec{1, 1, 0, 0, 48000}, {}, 11);
   const auto shifted_source =
-      snapshot({video_asset(1, "video-shifted")}, ClipSpec{1, 1, 0, 500, 4096}, {}, 12);
+      snapshot({video_asset(1, "video-shifted")}, ClipSpec{1, 1, 0, 500, 48000}, {}, 12);
   const auto editorial_position = frames(2048);
 
   playback.configure(first, editorial_position);
