@@ -123,7 +123,7 @@ OfflineAudioRenderer::ContributorState& OfflineAudioRenderer::state_for(
   const auto clip_gain = ClipGain::from_decibels(contributor.gain_db, contributor.muted);
   const auto track_gain = ClipGain::from_decibels(contributor.track_gain_db, contributor.track_muted);
   auto state = std::make_unique<ContributorState>(ContributorState{
-      contributor, std::move(source), origin, {}, std::nullopt, false, std::nullopt,
+      contributor, std::move(source), origin, {}, false, std::nullopt, std::nullopt,
       ClipGain{clip_gain.linear * track_gain.linear, clip_gain.muted || track_gain.muted},
       ClipFade{}, 0, 0, -1});
   {
