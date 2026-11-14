@@ -54,6 +54,19 @@ $base = if ($cmakeText -match 'VERSION\s+(\d+\.\d+\.\d+)') { $Matches[1] } else 
 $label = if ($cmakeText -match 'PULSAR_VERSION_LABEL\s+"([^"]*)"') { $Matches[1] } else { "" }
 if (-not $base) { throw "Could not determine PULSAR version." }
 $version = if ($label) { "$base-$label" } else { $base }
+$expectedVersion = if ($env:PULSAR_EXPECTED_VERSION) { $env:PULSAR_EXPECTED_VERSION } else { $version }
+if ($version -ne $expectedVersion) {
+    throw "Expected PULSAR version $expectedVersion but CMake declares $version."
+}
+$headSha = if ($env:PULSAR_HEAD_SHA) { $env:PULSAR_HEAD_SHA } else { "unknown" }
+$workflowSha = if ($env:PULSAR_WORKFLOW_SHA) { $env:PULSAR_WORKFLOW_SHA } else { "unknown" }
+$checkoutSha = if ($env:PULSAR_CHECKOUT_SHA) { $env:PULSAR_CHECKOUT_SHA } else { "unknown" }
+@(
+    "PULSAR_VERSION=$version"
+    "PULSAR_HEAD_SHA=$headSha"
+    "PULSAR_WORKFLOW_SHA=$workflowSha"
+    "PULSAR_CHECKOUT_SHA=$checkoutSha"
+) | Set-Content (Join-Path $stage "BUILD-METADATA.txt") -Encoding ascii
 $archive = Join-Path $dist ("PULSAR-{0}-windows-x86_64.zip" -f $version)
 if (Test-Path $archive) { Remove-Item -LiteralPath $archive -Force }
 Compress-Archive -Path (Join-Path $stage "*") -DestinationPath $archive -CompressionLevel Optimal

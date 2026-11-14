@@ -285,12 +285,10 @@ foreach(pair "safety|pulsar.desktop.safety" "shutdown|pulsar.desktop.shutdown" "
   pulsar_apply_compiler_warnings(${target})
   add_dependencies(${target} pulsar_desktop)
   add_test(NAME ${test_name} COMMAND ${target})
-  set_tests_properties(${test_name} PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;PULSAR_RECOVERY_DIR=${CMAKE_CURRENT_BINARY_DIR}/recovery-${short}" TIMEOUT 300)
+  set_tests_properties(${test_name} PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;PULSAR_RECOVERY_DIR=${CMAKE_CURRENT_BINARY_DIR}/recovery-${short};PULSAR_ASSETS_DIR=${CMAKE_SOURCE_DIR}/assets" TIMEOUT 300)
 endforeach()
 target_link_libraries(pulsar_desktop_polish_tests PRIVATE Qt6::Test)
 target_link_libraries(pulsar_desktop_workspace_tests PRIVATE Qt6::Test)
-# The audition test needs the sound pack of the source tree (installed builds find it next to the binary).
-set_property(TEST pulsar.desktop.audition APPEND PROPERTY ENVIRONMENT "PULSAR_ASSETS_DIR=${CMAKE_SOURCE_DIR}/assets")
 endif()
 
 # ---- Installation (portable bundle / AppImage / distro packaging) ----------

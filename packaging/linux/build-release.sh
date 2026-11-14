@@ -27,7 +27,7 @@ declare -A TOOL_URL=(
   [linuxdeploy-plugin-appimage-x86_64.AppImage]=https://github.com/linuxdeploy/linuxdeploy-plugin-appimage/releases/download/continuous/linuxdeploy-plugin-appimage-x86_64.AppImage
 )
 declare -A TOOL_SHA=(
-  [linuxdeploy-x86_64.AppImage]=8aea8da0f7f7039d2a2cecb14657d752a222a5e1d3825caeef186c82f751cdd1
+  [linuxdeploy-x86_64.AppImage]=df908b19f1ed1cdafa79508d415aa12d6c56ce4d56d4149aa8c09286718706e5
   [linuxdeploy-plugin-qt-x86_64.AppImage]=cfc1055b2b9dbc08412b579f20990b7b41a17b61beaa5847dc9477c96c9e9617
   [linuxdeploy-plugin-appimage-x86_64.AppImage]=49d6a17160675a6bd1781699aae6bdf7692d98552e02a3671d2183d10547842e
 )
@@ -57,6 +57,8 @@ cmake -S "$ROOT" -B "$BUILD" -G Ninja -DCMAKE_BUILD_TYPE=Release -DPULSAR_BUILD_
 cmake --build "$BUILD"
 VERSION="$("$BUILD/apps/pulsar-desktop/pulsar-desktop" --version | awk '{print $2}')"
 [ -n "$VERSION" ] || die "could not read the product version"
+EXPECTED_VERSION="${PULSAR_EXPECTED_VERSION:-$VERSION}"
+[ "$VERSION" = "$EXPECTED_VERSION" ] || die "expected version $EXPECTED_VERSION but binary reports $VERSION"
 NAME="PULSAR-$VERSION"
 echo "== packaging $NAME"
 
@@ -67,6 +69,10 @@ DESTDIR="$APPDIR" cmake --install "$BUILD" --prefix /usr
 # --- bundle Qt + FFmpeg runtime ---------------------------------------------------------------
 export QMAKE QML_SOURCES_PATHS="$ROOT/apps/pulsar-desktop/qml:$ROOT/packaging/linux" DEPLOY_PLATFORM_THEMES=0 \
        EXTRA_PLATFORM_PLUGINS="libqwayland-egl.so;libqwayland-generic.so" VERSION
+QT_PLUGIN_DIR="$($QMAKE -query QT_INSTALL_PLUGINS)"
+for plugin in libqwayland-egl.so libqwayland-generic.so; do
+  [ -f "$QT_PLUGIN_DIR/platforms/$plugin" ] || die "missing required Qt Wayland plugin: $QT_PLUGIN_DIR/platforms/$plugin"
+done
 ( cd "$STAGE" && linuxdeploy-x86_64.AppImage --appdir "$APPDIR" \
     --executable "$APPDIR/usr/bin/pulsar-desktop" \
     --desktop-file "$APPDIR/usr/share/applications/pulsar.desktop" \
@@ -118,6 +124,12 @@ cp "$FFSRC"/ffmpeg-6.1.1/COPYING.GPLv3 "$FFSRC"/ffmpeg-6.1.1/COPYING.GPLv2 "$FFS
 tar -C "$FFSRC" -xzf "$THIRD/x264_0.164.3108+git31e19f9.orig.tar.gz" --wildcards '*/COPYING' --strip-components=1 && mv "$FFSRC/COPYING" "$LIC/X264-COPYING"; rm -rf "$FFSRC"
 # Licence of PULSAR itself, the notices, and the licence texts our dependencies refer to.
 DOC="$APPDIR/usr/share/doc/pulsar"; mkdir -p "$DOC/licenses"
+cat > "$DOC/BUILD-METADATA.txt" <<EOF
+PULSAR_VERSION=$VERSION
+PULSAR_HEAD_SHA=${PULSAR_HEAD_SHA:-unknown}
+PULSAR_WORKFLOW_SHA=${PULSAR_WORKFLOW_SHA:-unknown}
+PULSAR_CHECKOUT_SHA=${PULSAR_CHECKOUT_SHA:-unknown}
+EOF
 cp "$ROOT/LICENSE" "$ROOT/THIRD_PARTY_NOTICES.md" "$DOC/"
 for text in GPL-2 GPL-3 LGPL-2 LGPL-2.1 LGPL-3 Apache-2.0 MPL-2.0 BSD CC0-1.0 Artistic; do cp "/usr/share/common-licenses/$text" "$DOC/licenses/$text"; done
 cp "$ROOT/assets/fonts/"*OFL* "$DOC/licenses/" 2>/dev/null || true
@@ -127,7 +139,8 @@ BUNDLE="$STAGE/$NAME"
 rm -rf "$BUNDLE"; mkdir -p "$BUNDLE"
 cp -a "$APPDIR/usr" "$BUNDLE/usr"
 cp "$ROOT/packaging/linux/pulsar-launcher.sh" "$BUNDLE/pulsar"; chmod +x "$BUNDLE/pulsar"
-cp "$ROOT/docs/release/0.2.0-beta.1.md" "$BUNDLE/README-BETA.md"
+cp "$DOC/BUILD-METADATA.txt" "$BUNDLE/BUILD-METADATA.txt"
+cp "$ROOT/docs/release/$VERSION.md" "$BUNDLE/README-BETA.md"
 cp "$ROOT/LICENSE" "$ROOT/THIRD_PARTY_NOTICES.md" "$BUNDLE/"
 cp "$ROOT/CHANGELOG.md" "$BUNDLE/CHANGELOG.md"
 cp -a "$ROOT/packaging/linux/pulsar.desktop" "$ROOT/packaging/linux/pulsar.svg" "$BUNDLE/"

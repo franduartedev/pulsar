@@ -55,12 +55,16 @@ void AudioMixPlaybackSession::set_condition(AudioPlaybackCondition condition) no
   }
 }
 
-void AudioMixPlaybackSession::configure(ProjectSnapshot snapshot) {
+void AudioMixPlaybackSession::configure(ProjectSnapshot snapshot,
+                                        domain::MediaTime timeline_position) {
+  if (timeline_position < domain::MediaTime::zero()) {
+    throw std::invalid_argument{"audio mix configuration position cannot be negative"};
+  }
   const bool was_playing = requested_playing_;
   close_output();
   mixer_.configure(snapshot);
   snapshot_ = std::move(snapshot);
-  render_position_.reset();
+  render_position_ = timeline_position;
   output_buffer_start_.reset();
   audio_ahead_ = false;
   last_usable_contributors_ = 0;

@@ -32,7 +32,10 @@ public:
   AudioMixPlaybackSession(const AudioMixPlaybackSession&) = delete;
   AudioMixPlaybackSession& operator=(const AudioMixPlaybackSession&) = delete;
 
-  void configure(ProjectSnapshot snapshot);
+  // Reconfiguring is an editorial generation boundary. The caller must
+  // publish the position that the new snapshot represents so a subsequent
+  // play() cannot default to timeline zero while waiting for the next tick.
+  void configure(ProjectSnapshot snapshot, domain::MediaTime timeline_position);
   void seek(domain::MediaTime timeline_position);
   void play();
   void pause();
@@ -46,6 +49,10 @@ public:
   }
   [[nodiscard]] bool has_device_clock() const noexcept;
   [[nodiscard]] std::optional<domain::MediaTime> clock_position() const;
+  [[nodiscard]] std::optional<domain::MediaTime> render_position() const noexcept {
+    return render_position_;
+  }
+  [[nodiscard]] std::uint64_t generation() const noexcept { return generation_; }
   [[nodiscard]] const AudioMixPlaybackMetrics& metrics() const noexcept { return metrics_; }
 
 private:

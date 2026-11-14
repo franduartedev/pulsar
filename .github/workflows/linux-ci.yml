@@ -4,6 +4,7 @@ on:
   push:
     branches: [main, feature/pulsar-audio-fx]
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -19,6 +20,25 @@ jobs:
     steps:
       - name: Check out
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Record source revision
+        run: |
+          HEAD_SHA="${{ github.event.pull_request.head.sha || github.sha }}"
+          WORKFLOW_SHA="${{ github.sha }}"
+          CHECKOUT_SHA="$(git rev-parse HEAD)"
+          test "$CHECKOUT_SHA" = "$HEAD_SHA"
+          {
+            echo "PULSAR_HEAD_SHA=$HEAD_SHA"
+            echo "PULSAR_WORKFLOW_SHA=$WORKFLOW_SHA"
+            echo "PULSAR_CHECKOUT_SHA=$CHECKOUT_SHA"
+          } >> "$GITHUB_ENV"
+          {
+            echo "head_sha=$HEAD_SHA"
+            echo "workflow_sha=$WORKFLOW_SHA"
+            echo "checkout_sha=$CHECKOUT_SHA"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Install build dependencies
         run: |
@@ -45,3 +65,88 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
         run: ctest --test-dir build --output-on-failure
+
+  package:
+    name: package-linux
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.pull_request.head.ref == 'integration/beta-2' ||
+      github.ref == 'refs/heads/integration/beta-2'
+    needs: build-and-test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Record source revision
+        run: |
+          HEAD_SHA="${{ github.event.pull_request.head.sha || github.sha }}"
+          WORKFLOW_SHA="${{ github.sha }}"
+          CHECKOUT_SHA="$(git rev-parse HEAD)"
+          test "$CHECKOUT_SHA" = "$HEAD_SHA"
+          {
+            echo "PULSAR_HEAD_SHA=$HEAD_SHA"
+            echo "PULSAR_WORKFLOW_SHA=$WORKFLOW_SHA"
+            echo "PULSAR_CHECKOUT_SHA=$CHECKOUT_SHA"
+          } >> "$GITHUB_ENV"
+          {
+            echo "head_sha=$HEAD_SHA"
+            echo "workflow_sha=$WORKFLOW_SHA"
+            echo "checkout_sha=$CHECKOUT_SHA"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Install packaging dependencies
+        run: |
+          sudo apt-get update -o Acquire::Retries=3
+          sudo apt-get install -y --no-install-recommends \
+            cmake ninja-build g++ gcc make nasm xz-utils pkg-config python3 curl tar dpkg \
+            squashfs-tools file \
+            qt6-base-dev qt6-declarative-dev qt6-multimedia-dev qt6-tools-dev-tools qt6-wayland \
+            qml6-module-qtquick qml6-module-qtquick-controls \
+            qml6-module-qtquick-dialogs qml6-module-qtquick-layouts \
+            qml6-module-qtquick-window qml6-module-qtquick-templates \
+            qml6-module-qt-labs-folderlistmodel \
+            qml6-module-qtqml-workerscript \
+            libdav1d-dev libavformat-dev libavcodec-dev libavutil-dev \
+            libswscale-dev libswresample-dev
+
+      - name: Build Linux packages
+        env:
+          PULSAR_EXPECTED_VERSION: 0.2.0-beta.2
+          PULSAR_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          PULSAR_WORKFLOW_SHA: ${{ github.sha }}
+        run: ./packaging/linux/build-release.sh
+
+      - name: Verify Linux packages
+        run: |
+          test -f dist/PULSAR-0.2.0-beta.2-linux-x86_64.tar.gz
+          test -f dist/PULSAR-0.2.0-beta.2-x86_64.AppImage
+          test -f dist/PULSAR-0.2.0-beta.2-source.tar.gz
+          test -f dist/PULSAR-0.2.0-beta.2-third-party-source.tar.gz
+          test -f dist/SHA256SUMS
+          grep -q 'PULSAR-0.2.0-beta.2-linux-x86_64.tar.gz' dist/SHA256SUMS
+          grep -q 'PULSAR-0.2.0-beta.2-x86_64.AppImage' dist/SHA256SUMS
+          tar -xOf dist/PULSAR-0.2.0-beta.2-linux-x86_64.tar.gz \
+            PULSAR-0.2.0-beta.2/BUILD-METADATA.txt | grep -q 'PULSAR_VERSION=0.2.0-beta.2'
+          chmod +x dist/PULSAR-0.2.0-beta.2-x86_64.AppImage
+          APPIMAGE_EXTRACT_AND_RUN=1 dist/PULSAR-0.2.0-beta.2-x86_64.AppImage --version |
+            grep -qx 'PULSAR 0.2.0-beta.2'
+          rm -rf "$RUNNER_TEMP/pulsar-beta2-tar"
+          mkdir -p "$RUNNER_TEMP/pulsar-beta2-tar"
+          tar -xzf dist/PULSAR-0.2.0-beta.2-linux-x86_64.tar.gz -C "$RUNNER_TEMP/pulsar-beta2-tar"
+          "$RUNNER_TEMP/pulsar-beta2-tar/PULSAR-0.2.0-beta.2/pulsar" --version |
+            grep -qx 'PULSAR 0.2.0-beta.2'
+
+      - name: Upload Linux packages and checksums
+        uses: actions/upload-artifact@v4
+        with:
+          name: pulsar-linux-beta-2
+          path: |
+            dist/PULSAR-0.2.0-beta.2-linux-x86_64.tar.gz
+            dist/PULSAR-0.2.0-beta.2-x86_64.AppImage
+            dist/PULSAR-0.2.0-beta.2-source.tar.gz
+            dist/PULSAR-0.2.0-beta.2-third-party-source.tar.gz
+            dist/SHA256SUMS

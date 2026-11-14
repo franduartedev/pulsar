@@ -6,12 +6,12 @@
 
 **Editor de video nativo y liviano, para una edición predecible.**
 
-[![Versión](https://img.shields.io/badge/versi%C3%B3n-0.2.0--beta.1-3b82f6?style=for-the-badge)](CHANGELOG.md)
+[![Versión](https://img.shields.io/badge/versi%C3%B3n-0.2.0--beta.2-3b82f6?style=for-the-badge)](CHANGELOG.md)
 [![Plataforma](https://img.shields.io/badge/plataforma-Linux%20x86__64-14b8a6?style=for-the-badge&logo=linux&logoColor=white)](#-requisitos)
 [![Licencia](https://img.shields.io/badge/licencia-GPL--3.0--or--later-blue?style=for-the-badge)](LICENSE)
 [![Hecho con](https://img.shields.io/badge/C%2B%2B-Qt%206%20%C2%B7%20FFmpeg-00599C?style=for-the-badge&logo=qt&logoColor=white)](#-compilar-desde-el-código)
 
-[**Descargar**](../../releases) · [Notas de la versión](docs/release/0.2.0-beta.1.md) · [Reportar un bug](../../issues/new/choose) · [Hoja de ruta](docs/release/roadmap.md) · [🇬🇧 English](README.md)
+[**Descargar**](../../releases) · [Notas de la versión](docs/release/0.2.0-beta.2.md) · [Reportar un bug](../../issues/new/choose) · [Hoja de ruta](docs/release/roadmap.md) · [🇬🇧 English](README.md)
 
 <br>
 
@@ -66,15 +66,15 @@ Descargá los archivos y `SHA256SUMS` desde la [página de Releases](../../relea
 
 ```sh
 # tar.gz (recomendado)
-tar xzf PULSAR-0.2.0-beta.1-linux-x86_64.tar.gz
-./PULSAR-0.2.0-beta.1/pulsar
+tar xzf PULSAR-0.2.0-beta.2-linux-x86_64.tar.gz
+./PULSAR-0.2.0-beta.2/pulsar
 
 # o AppImage
-chmod +x PULSAR-0.2.0-beta.1-x86_64.AppImage
-./PULSAR-0.2.0-beta.1-x86_64.AppImage     # agregá --appimage-extract-and-run si no tenés FUSE
+chmod +x PULSAR-0.2.0-beta.2-x86_64.AppImage
+./PULSAR-0.2.0-beta.2-x86_64.AppImage     # agregá --appimage-extract-and-run si no tenés FUSE
 ```
 
-`--version` muestra `PULSAR 0.2.0-beta.1`. El paquete incluye su propio FFmpeg: durante la beta evitá abrir medios de origen no confiable.
+`--version` muestra `PULSAR 0.2.0-beta.2`. El paquete incluye su propio FFmpeg: durante la beta evitá abrir medios de origen no confiable.
 
 ## ⚠️ Limitaciones conocidas
 
@@ -84,7 +84,7 @@ chmod +x PULSAR-0.2.0-beta.1-x86_64.AppImage
 - Sin títulos animados, máscaras, herramientas de color ni control de velocidad; el fundido cruzado es por ahora la única transición.
 - Los Audio FX son por clip; todavía no existe un rack de efectos para buses/master. La cadena integrada por clip sí puede reordenarse y queda guardada en el proyecto.
 - Sin reenlace de medios faltantes, lista de proyectos recientes ni selección múltiple.
-- La exportación es solo MP4 / H.264 / AAC; sin presets verticales (9:16): el lienzo sigue al primer clip.
+- La exportación es solo MP4 / H.264 / AAC. Existe un preset de lienzo 9:16, pero todavía hay que validar más combinaciones de fuentes y contenedores verticales.
 - Imágenes: solo PNG, JPEG y WebP. Un proyecto solo de audio no se puede exportar.
 
 > [!IMPORTANT]
@@ -94,7 +94,7 @@ chmod +x PULSAR-0.2.0-beta.1-x86_64.AppImage
 >
 > Si alguno falla en tu equipo, por favor [abrí un issue](../../issues/new/choose) con los datos del archivo de origen.
 
-Lista completa: [notas de la versión](docs/release/0.2.0-beta.1.md) (en inglés).
+Lista completa: [notas de la versión](docs/release/0.2.0-beta.2.md) (en inglés).
 
 ## 🐞 Reportar un bug / dar feedback
 

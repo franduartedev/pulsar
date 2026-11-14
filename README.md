@@ -6,12 +6,12 @@
 
 **Native, lightweight video editor for predictable editing.**
 
-[![Version](https://img.shields.io/badge/version-0.2.0--beta.1-3b82f6?style=for-the-badge)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.2.0--beta.2-3b82f6?style=for-the-badge)](CHANGELOG.md)
 [![Platform](https://img.shields.io/badge/platform-Linux%20x86__64-14b8a6?style=for-the-badge&logo=linux&logoColor=white)](#-requirements)
 [![License](https://img.shields.io/badge/license-GPL--3.0--or--later-blue?style=for-the-badge)](LICENSE)
 [![Built with](https://img.shields.io/badge/C%2B%2B-Qt%206%20%C2%B7%20FFmpeg-00599C?style=for-the-badge&logo=qt&logoColor=white)](#-build-from-source)
 
-[**Download**](../../releases) · [Release notes](docs/release/0.2.0-beta.1.md) · [Report a bug](../../issues/new/choose) · [Roadmap](docs/release/roadmap.md) · [🇪🇸 Español](README.es.md)
+[**Download**](../../releases) · [Release notes](docs/release/0.2.0-beta.2.md) · [Report a bug](../../issues/new/choose) · [Roadmap](docs/release/roadmap.md) · [🇪🇸 Español](README.es.md)
 
 <br>
 
@@ -67,15 +67,15 @@ Download the files and `SHA256SUMS` from the [Releases page](../../releases) and
 
 ```sh
 # tar.gz (recommended)
-tar xzf PULSAR-0.2.0-beta.1-linux-x86_64.tar.gz
-./PULSAR-0.2.0-beta.1/pulsar
+tar xzf PULSAR-0.2.0-beta.2-linux-x86_64.tar.gz
+./PULSAR-0.2.0-beta.2/pulsar
 
 # or AppImage
-chmod +x PULSAR-0.2.0-beta.1-x86_64.AppImage
-./PULSAR-0.2.0-beta.1-x86_64.AppImage     # add --appimage-extract-and-run without FUSE
+chmod +x PULSAR-0.2.0-beta.2-x86_64.AppImage
+./PULSAR-0.2.0-beta.2-x86_64.AppImage     # add --appimage-extract-and-run without FUSE
 ```
 
-`--version` prints `PULSAR 0.2.0-beta.1`. The bundle ships its own FFmpeg, so avoid opening media from untrusted sources during the beta.
+`--version` prints `PULSAR 0.2.0-beta.2`. The bundle ships its own FFmpeg, so avoid opening media from untrusted sources during the beta.
 
 ## ⚠️ Known limitations
 
@@ -85,7 +85,7 @@ chmod +x PULSAR-0.2.0-beta.1-x86_64.AppImage
 - No animated titles, masks, colour tools or speed control; cross dissolve is currently the only transition.
 - Audio FX are currently clip-level; there is no bus/master FX rack yet. The built-in clip FX chain can be reordered and that order is persisted.
 - No relink UI for missing media, recent-projects list or multi-selection.
-- Export is MP4 / H.264 / AAC only; no vertical (9:16) canvas presets (the canvas follows the first clip).
+- Export is MP4 / H.264 / AAC only. A 9:16 canvas preset exists, but vertical-source/container combinations still need broader validation.
 - Images: PNG, JPEG and WebP only. An audio-only project cannot be exported.
 
 > [!IMPORTANT]
@@ -95,7 +95,7 @@ chmod +x PULSAR-0.2.0-beta.1-x86_64.AppImage
 >
 > If either misbehaves for you, please [open an issue](../../issues/new/choose) with the source file details.
 
-Full list: [release notes](docs/release/0.2.0-beta.1.md).
+Full list: [release notes](docs/release/0.2.0-beta.2.md).
 
 ## 🐞 Report a bug / give feedback
 

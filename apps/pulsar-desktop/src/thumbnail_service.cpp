@@ -114,9 +114,10 @@ std::optional<QImage> decode_thumbnail(const ThumbnailRequest& request) {
   if (converted.width <= 0 || converted.height <= 0) return std::nullopt;
   const QImage wrapped{converted.pixels.data(), converted.width, converted.height, converted.stride_bytes,
                        QImage::Format_RGBA8888};
-  return wrapped.scaled(ThumbnailCache::kWidth, ThumbnailCache::kHeight, Qt::KeepAspectRatio,
-                        Qt::SmoothTransformation)
-      .convertToFormat(QImage::Format_RGBA8888);  // detaches from the temporary pixel buffer
+  auto result = wrapped.scaled(ThumbnailCache::kWidth, ThumbnailCache::kHeight,
+                               Qt::KeepAspectRatio, Qt::SmoothTransformation)
+                    .convertToFormat(QImage::Format_RGBA8888);  // detaches from the temporary pixel buffer
+  return result;
 }
 }  // namespace
 

@@ -294,9 +294,20 @@ void EditorSession::synchronize_document_state() {
     ++sync_skipped_count_;
     return;
   }
+  const auto video_clip_count = [this] {
+    const auto* track = document_.timeline().find_track(document_.video_track_id());
+    return track == nullptr ? std::size_t{0} : track->clips().size();
+  };
+  const auto current_video_clip_count = video_clip_count();
   const auto start = std::chrono::steady_clock::now();
   coordinator_.set_snapshot(document_.snapshot());
+  const bool release_paused_source = synchronized_document_generation_.has_value() &&
+                                     synchronized_video_clip_count_ > 0 &&
+                                     current_video_clip_count > synchronized_video_clip_count_ &&
+                                     coordinator_.intent() == application::PlaybackIntent::Paused;
+  if (release_paused_source) coordinator_.pause();
   synchronized_document_generation_ = document_.document_generation();
+  synchronized_video_clip_count_ = current_video_clip_count;
   rebuild_read_model();
   sync_durations_.push(std::chrono::steady_clock::now() - start);
   ++sync_performed_count_;

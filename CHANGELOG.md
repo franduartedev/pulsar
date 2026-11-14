@@ -16,6 +16,21 @@ the version is defined once, in the root `CMakeLists.txt`.
   capabilities, known limitations, bug reporting. Sound effects count fixed to 37.
 - Feedback issue template.
 
+## 0.2.0-beta.2
+
+Candidate release focused on Windows readiness and V2 audio edit stability.
+
+### Fixed
+- Audio V2 preserves the editorial position when a playing snapshot is edited.
+- Paused playback and resume preserve the current editorial position.
+- Audio seeks respect shifted source ranges and discard audio queued by older generations.
+- Windows playback releases paused decoders and media sources safely during document and clip edits.
+
+### Validated
+- Linux and Windows CI: 62/62 tests on the integration baseline.
+- Windows manual editor pass with overlapping clips.
+- Project persistence, legacy project restore, MP4 export and portable Windows packaging remain covered by the automated suite.
+
 ## 0.2.0-beta.1
 
 First public beta (Linux x86_64).
