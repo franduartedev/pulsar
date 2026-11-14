@@ -294,8 +294,11 @@ void EditorSession::synchronize_document_state() {
     ++sync_skipped_count_;
     return;
   }
+  const bool release_paused_source = synchronized_document_generation_.has_value() &&
+                                     coordinator_.intent() == application::PlaybackIntent::Paused;
   const auto start = std::chrono::steady_clock::now();
   coordinator_.set_snapshot(document_.snapshot());
+  if (release_paused_source) coordinator_.pause();
   synchronized_document_generation_ = document_.document_generation();
   rebuild_read_model();
   sync_durations_.push(std::chrono::steady_clock::now() - start);
