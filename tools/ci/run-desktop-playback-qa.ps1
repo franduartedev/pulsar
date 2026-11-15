@@ -1,9 +1,15 @@
 #!/usr/bin/env pwsh
 # Hardware playback QA for the packaged PULSAR desktop.
 #
-# Generates an isolated synthetic 8s audiovisual fixture, writes a persisted
-# project that cuts it at 4s, plays it through the real executable, and checks
-# the mixed PCM captured before the audio device plus the playback metrics.
+# Generates an isolated synthetic 8s audiovisual fixture whose audio is 4s of
+# 440 Hz followed by 4s of 880 Hz, writes a persisted project that cuts it at
+# 4s, plays it through the real executable, and checks the mixed PCM captured
+# before the audio device plus the playback metrics.
+#
+# The PCM is checked spectrally: content must be 440 Hz before the cut and
+# 880 Hz after it, so a cut mapped to the wrong source range fails even though
+# the output is continuous. This is pre-device PCM; physical audibility is not
+# validated here (that needs a loopback recording).
 #
 # CI runners expose no audio endpoint, so the renderer fills its buffer and the
 # timeline never reaches the 4s cut. Run this script on a machine with audio
@@ -16,10 +22,10 @@
 param(
   [Parameter(Mandatory)][string]$Exe,
   [string]$Workspace = (Join-Path $env:TEMP 'pulsar-desktop-qa'),
-  [int]$PlaybackMs = 6500,
-  [int]$PauseAfterMs = 3000,
-  [int]$ResumeAfterMs = 4200,
-  [int]$ExitMs = 9000,
+  [int]$PlaybackMs = 8000,
+  [int]$PauseAfterMs = 2600,
+  [int]$ResumeAfterMs = 3400,
+  [int]$ExitMs = 11000,
   [switch]$Offscreen
 )
 
@@ -42,8 +48,11 @@ New-Item -ItemType Directory -Force -Path $Workspace | Out-Null
 $media = Join-Path $Workspace 'synthetic audio [QA] #1.mp4'
 & $ffmpeg -y -hide_banner -loglevel error `
   -f lavfi -i 'testsrc=size=320x180:rate=30' `
-  -f lavfi -i 'sine=frequency=440:sample_rate=48000' `
-  -t 8 -c:v mpeg4 -q:v 5 -pix_fmt yuv420p -c:a aac -b:a 128k $media
+  -f lavfi -i 'sine=frequency=440:sample_rate=48000:duration=4' `
+  -f lavfi -i 'sine=frequency=880:sample_rate=48000:duration=4' `
+  -filter_complex '[1:a][2:a]concat=n=2:v=0:a=1[a]' `
+  -map 0:v -map '[a]' -t 8 `
+  -c:v mpeg4 -q:v 5 -pix_fmt yuv420p -c:a aac -b:a 128k $media
 if ($LASTEXITCODE -ne 0) { throw "Fixture generation failed with exit code $LASTEXITCODE." }
 if (-not (Test-Path -LiteralPath $media -PathType Leaf)) { throw "Fixture was not created at $media" }
 $mediaLength = (Get-Item -LiteralPath $media).Length
@@ -98,6 +107,11 @@ $errorText = Get-Content -LiteralPath $stderr -Raw
 if ($errorText -match 'open project failed|media file does not exist|cannot decode project') {
   throw "The packaged desktop failed to open the persisted cut project: $errorText"
 }
+# Guard the Inspector Canvas repaint regression: a TypeError here means a
+# Connections handler resolved requestPaint on the wrong object again.
+if ($errorText -match 'requestPaint is not a function') {
+  throw "The packaged desktop painted a Canvas through a non-Canvas object: $errorText"
+}
 
 $metrics = Get-Content -LiteralPath $stdout -Raw
 Write-Host '--- playback metrics ---'
@@ -124,5 +138,12 @@ if (-not ($positions | Where-Object { $_ -ge 4.0 })) {
   throw "PCM never rendered audio after the 4s cut (timeline $pcmStart -> $pcmEnd). Set -Offscreen only for smoke checks; split continuity needs a consuming audio device."
 }
 
+# Continuity is not enough: the fixture is 440 Hz before 4s and 880 Hz after it,
+# so the captured PCM must change spectral content at the cut.
+$spectral = Join-Path $PSScriptRoot 'assert-pcm-spectral-cut.ps1'
+& $spectral -PcmPath $pcm
+
 Write-Host 'Playback QA passed: audio rendered across the 4s cut with PCM evidence.'
+Write-Host 'Spectral check passed: 440 Hz before the cut, 880 Hz after the cut.'
+Write-Host 'Physical audibility is NOT validated here (pre-device PCM); use a loopback recording for that.'
 Write-Host "Evidence directory: $Workspace"

@@ -189,8 +189,11 @@ jobs:
           $media = Join-Path $qa "synthetic audio [CI] #1.mp4"
           & $env:PULSAR_TEST_FFMPEG_CLI -y -hide_banner -loglevel error `
             -f lavfi -i "testsrc=size=320x180:rate=30" `
-            -f lavfi -i "sine=frequency=440:sample_rate=48000" `
-            -t 8 -c:v mpeg4 -q:v 5 -pix_fmt yuv420p -c:a aac -b:a 128k $media
+            -f lavfi -i "sine=frequency=440:sample_rate=48000:duration=4" `
+            -f lavfi -i "sine=frequency=880:sample_rate=48000:duration=4" `
+            -filter_complex "[1:a][2:a]concat=n=2:v=0:a=1[a]" `
+            -map 0:v -map "[a]" -t 8 `
+            -c:v mpeg4 -q:v 5 -pix_fmt yuv420p -c:a aac -b:a 128k $media
           if ($LASTEXITCODE -ne 0) { throw "Synthetic media generation failed with exit code $LASTEXITCODE." }
           # Use -LiteralPath for every path check below: '$media' contains '['.
           if (-not (Test-Path -LiteralPath $media -PathType Leaf)) {
@@ -239,7 +242,7 @@ jobs:
           $env:PULSAR_QA_WORKSPACE = $qa
           $env:PULSAR_QA_PCM_PATH = $pcm
           try {
-            $arguments = '"{0}" --smoke-size 1280x720 --smoke-exit-ms 9000 --smoke-screenshot "{1}" --qa-playback-ms 6500 --qa-pause-after-ms 3000 --qa-resume-after-ms 4200 --dump-performance-on-exit' -f $project, $shot
+            $arguments = '"{0}" --smoke-size 1280x720 --smoke-exit-ms 11000 --smoke-screenshot "{1}" --qa-playback-ms 8000 --qa-pause-after-ms 2600 --qa-resume-after-ms 3400 --dump-performance-on-exit' -f $project, $shot
             $process = Start-Process -FilePath $exe -ArgumentList $arguments `
               -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru -Wait
             if ($process.ExitCode -ne 0) { throw "Packaged desktop exited with code $($process.ExitCode)." }
@@ -252,6 +255,9 @@ jobs:
           $errorText = Get-Content -LiteralPath $stderr -Raw
           if ($errorText -match "open project failed|media file does not exist|cannot decode project") {
             throw "Packaged desktop failed to open the persisted cut project: $errorText"
+          }
+          if ($errorText -match "requestPaint is not a function") {
+            throw "Packaged desktop painted a Canvas through a non-Canvas object: $errorText"
           }
           $metrics = Get-Content -LiteralPath $stdout -Raw
           Write-Host "--- playback metrics ---"
@@ -282,7 +288,7 @@ jobs:
               Where-Object { $_.Status -eq 'OK' })
           }
           if ($audioEndpoints.Count -eq 0) {
-            Write-Host "::warning::No enabled audio endpoint on this runner; playback PCM and split continuity were NOT validated here. Run the packaged desktop on a machine with audio hardware for device validation."
+            Write-Host "::warning::No enabled audio endpoint on this runner; playback PCM, split continuity and the 440->880 spectral cut were NOT validated here. Run the packaged desktop on a machine with audio hardware for device validation."
           } else {
             Write-Host "Enabled audio endpoints: $($audioEndpoints.Count)"
             # The project splits at 4s: PCM must contain rendered audio on both
@@ -300,6 +306,9 @@ jobs:
             if (-not ($positions | Where-Object { $_ -ge 4.0 })) {
               throw "PCM capture never rendered audio after the 4s split. Timeline: $pcmStart -> $pcmEnd"
             }
+            # The fixture is 440 Hz before 4s and 880 Hz after it: continuity is
+            # not enough, the spectral content must change at the cut.
+            & .\tools\ci\assert-pcm-spectral-cut.ps1 -PcmPath $pcm
             Write-Host "Packaged desktop playback passed; screenshot bytes: $((Get-Item -LiteralPath $shot).Length); PCM blocks: $blockCount"
           }
 

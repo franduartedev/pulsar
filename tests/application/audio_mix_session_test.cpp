@@ -12,6 +12,7 @@
 #include <cassert>
 #include <chrono>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <iostream>
@@ -44,6 +45,10 @@ struct SignalSpec {
   bool has_origin{false};
   bool starve{false};
   bool throw_decode{false};
+  // Deterministic sine content used by the spectral cut test; constant stays
+  // the default so existing fixtures are unchanged.
+  float tone_hz{0.0F};
+  float tone_amplitude{0.1F};
 };
 
 class SignalSource final : public application::AudioPlaybackSource {
@@ -77,6 +82,20 @@ public:
     if (cursor_ >= spec_.total_frames) return std::nullopt;
     const auto count = std::min(spec_.block_frames, spec_.total_frames - cursor_);
     std::vector<float> samples(count * static_cast<std::size_t>(spec_.channels), spec_.constant);
+    if (spec_.tone_hz > 0.0F) {
+      constexpr double kTwoPi = 6.283185307179586476925286766559;
+      for (std::size_t frame = 0; frame < count; ++frame) {
+        const auto position = static_cast<double>(cursor_ + frame);
+        const auto value = static_cast<float>(
+            static_cast<double>(spec_.tone_amplitude) *
+            std::sin(kTwoPi * static_cast<double>(spec_.tone_hz) * position /
+                     static_cast<double>(spec_.rate)));
+        for (int channel = 0; channel < spec_.channels; ++channel) {
+          samples[frame * static_cast<std::size_t>(spec_.channels) +
+                  static_cast<std::size_t>(channel)] = value;
+        }
+      }
+    }
     if (spec_.impulse_frame >= cursor_ && spec_.impulse_frame < cursor_ + count) {
       const auto local = spec_.impulse_frame - cursor_;
       for (int channel = 0; channel < spec_.channels; ++channel) {
@@ -572,6 +591,68 @@ void editorial_split_is_pcm_equivalent_to_unsplit_source() {
   assert(split.metrics().source_opens == 1);
 }
 
+// Hann-windowed single-bin DFT: peak amplitude of `frequency` in the first
+// channel of an interleaved block. Used to prove which clip's content is
+// audible, not merely that some audio is present.
+double windowed_tone_amplitude(const std::vector<float>& interleaved, int channels, int rate,
+                               double frequency) {
+  constexpr double kTwoPi = 6.283185307179586476925286766559;
+  const auto frame_count = interleaved.size() / static_cast<std::size_t>(channels);
+  if (frame_count < 2) return 0.0;
+  double real = 0.0;
+  double imaginary = 0.0;
+  double window_sum = 0.0;
+  for (std::size_t frame = 0; frame < frame_count; ++frame) {
+    const auto taper = 0.5 - 0.5 * std::cos(kTwoPi * static_cast<double>(frame) /
+                                             static_cast<double>(frame_count - 1));
+    const auto angle = kTwoPi * frequency * static_cast<double>(frame) /
+                       static_cast<double>(rate);
+    const auto sample =
+        static_cast<double>(interleaved[frame * static_cast<std::size_t>(channels)]) * taper;
+    real += sample * std::cos(angle);
+    imaginary -= sample * std::sin(angle);
+    window_sum += taper;
+  }
+  return 2.0 * std::sqrt(real * real + imaginary * imaginary) / window_sum;
+}
+
+void spectral_content_follows_the_cut() {
+  constexpr double kBeforeHz = 440.0;
+  constexpr double kAfterHz = 880.0;
+  constexpr std::int64_t kCutFrame = kMixRate * 2;
+  SourceBank bank{{{"tone440", SignalSpec{.tone_hz = 440.0F}},
+                   {"tone880", SignalSpec{.tone_hz = 880.0F}}}};
+  application::AudioMixSession mixer{bank.factory()};
+  mixer.configure(snapshot({audio_asset(1, "tone440"), audio_asset(2, "tone880")}, std::nullopt,
+                           {{{1, 1, 0, 0, kCutFrame}, {2, 2, kCutFrame, 0, kCutFrame}}}, 30));
+
+  // One window straddling the cut: 100 ms of clip 1 followed by 100 ms of clip 2.
+  constexpr std::int64_t kHalfWindow = kMixRate / 10;
+  const auto block =
+      mixer.render(frames(kCutFrame - kHalfWindow), static_cast<std::size_t>(kHalfWindow * 2)).block;
+  assert(block.frame_count() == static_cast<std::size_t>(kHalfWindow * 2));
+  const auto channels = static_cast<int>(block.samples().size() / block.frame_count());
+  const auto split = block.samples().begin() +
+                     static_cast<std::ptrdiff_t>(kHalfWindow) * channels;
+  const std::vector<float> before(block.samples().begin(), split);
+  const std::vector<float> after(split, block.samples().end());
+
+  const auto before_440 = windowed_tone_amplitude(before, channels, kMixRate, kBeforeHz);
+  const auto before_880 = windowed_tone_amplitude(before, channels, kMixRate, kAfterHz);
+  const auto after_440 = windowed_tone_amplitude(after, channels, kMixRate, kBeforeHz);
+  const auto after_880 = windowed_tone_amplitude(after, channels, kMixRate, kAfterHz);
+  std::cout << "spectral cut: before 440=" << before_440 << " 880=" << before_880
+            << "; after 440=" << after_440 << " 880=" << after_880 << '\n';
+
+  // Continuous audio is not enough: the spectral content must switch at the
+  // cut, so a clip mapped to the wrong source range would fail here.
+  assert(channels == 2);
+  assert(before_440 > 0.05 && before_880 < before_440 / 10.0);
+  assert(after_880 > 0.05 && after_440 < after_880 / 10.0);
+  assert(after_880 > before_880 * 10.0);
+  assert(bank.opens == 2);
+}
+
 void rates_channels_seek_and_block_invariance() {
   SourceBank bank{{{"mono44", SignalSpec{.rate = 44'100, .channels = 1,
                                           .total_frames = 44'100 * 4U,
@@ -730,6 +811,7 @@ int main() {
   nonzero_source_trim_split_and_gap_mapping();
   gain_and_runtime_stream_origin_are_applied();
   editorial_split_is_pcm_equivalent_to_unsplit_source();
+  spectral_content_follows_the_cut();
   rates_channels_seek_and_block_invariance();
   failures_are_isolated_and_generation_invalidates_pcm();
   empty_mix_uses_software_clock_and_bounds_are_enforced();
