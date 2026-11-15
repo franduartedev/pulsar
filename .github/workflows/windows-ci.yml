@@ -183,8 +183,8 @@ jobs:
           & $env:PULSAR_TEST_FFMPEG_CLI -y -hide_banner -loglevel error `
             -f lavfi -i "testsrc=size=320x180:rate=30" `
             -f lavfi -i "sine=frequency=440:sample_rate=48000" `
-            -t 2 -c:v libx264 -pix_fmt yuv420p -c:a aac -b:a 128k $media
-          if ($LASTEXITCODE -ne 0 -or -not (Test-Path $media)) { throw "Synthetic media generation failed." }
+            -t 2 -c:v mpeg4 -q:v 5 -pix_fmt yuv420p -c:a aac -b:a 128k $media
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path $media)) { throw "Synthetic media generation failed with exit code $LASTEXITCODE." }
           $mediaLocator = $media.Replace('\', '/')
           $project = Join-Path $qa "persisted cut [CI] #1.pulsar"
           $projectLines = @(
@@ -192,7 +192,7 @@ jobs:
             "TIMELINE 4"
             "TRACK 8 VIDEO"
             "VIDEO_TRACK 8"
-            "ASSET 2 0 2 1 1 `"$mediaLocator`" `"h264`" 320 180 1 15360 30 1 `"mov,mp4,m4a,3gp,3g2,mj2`" AUDIO 1 48000 1 1 48000 2 1 1"
+            "ASSET 2 0 2 1 1 `"$mediaLocator`" `"mpeg4`" 320 180 1 15360 30 1 `"mov,mp4,m4a,3gp,3g2,mj2`" AUDIO 1 48000 1 1 48000 2 1 1"
             "CLIP 20 8 2 0 1 1 1 1 0 1 1"
             "CLIP 21 8 2 1 1 1 2 1 1 1 1 1"
             "ALLOCATOR 10 30 5 9"
