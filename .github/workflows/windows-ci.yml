@@ -180,7 +180,7 @@ jobs:
           Remove-Item -Recurse -Force $qa -ErrorAction SilentlyContinue
           New-Item -ItemType Directory -Force -Path $qa | Out-Null
           $media = Join-Path $qa "synthetic audio [CI] #1.mp4"
-          & ffmpeg -y -hide_banner -loglevel error `
+          & $env:PULSAR_TEST_FFMPEG_CLI -y -hide_banner -loglevel error `
             -f lavfi -i "testsrc=size=320x180:rate=30" `
             -f lavfi -i "sine=frequency=440:sample_rate=48000" `
             -t 2 -c:v libx264 -pix_fmt yuv420p -c:a aac -b:a 128k $media
