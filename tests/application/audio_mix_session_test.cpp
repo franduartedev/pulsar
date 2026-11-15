@@ -628,9 +628,9 @@ void spectral_content_follows_the_cut() {
 
   // One window straddling the cut: 100 ms of clip 1 followed by 100 ms of clip 2.
   constexpr std::int64_t kHalfWindow = kMixRate / 10;
-  const auto block =
-      mixer.render(frames(kCutFrame - kHalfWindow), static_cast<std::size_t>(kHalfWindow * 2)).block;
-  assert(block.frame_count() == static_cast<std::size_t>(kHalfWindow * 2));
+  const auto window_frames = static_cast<std::size_t>(kHalfWindow * 2);
+  const auto block = mixer.render(frames(kCutFrame - kHalfWindow), window_frames).block;
+  assert(block.frame_count() == window_frames);
   const auto channels = static_cast<int>(block.samples().size() / block.frame_count());
   const auto split = block.samples().begin() +
                      static_cast<std::ptrdiff_t>(kHalfWindow) * channels;
