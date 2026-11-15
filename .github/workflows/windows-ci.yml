@@ -100,7 +100,7 @@ jobs:
         run: |
           choco install ffmpeg --no-progress --yes
           $ffmpeg = Join-Path $env:ProgramData 'chocolatey\bin\ffmpeg.exe'
-          if (-not (Test-Path $ffmpeg)) {
+          if (-not (Test-Path -LiteralPath $ffmpeg -PathType Leaf)) {
             $ffmpeg = (Get-Command ffmpeg -ErrorAction Stop).Source
           }
           "PULSAR_TEST_FFMPEG_CLI=$ffmpeg" >> $env:GITHUB_ENV
@@ -140,16 +140,16 @@ jobs:
         shell: pwsh
         run: |
           $archive = Join-Path $pwd "dist/PULSAR-0.2.0-beta.2-windows-x86_64.zip"
-          if (-not (Test-Path $archive)) { throw "Expected beta.2 Windows package was not generated." }
+          if (-not (Test-Path -LiteralPath $archive -PathType Leaf)) { throw "Expected beta.2 Windows package was not generated." }
           $fixArchive = Join-Path $pwd "dist/PULSAR-beta2-fix-test-windows-x86_64.zip"
           Copy-Item -LiteralPath $archive -Destination $fixArchive -Force
-          if (-not (Test-Path $fixArchive)) { throw "Named beta.2 fix test package was not generated." }
+          if (-not (Test-Path -LiteralPath $fixArchive -PathType Leaf)) { throw "Named beta.2 fix test package was not generated." }
           $verify = Join-Path $env:RUNNER_TEMP "pulsar-beta2-package-check"
           Remove-Item -Recurse -Force $verify -ErrorAction SilentlyContinue
           Expand-Archive -LiteralPath $archive -DestinationPath $verify
           $metadata = Join-Path $verify "BUILD-METADATA.txt"
-          if (-not (Test-Path $metadata)) { throw "Package is missing BUILD-METADATA.txt." }
-          $metadataText = Get-Content $metadata -Raw
+          if (-not (Test-Path -LiteralPath $metadata -PathType Leaf)) { throw "Package is missing BUILD-METADATA.txt." }
+          $metadataText = Get-Content -LiteralPath $metadata -Raw
           foreach ($required in @(
             "PULSAR_VERSION=0.2.0-beta.2",
             "PULSAR_HEAD_SHA=$env:PULSAR_HEAD_SHA",
@@ -168,10 +168,17 @@ jobs:
             if ($match) { $found = $true; break }
           }
           if (-not $found) { throw "The packaged executable does not contain the beta.2 version marker." }
-          if (-not (Test-Path (Join-Path $verify "LICENSE.txt")) -or
-              -not (Test-Path (Join-Path $verify "THIRD_PARTY_NOTICES.md"))) {
+          if (-not (Test-Path -LiteralPath (Join-Path $verify "LICENSE.txt") -PathType Leaf) -or
+              -not (Test-Path -LiteralPath (Join-Path $verify "THIRD_PARTY_NOTICES.md") -PathType Leaf)) {
             throw "Package is missing required license notices."
           }
+
+      # Regression test: QA fixture names contain spaces, brackets and '#', and
+      # PowerShell treats '[...]' in a path as a wildcard character class. A
+      # successful FFmpeg run was reported as a failure because of this.
+      - name: Verify literal path handling for QA fixture names
+        shell: pwsh
+        run: .\tools\ci\verify-literal-path-handling.ps1
 
       - name: Smoke-test packaged desktop with persisted cut project
         shell: pwsh
@@ -184,7 +191,25 @@ jobs:
             -f lavfi -i "testsrc=size=320x180:rate=30" `
             -f lavfi -i "sine=frequency=440:sample_rate=48000" `
             -t 2 -c:v mpeg4 -q:v 5 -pix_fmt yuv420p -c:a aac -b:a 128k $media
-          if ($LASTEXITCODE -ne 0 -or -not (Test-Path $media)) { throw "Synthetic media generation failed with exit code $LASTEXITCODE." }
+          if ($LASTEXITCODE -ne 0) { throw "Synthetic media generation failed with exit code $LASTEXITCODE." }
+          # Use -LiteralPath for every path check below: '$media' contains '['.
+          if (-not (Test-Path -LiteralPath $media -PathType Leaf)) {
+            $present = @(Get-ChildItem -LiteralPath $qa -File | ForEach-Object Name) -join ', '
+            throw "Synthetic media was not created at '$media'. Directory contains: $present"
+          }
+          $mediaLength = (Get-Item -LiteralPath $media).Length
+          if ($mediaLength -le 0) { throw "Synthetic media is empty: '$media'." }
+          $ffprobe = Join-Path (Split-Path -Parent $env:PULSAR_TEST_FFMPEG_CLI) "ffprobe.exe"
+          if (-not (Test-Path -LiteralPath $ffprobe -PathType Leaf)) {
+            $ffprobe = (Get-Command ffprobe -ErrorAction SilentlyContinue).Source
+          }
+          if (-not $ffprobe) { throw "ffprobe was not found next to '$env:PULSAR_TEST_FFMPEG_CLI' or on PATH." }
+          $streamTypes = @(& $ffprobe -v error -show_entries stream=codec_type -of csv=p=0 $media |
+            ForEach-Object { $_.Trim() } | Where-Object { $_ })
+          if ($LASTEXITCODE -ne 0) { throw "ffprobe failed on synthetic media with exit code $LASTEXITCODE." }
+          if ($streamTypes -notcontains "video") { throw "Synthetic media has no video stream. Streams: $($streamTypes -join ', ')" }
+          if ($streamTypes -notcontains "audio") { throw "Synthetic media has no audio stream. Streams: $($streamTypes -join ', ')" }
+          Write-Host "Synthetic media ok: $mediaLength bytes; streams: $($streamTypes -join ', ')"
           $mediaLocator = $media.Replace('\', '/')
           $project = Join-Path $qa "persisted cut [CI] #1.pulsar"
           $projectLines = @(
@@ -222,25 +247,25 @@ jobs:
             $env:PULSAR_QA_WORKSPACE = $oldQaWorkspace
             $env:PULSAR_QA_PCM_PATH = $oldQaPcm
           }
-          if (-not (Test-Path $shot)) { throw "Packaged desktop did not produce a screenshot." }
-          $errorText = Get-Content $stderr -Raw
+          if (-not (Test-Path -LiteralPath $shot -PathType Leaf)) { throw "Packaged desktop did not produce a screenshot." }
+          $errorText = Get-Content -LiteralPath $stderr -Raw
           if ($errorText -match "open project failed|media file does not exist|cannot decode project") {
             throw "Packaged desktop failed to open the persisted cut project: $errorText"
           }
-          $metrics = Get-Content $stdout -Raw
+          $metrics = Get-Content -LiteralPath $stdout -Raw
           if ($metrics -notmatch "audio.source_opens=[1-9][0-9]*") {
             throw "Playback did not open an audio source. Metrics: $metrics"
           }
           if ($metrics -notmatch "audio.render_p95_us=[1-9][0-9]*") {
             throw "Playback produced no measurable PCM render. Metrics: $metrics"
           }
-          if (-not (Test-Path $pcm) -or (Get-Item $pcm).Length -lt 100) {
+          if (-not (Test-Path -LiteralPath $pcm -PathType Leaf) -or (Get-Item -LiteralPath $pcm).Length -lt 100) {
             throw "Playback PCM capture is missing or empty."
           }
-          $pcmText = Get-Content $pcm -Raw
+          $pcmText = Get-Content -LiteralPath $pcm -Raw
           $blockCount = ([regex]::Matches($pcmText, "(?m)^BLOCK ")).Count
           if ($blockCount -lt 2) { throw "Playback PCM capture contains fewer than two blocks." }
-          Write-Host "Packaged desktop playback passed; screenshot bytes: $((Get-Item $shot).Length); PCM blocks: $blockCount"
+          Write-Host "Packaged desktop playback passed; screenshot bytes: $((Get-Item -LiteralPath $shot).Length); PCM blocks: $blockCount"
 
       - name: Generate Windows SHA256SUMS
         shell: pwsh
