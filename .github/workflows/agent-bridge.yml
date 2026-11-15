@@ -93,8 +93,11 @@ jobs:
       - name: Build bridge and tests
         run: cmake --build build-agent --parallel 2
 
+      - name: List bridge module tests
+        run: ctest --test-dir build-agent -C Release -N
+
       - name: Run bridge module tests
-        run: ctest --test-dir build-agent -C Release -R 'pulsar\.application\.agent_bridge' --output-on-failure
+        run: ctest --test-dir build-agent -C Release -R 'pulsar.application.agent_bridge' --output-on-failure
 
       - name: Run JSONL scenario and security checks (Linux)
         if: runner.os != 'Windows'
@@ -120,13 +123,13 @@ jobs:
           Remove-Item -Recurse -Force $workspace -ErrorAction SilentlyContinue
           New-Item -ItemType Directory -Path $workspace | Out-Null
           Get-Content examples/agent-bridge-round-trip.jsonl |
-            & build-agent/apps/agent-bridge/Release/pulsar_agent_bridge_cli.exe --root $workspace |
+            & .\build-agent\apps\agent-bridge\Release\pulsar_agent_bridge_cli.exe --root $workspace |
             Tee-Object (Join-Path $env:RUNNER_TEMP 'agent-bridge-output.jsonl')
           $outputs = Get-Content (Join-Path $env:RUNNER_TEMP 'agent-bridge-output.jsonl')
           if (($outputs | Where-Object { $_ -notmatch '"ok":true' }).Count -ne 0) { throw 'JSONL scenario returned an error' }
           if (-not (Test-Path (Join-Path $workspace 'round-trip.pulsar'))) { throw 'round-trip project missing' }
           '{"command":"create_test_media","path":"../agent-bridge-escape-sentinel"}' |
-            & build-agent/apps/agent-bridge/Release/pulsar_agent_bridge_cli.exe --root $workspace |
+            & .\build-agent\apps\agent-bridge\Release\pulsar_agent_bridge_cli.exe --root $workspace |
             Tee-Object (Join-Path $env:RUNNER_TEMP 'agent-bridge-negative.jsonl')
           if ((Get-Content (Join-Path $env:RUNNER_TEMP 'agent-bridge-negative.jsonl')) -notmatch '"ok":false') { throw 'escape was not rejected' }
           if (Test-Path (Join-Path $env:RUNNER_TEMP 'agent-bridge-escape-sentinel')) { throw 'escape sentinel was created' }
