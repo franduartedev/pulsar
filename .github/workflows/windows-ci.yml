@@ -256,10 +256,24 @@ jobs:
           $metrics = Get-Content -LiteralPath $stdout -Raw
           Write-Host "--- playback metrics ---"
           Write-Host $metrics
-          # A playback test needs an audio device: without one the mixer never
-          # renders and PCM assertions would fail for a missing runner
-          # capability instead of a product defect. Device audio is validated
-          # on real hardware.
+          # Rendering starts even without a device, so these assertions hold on
+          # every runner and catch a regression where play() never starts.
+          if ($metrics -notmatch "audio.source_opens=[1-9][0-9]*") {
+            throw "Playback did not open an audio source. Metrics: $metrics"
+          }
+          if ($metrics -notmatch "audio.render_p95_us=[1-9][0-9]*") {
+            throw "Playback produced no measurable PCM render. Metrics: $metrics"
+          }
+          if (-not (Test-Path -LiteralPath $pcm -PathType Leaf) -or (Get-Item -LiteralPath $pcm).Length -lt 100) {
+            throw "Playback PCM capture is missing or empty."
+          }
+          $pcmText = Get-Content -LiteralPath $pcm -Raw
+          $blockCount = ([regex]::Matches($pcmText, "(?m)^BLOCK ")).Count
+          if ($blockCount -lt 2) { throw "Playback PCM capture contains fewer than two blocks." }
+          Write-Host "Playback render assertions passed; PCM blocks: $blockCount"
+          # Timeline progress needs a consuming audio device: without one the
+          # renderer fills the buffer and stalls, so the 4s split can only be
+          # crossed on real hardware.
           $audioEndpoints = @()
           try {
             $audioEndpoints = @(Get-PnpDevice -Class AudioEndpoint -Status OK -ErrorAction Stop | Where-Object { $_.Present })
@@ -271,18 +285,6 @@ jobs:
             Write-Host "::warning::No enabled audio endpoint on this runner; playback PCM and split continuity were NOT validated here. Run the packaged desktop on a machine with audio hardware for device validation."
           } else {
             Write-Host "Enabled audio endpoints: $($audioEndpoints.Count)"
-            if ($metrics -notmatch "audio.source_opens=[1-9][0-9]*") {
-              throw "Playback did not open an audio source. Metrics: $metrics"
-            }
-            if ($metrics -notmatch "audio.render_p95_us=[1-9][0-9]*") {
-              throw "Playback produced no measurable PCM render. Metrics: $metrics"
-            }
-            if (-not (Test-Path -LiteralPath $pcm -PathType Leaf) -or (Get-Item -LiteralPath $pcm).Length -lt 100) {
-              throw "Playback PCM capture is missing or empty."
-            }
-            $pcmText = Get-Content -LiteralPath $pcm -Raw
-            $blockCount = ([regex]::Matches($pcmText, "(?m)^BLOCK ")).Count
-            if ($blockCount -lt 2) { throw "Playback PCM capture contains fewer than two blocks." }
             # The project splits at 4s: PCM must contain rendered audio on both
             # sides of the cut, otherwise the transition dropped frames.
             $blockMatches = [regex]::Matches($pcmText, "(?m)^BLOCK timeline=(-?\d+)/(\d+)/(\d+) frames=(\d+)")
