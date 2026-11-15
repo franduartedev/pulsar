@@ -728,6 +728,52 @@ void repository_atomic_save_and_missing_media_refresh() {
   std::filesystem::remove_all(root);
 }
 
+void repository_save_close_reopen_preserves_windows_style_project() {
+  const auto root = std::filesystem::temp_directory_path() /
+                    ("pulsar-project-special-path-" + std::to_string(
+                        std::chrono::steady_clock::now().time_since_epoch().count()));
+  std::filesystem::create_directories(root);
+#ifdef _WIN32
+  const auto project_dir = root / std::filesystem::path{L"PULSAR project [cut] #1"};
+  const auto media = project_dir / std::filesystem::path{L"media clip [take] #1.mp4"};
+#else
+  const auto project_dir = root / "PULSAR project [cut] #1";
+  const auto media = project_dir / "media clip [take] #1.mp4";
+#endif
+  std::filesystem::create_directories(project_dir);
+  { std::ofstream output{media}; output << "media"; }
+  const auto project = project_dir / "cut project.pulsar";
+
+  pulsar::project_file::FileProjectRepository repository;
+  domain::ClipId left{1};
+  domain::ClipId right{2};
+  std::string expected;
+  {
+    ProjectDocument document;
+    CommandProcessor processor{document};
+    const auto media_id = processor.import_asset(media, FakeProbe{});
+    left = processor.add_clip(media_id, TimeRange{t(0), t(6)}, t(0));
+    right = processor.split_clip(left, t(2));
+    const auto second_track = processor.add_track(domain::TrackKind::Video);
+    (void)processor.add_clip(second_track, media_id, TimeRange{t(1), t(3)}, t(8));
+    expected = ProjectCodec::encode(document.snapshot());
+    assert(repository.save(project, document.snapshot()).status == ProjectSaveStatus::Durable);
+  }
+
+  // Model the application boundary: the original document is gone before the
+  // project is opened again. No reproduction input is used as a destination.
+  const auto reopened_state = repository.load(project);
+  auto reopened = ProjectDocument::restore(reopened_state);
+  assert(ProjectCodec::encode(reopened.snapshot()) == expected);
+  assert(reopened.timeline().find_clip(left) != nullptr);
+  assert(reopened.timeline().find_clip(right) != nullptr);
+  assert(reopened.timeline().tracks().size() == 2);
+  assert(reopened.assets().front().source_locator() == media);
+  assert(reopened.assets().front().availability() == application::MediaAvailability::Available);
+
+  std::filesystem::remove_all(root);
+}
+
 } // namespace
 
 void repository_normalizes_codec_failures() {
@@ -799,5 +845,6 @@ int main() {
   edited_state_and_saved_snapshot_regressions();
   allocator_high_water_and_restore_validation();
   repository_atomic_save_and_missing_media_refresh();
+  repository_save_close_reopen_preserves_windows_style_project();
   repository_normalizes_codec_failures();
 }

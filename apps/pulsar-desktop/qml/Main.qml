@@ -143,7 +143,7 @@ Window {
         title: "Abrir proyecto"
         fileMode: FileDialog.OpenFile
         nameFilters: ["Proyectos PULSAR (*.pulsar)", "Todos los archivos (*)"]
-        onAccepted: controller.openProject(decodeURIComponent(selectedFile.toString().replace(/^file:\/\//, "")))
+        onAccepted: controller.openUrl(selectedFile)
     }
     FileDialog {
         id: importSubtitleDialog

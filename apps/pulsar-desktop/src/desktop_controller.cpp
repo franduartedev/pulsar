@@ -57,6 +57,14 @@
 #include <vector>
 
 namespace {
+[[nodiscard]] std::filesystem::path filesystem_path_from_qstring(const QString& value) {
+#ifdef _WIN32
+  return std::filesystem::path{value.toStdWString()};
+#else
+  return std::filesystem::path{value.toStdString()};
+#endif
+}
+
 // Nearest-rank percentile over a sorted copy; on-demand reporting only.
 std::chrono::nanoseconds percentile_sorted(const std::vector<std::chrono::nanoseconds>& sorted,
                                            double rank) {
@@ -2560,7 +2568,8 @@ bool DesktopController::saveProject(const QString& path) {
     return false;
   }
   try {
-    const auto result = active_session_->save_project(std::filesystem::path{trimmed.toStdString()},
+    const auto destination = filesystem_path_from_qstring(trimmed);
+    const auto result = active_session_->save_project(destination,
                                                       pulsar::project_file::FileProjectRepository{});
     if (result.status == pulsar::application::ProjectSaveStatus::Durable) {
       setStatus(QStringLiteral("Proyecto guardado"));
@@ -2568,7 +2577,7 @@ bool DesktopController::saveProject(const QString& path) {
       setStatus(QStringLiteral("Proyecto guardado (durabilidad no confirmada)"));
     }
     clearError();
-    const auto saved_path = std::filesystem::path{trimmed.toStdString()};
+    const auto saved_path = destination;
     if (active_project_file_ != saved_path) {
       active_project_file_ = saved_path;
       emit activeProjectPathChanged();
@@ -2743,7 +2752,7 @@ bool DesktopController::openProjectImpl(const QString& path, std::optional<pulsa
   if (trimmed.isEmpty() && !recovered) {   // a recovered session may never have been saved
     return false;
   }
-  const std::filesystem::path project_path{trimmed.toStdString()};
+  const std::filesystem::path project_path = filesystem_path_from_qstring(trimmed);
   setBusy(true);
   setStatus(QStringLiteral("Abriendo proyecto…"));
   clearError();

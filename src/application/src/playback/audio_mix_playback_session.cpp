@@ -295,8 +295,16 @@ std::optional<domain::MediaTime> AudioMixPlaybackSession::clock_position() const
 
 void AudioMixPlaybackSession::close_output() noexcept {
   if (output_ == nullptr) return;
+  // An editorial transition is a hard audio discontinuity. Stop discards the
+  // engine queue, while an adapter may still own frames submitted to its
+  // backend. Flush explicitly before closing so the next snapshot cannot
+  // begin behind PCM from the previous snapshot.
   const auto state = output_->state();
-  if (state == AudioOutputState::Running || state == AudioOutputState::Draining) {
+  if (state != AudioOutputState::Closed && state != AudioOutputState::Error) {
+    (void)output_->flush();
+  }
+  if (output_->state() == AudioOutputState::Running ||
+      output_->state() == AudioOutputState::Draining) {
     output_->stop();
   }
   if (output_->state() != AudioOutputState::Closed) output_->close();

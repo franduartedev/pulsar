@@ -171,7 +171,10 @@ public:
     return true;
   }
 
-  bool flush() override { return stop(); }
+  bool flush() override {
+    ++flushes;
+    return stop();
+  }
   application::AudioOutputState state() const override { return state_; }
   std::optional<application::AudioDeviceFormat> device_format() const override { return format_; }
   application::AudioOutputMetrics metrics() const override { return metrics_; }
@@ -180,6 +183,7 @@ public:
   std::uint64_t pending_frames() const noexcept { return pending_; }
 
   std::vector<application::AudioBlock> accepted;
+  int flushes{0};
 
 private:
   application::AudioOutputState state_{application::AudioOutputState::Closed};
@@ -279,9 +283,11 @@ void playback_reconfigure_preserves_editorial_audio_position() {
   assert(*playback.clock_position() == editorial_position);
 
   output.accepted.clear();
+  const auto flushes_before_reconfigure = output.flushes;
   // This generation represents adding/changing a V2 visual clip. V1's
   // embedded audio remains the same and must not restart at timeline zero.
   playback.configure(second, editorial_position);
+  assert(output.flushes > flushes_before_reconfigure);
   assert(playback.generation() > first_generation);
   assert(playback.render_position().has_value());
   assert(*playback.render_position() == editorial_position);
@@ -300,6 +306,45 @@ void playback_reconfigure_preserves_editorial_audio_position() {
   assert(output.accepted.front().samples()[0] > 0.5F);
   assert(!bank.seek_targets.empty());
   assert(bank.seek_targets.back() == frames(2548));
+}
+
+void split_transition_and_pause_resume_preserve_pcm_continuity() {
+  SignalSpec signal{.block_frames = 137, .constant = 0.1F, .impulse_frame = 2048};
+  SourceBank bank{{{"signal", signal}}};
+  const auto unsplit = snapshot({audio_asset(1, "signal")}, std::nullopt,
+                                {{{1, 1, 0, 0, 4096}}}, 20);
+  const auto split = snapshot({audio_asset(1, "signal")}, std::nullopt,
+                              {{{1, 1, 0, 0, 2048}, {2, 1, 2048, 2048, 2048}}}, 21);
+
+  application::AudioMixSession expected_mixer{bank.factory()};
+  expected_mixer.configure(split);
+  const auto expected = expected_mixer.render(frames(2048), 1024).block.samples();
+
+  PlaybackOutput output;
+  application::AudioMixPlaybackSession playback{&output, bank.factory()};
+  playback.configure(unsplit, frames(0));
+  playback.play();
+  assert(!output.accepted.empty());
+
+  // Reconfigure at the editorial split while transport is running. The first
+  // post-split PCM block must be the same block as the uninterrupted timeline,
+  // not stale pre-cut audio or silence.
+  output.accepted.clear();
+  playback.configure(split, frames(2048));
+  playback.play();
+  assert(!output.accepted.empty());
+  assert(output.accepted.front().samples() == expected);
+  assert(output.accepted.front().samples().front() > 0.5F);
+
+  // A paused transition must retain the exact editorial cursor and reproduce
+  // the same first block on resume.
+  playback.pause();
+  output.accepted.clear();
+  playback.configure(split, frames(2048));
+  playback.play();
+  assert(!output.accepted.empty());
+  assert(output.accepted.front().samples() == expected);
+  assert(playback.render_position().has_value() && *playback.render_position() > frames(2048));
 }
 
 float left(const application::AudioBlock& block, std::size_t frame) {
@@ -674,6 +719,7 @@ void benchmark_mix_scaling() {
 
 int main() {
   playback_reconfigure_preserves_editorial_audio_position();
+  split_transition_and_pause_resume_preserve_pcm_continuity();
   contributor_resolution_is_complete_and_deterministic();
   mix_alignment_gain_mute_and_clipping();
   fades_ramp_in_the_mixer_across_blocks();
