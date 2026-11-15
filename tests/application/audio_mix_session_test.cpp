@@ -626,8 +626,9 @@ void spectral_content_follows_the_cut() {
   mixer.configure(snapshot({audio_asset(1, "tone440"), audio_asset(2, "tone880")}, std::nullopt,
                            {{{1, 1, 0, 0, kCutFrame}, {2, 2, kCutFrame, 0, kCutFrame}}}, 30));
 
-  // One window straddling the cut: 100 ms of clip 1 followed by 100 ms of clip 2.
-  constexpr std::int64_t kHalfWindow = kMixRate / 10;
+  // One window straddling the cut: 50 ms of clip 1 followed by 50 ms of clip 2.
+  // Length is inside AudioMixSession::maximum_render_frames.
+  constexpr std::int64_t kHalfWindow = kMixRate / 20;
   const auto window_frames = static_cast<std::size_t>(kHalfWindow * 2);
   const auto block = mixer.render(frames(kCutFrame - kHalfWindow), window_frames).block;
   assert(block.frame_count() == window_frames);
