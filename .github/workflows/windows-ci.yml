@@ -141,6 +141,9 @@ jobs:
         run: |
           $archive = Join-Path $pwd "dist/PULSAR-0.2.0-beta.2-windows-x86_64.zip"
           if (-not (Test-Path $archive)) { throw "Expected beta.2 Windows package was not generated." }
+          $fixArchive = Join-Path $pwd "dist/PULSAR-beta2-fix-test-windows-x86_64.zip"
+          Copy-Item -LiteralPath $archive -Destination $fixArchive -Force
+          if (-not (Test-Path $fixArchive)) { throw "Named beta.2 fix test package was not generated." }
           $verify = Join-Path $env:RUNNER_TEMP "pulsar-beta2-package-check"
           Remove-Item -Recurse -Force $verify -ErrorAction SilentlyContinue
           Expand-Archive -LiteralPath $archive -DestinationPath $verify
@@ -174,8 +177,11 @@ jobs:
         shell: pwsh
         run: |
           $archive = Get-Item "dist/PULSAR-0.2.0-beta.2-windows-x86_64.zip"
-          $hash = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant()
-          "$hash  $($archive.Name)" | Set-Content "dist/SHA256SUMS" -Encoding ascii
+          $fixArchive = Get-Item "dist/PULSAR-beta2-fix-test-windows-x86_64.zip"
+          @(
+            "{0}  {1}" -f (Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant(), $archive.Name
+            "{0}  {1}" -f (Get-FileHash $fixArchive -Algorithm SHA256).Hash.ToLowerInvariant(), $fixArchive.Name
+          ) | Set-Content "dist/SHA256SUMS" -Encoding ascii
 
       - name: Upload portable bundle and checksum
         uses: actions/upload-artifact@v4
@@ -183,6 +189,7 @@ jobs:
           name: pulsar-windows-beta-2
           path: |
             dist/PULSAR-0.2.0-beta.2-windows-x86_64.zip
+            dist/PULSAR-beta2-fix-test-windows-x86_64.zip
             dist/SHA256SUMS
 
       - name: Fail job if tests failed
