@@ -213,6 +213,10 @@ int main(int argc, char** argv) {
   fs::copy_file(fixtures / "e6_video_b.mp4", root / "media/b.mp4");
   REQUIRE(33, controller.openProject(q(second)));
   REQUIRE(34, asset_available(controller, 1) && !clip_missing(controller, 1));
+  controller.seekToStart();
+  controller.play();
+  REQUIRE(220, controller.playing());
+  controller.pause();
 
   // ---- Built-in sounds survive save -> reopen -> export (regression: the catalogue
   // locator was looked up relative to the working directory and came back "offline").

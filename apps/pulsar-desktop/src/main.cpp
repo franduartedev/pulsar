@@ -70,6 +70,9 @@ int main(int argc, char** argv) {
   std::optional<int> smoke_exit_ms;
   std::optional<QSize> smoke_size;
   std::optional<QString> smoke_screenshot;
+  std::optional<int> qa_playback_ms;
+  std::optional<int> qa_pause_after_ms;
+  std::optional<int> qa_resume_after_ms;
   bool dump_performance_on_exit = false;
   for (int index = 1; index < argc; ++index) {
     const QString argument = QString::fromLocal8Bit(argv[index]);
@@ -92,6 +95,18 @@ int main(int argc, char** argv) {
       smoke_screenshot = QString::fromLocal8Bit(argv[++index]);
     } else if (argument == QStringLiteral("--dump-performance-on-exit")) {
       dump_performance_on_exit = true;
+    } else if (argument == QStringLiteral("--qa-playback-ms") && index + 1 < argc) {
+      bool ok = false;
+      const int value = QString::fromLocal8Bit(argv[++index]).toInt(&ok);
+      if (ok && value > 0) qa_playback_ms = value;
+    } else if (argument == QStringLiteral("--qa-pause-after-ms") && index + 1 < argc) {
+      bool ok = false;
+      const int value = QString::fromLocal8Bit(argv[++index]).toInt(&ok);
+      if (ok && value > 0) qa_pause_after_ms = value;
+    } else if (argument == QStringLiteral("--qa-resume-after-ms") && index + 1 < argc) {
+      bool ok = false;
+      const int value = QString::fromLocal8Bit(argv[++index]).toInt(&ok);
+      if (ok && value > 0) qa_resume_after_ms = value;
     } else if (!argument.startsWith(QLatin1String("--")) && !initial_path.has_value()) {
       initial_path = argument;
     }
@@ -117,6 +132,19 @@ int main(int argc, char** argv) {
       if (initial_path->endsWith(QStringLiteral(".pulsar"), Qt::CaseInsensitive)) controller.openProject(*initial_path);
       else controller.openPath(*initial_path);
     });
+  }
+  if (qa_playback_ms.has_value()) {
+    QTimer::singleShot(1800, &controller, [&controller] { controller.play(); });
+    if (qa_pause_after_ms.has_value()) {
+      QTimer::singleShot(1800 + *qa_pause_after_ms, &controller,
+                         [&controller] { controller.pause(); });
+    }
+    if (qa_resume_after_ms.has_value()) {
+      QTimer::singleShot(1800 + *qa_resume_after_ms, &controller,
+                         [&controller] { controller.play(); });
+    }
+    QTimer::singleShot(1800 + *qa_playback_ms, &controller,
+                       [&controller] { controller.pause(); });
   }
   if (smoke_exit_ms.has_value()) {
     QTimer::singleShot(*smoke_exit_ms, &app, &QCoreApplication::quit);

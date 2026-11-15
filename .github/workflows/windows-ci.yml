@@ -203,24 +203,44 @@ jobs:
           $stage = Join-Path $build "packaging-stage/PULSAR"
           $exe = Join-Path $stage "bin/pulsar-desktop.exe"
           $shot = Join-Path $qa "persisted-cut.png"
+          $pcm = Join-Path $qa "playback-pcm.log"
           $stdout = Join-Path $qa "stdout.log"
           $stderr = Join-Path $qa "stderr.log"
           $oldPlatform = $env:QT_QPA_PLATFORM
+          $oldQaWorkspace = $env:PULSAR_QA_WORKSPACE
+          $oldQaPcm = $env:PULSAR_QA_PCM_PATH
           $env:QT_QPA_PLATFORM = "offscreen"
+          $env:PULSAR_QA_WORKSPACE = $qa
+          $env:PULSAR_QA_PCM_PATH = $pcm
           try {
-            $arguments = '"{0}" --smoke-size 1280x720 --smoke-exit-ms 4000 --smoke-screenshot "{1}"' -f $project, $shot
+            $arguments = '"{0}" --smoke-size 1280x720 --smoke-exit-ms 9000 --smoke-screenshot "{1}" --qa-playback-ms 6500 --qa-pause-after-ms 3000 --qa-resume-after-ms 4200 --dump-performance-on-exit' -f $project, $shot
             $process = Start-Process -FilePath $exe -ArgumentList $arguments `
               -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru -Wait
             if ($process.ExitCode -ne 0) { throw "Packaged desktop exited with code $($process.ExitCode)." }
           } finally {
             $env:QT_QPA_PLATFORM = $oldPlatform
+            $env:PULSAR_QA_WORKSPACE = $oldQaWorkspace
+            $env:PULSAR_QA_PCM_PATH = $oldQaPcm
           }
           if (-not (Test-Path $shot)) { throw "Packaged desktop did not produce a screenshot." }
           $errorText = Get-Content $stderr -Raw
           if ($errorText -match "open project failed|media file does not exist|cannot decode project") {
             throw "Packaged desktop failed to open the persisted cut project: $errorText"
           }
-          Write-Host "Packaged desktop persistence smoke passed; screenshot bytes: $((Get-Item $shot).Length)"
+          $metrics = Get-Content $stdout -Raw
+          if ($metrics -notmatch "audio.source_opens=[1-9][0-9]*") {
+            throw "Playback did not open an audio source. Metrics: $metrics"
+          }
+          if ($metrics -notmatch "audio.render_p95_us=[1-9][0-9]*") {
+            throw "Playback produced no measurable PCM render. Metrics: $metrics"
+          }
+          if (-not (Test-Path $pcm) -or (Get-Item $pcm).Length -lt 100) {
+            throw "Playback PCM capture is missing or empty."
+          }
+          $pcmText = Get-Content $pcm -Raw
+          $blockCount = ([regex]::Matches($pcmText, "(?m)^BLOCK ")).Count
+          if ($blockCount -lt 2) { throw "Playback PCM capture contains fewer than two blocks." }
+          Write-Host "Packaged desktop playback passed; screenshot bytes: $((Get-Item $shot).Length); PCM blocks: $blockCount"
 
       - name: Generate Windows SHA256SUMS
         shell: pwsh

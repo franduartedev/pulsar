@@ -2,12 +2,69 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdlib>
 #include <exception>
+#include <filesystem>
+#include <fstream>
+#include <iomanip>
 #include <limits>
 #include <stdexcept>
 
 namespace pulsar::application {
 namespace {
+
+class QaPcmCapture final {
+public:
+  QaPcmCapture() {
+    const char* output = std::getenv("PULSAR_QA_PCM_PATH");
+    const char* workspace = std::getenv("PULSAR_QA_WORKSPACE");
+    if (output == nullptr || workspace == nullptr || *output == '\0' || *workspace == '\0') return;
+    std::error_code error;
+    const auto root = std::filesystem::weakly_canonical(workspace, error);
+    if (error) return;
+    const auto destination = std::filesystem::weakly_canonical(output, error);
+    if (error) return;
+    const auto relative = std::filesystem::relative(destination, root, error).generic_string();
+    if (error || relative.empty() || relative == ".." || relative.starts_with("../")) return;
+    std::filesystem::create_directories(destination.parent_path(), error);
+    if (error) return;
+    stream_.open(destination, std::ios::out | std::ios::trunc);
+    if (!stream_) return;
+    enabled_ = true;
+    stream_ << "PULSAR_QA_PCM 1\n";
+  }
+
+  void append(domain::MediaTime timeline_position, const AudioBlock& block) {
+    if (!enabled_) return;
+    if (!format_written_) {
+      stream_ << "FORMAT sample_rate=" << block.sample_rate()
+              << " channels=" << block.channel_count() << "\n";
+      format_written_ = true;
+    }
+    stream_ << "BLOCK timeline=" << timeline_position.value() << '/'
+            << timeline_position.time_base().numerator() << '/'
+            << timeline_position.time_base().denominator()
+            << " frames=" << block.frame_count()
+            << " samples=" << block.samples().size() << " values=";
+    stream_ << std::setprecision(9);
+    for (std::size_t index = 0; index < block.samples().size(); ++index) {
+      if (index != 0) stream_ << ',';
+      stream_ << block.samples()[index];
+    }
+    stream_ << '\n';
+    stream_.flush();
+  }
+
+private:
+  std::ofstream stream_;
+  bool enabled_{false};
+  bool format_written_{false};
+};
+
+QaPcmCapture& qa_pcm_capture() {
+  static QaPcmCapture capture;
+  return capture;
+}
 
 [[nodiscard]] std::uint64_t frame_delta(const AudioOutputMetrics& metrics) noexcept {
   const auto submitted = metrics.device_frames_submitted;
@@ -238,6 +295,7 @@ bool AudioMixPlaybackSession::fill_until(std::uint64_t target_frames) {
       return false;
     }
     auto result = std::move(*rendered);
+    qa_pcm_capture().append(render_position, result.block);
     metrics_.last_level = result.level;
     const auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(
         std::chrono::steady_clock::now() - start).count();

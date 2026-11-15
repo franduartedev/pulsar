@@ -2803,7 +2803,7 @@ bool DesktopController::openProjectImpl(const QString& path, std::optional<pulsa
     return false;
   }
   pause();
-  has_media_ = false;
+  has_media_ = active_session_->timeline_duration() > MediaTime::zero();
   const auto assets = active_session_->document().assets();
   if (!assets.empty()) {
     const auto& asset = assets.front();
