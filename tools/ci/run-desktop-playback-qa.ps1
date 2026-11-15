@@ -107,9 +107,9 @@ $errorText = Get-Content -LiteralPath $stderr -Raw
 if ($errorText -match 'open project failed|media file does not exist|cannot decode project') {
   throw "The packaged desktop failed to open the persisted cut project: $errorText"
 }
-# Guard the Inspector Canvas repaint regression: a TypeError here means a
+# Guard the Inspector Canvas repaint regression: this TypeError means a
 # Connections handler resolved requestPaint on the wrong object again.
-if ($errorText -match 'requestPaint is not a function') {
+if ($errorText -match "Property 'requestPaint' of object") {
   throw "The packaged desktop painted a Canvas through a non-Canvas object: $errorText"
 }
 

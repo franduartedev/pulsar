@@ -256,7 +256,7 @@ jobs:
           if ($errorText -match "open project failed|media file does not exist|cannot decode project") {
             throw "Packaged desktop failed to open the persisted cut project: $errorText"
           }
-          if ($errorText -match "requestPaint is not a function") {
+          if ($errorText -match "Property 'requestPaint' of object") {
             throw "Packaged desktop painted a Canvas through a non-Canvas object: $errorText"
           }
           $metrics = Get-Content -LiteralPath $stdout -Raw
