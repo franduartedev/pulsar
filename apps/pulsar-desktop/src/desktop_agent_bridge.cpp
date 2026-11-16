@@ -311,8 +311,15 @@ QJsonObject DesktopAgentBridge::dispatch(const QJsonObject& request) {
                 static_cast<qint64>(std::filesystem::file_size(path))}});
     }
     if (command == QStringLiteral("get_metrics")) {
-      return success(id, {{QStringLiteral("performance"), controller_.performanceSnapshot()},
-                          {QStringLiteral("diagnostics"), controller_.debugMetrics()},
+      // performanceSnapshot() queries live playback workers and can wait on a
+      // hardware audio callback. While playing, use the diagnostics already
+      // sampled by DesktopController::updateTick so the UI thread stays
+      // responsive and the values still describe the real playback session.
+      const auto diagnostics = controller_.debugMetrics();
+      const auto performance =
+          controller_.playing() ? diagnostics : controller_.performanceSnapshot();
+      return success(id, {{QStringLiteral("performance"), performance},
+                          {QStringLiteral("diagnostics"), diagnostics},
                           {QStringLiteral("position_seconds"),
                            controller_.agentPlaybackPositionSeconds()},
                           {QStringLiteral("playing"), controller_.playing()}});

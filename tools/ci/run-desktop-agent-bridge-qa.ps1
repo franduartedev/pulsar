@@ -126,8 +126,8 @@ try {
   if (-not (Test-Path -LiteralPath $shot -PathType Leaf) -or (Get-Item -LiteralPath $shot).Length -lt 1000) {
     throw 'Agent screenshot is missing or empty.'
   }
-  if ($metrics.performance -notmatch 'audio.source_opens=[1-9][0-9]*') {
-    throw "Real playback did not open an audio source: $($metrics.performance)"
+  if ($metrics.diagnostics -notmatch 'audio_source_opens=[1-9][0-9]*') {
+    throw "Real playback did not open an audio source: $($metrics.diagnostics)"
   }
 
   # Security checks use the real endpoint and must not mutate anything outside
