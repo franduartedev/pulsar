@@ -2,9 +2,9 @@ name: Agent Bridge MVP
 
 on:
   push:
-    branches: [feat/agent-bridge-mvp]
+    branches: [feat/agent-bridge-mvp, feat/agent-bridge-desktop]
   pull_request:
-    branches: [feat/agent-bridge-mvp]
+    branches: [feat/agent-bridge-mvp, feat/agent-bridge-desktop]
   workflow_dispatch:
 
 permissions:

@@ -312,6 +312,15 @@ jobs:
             Write-Host "Packaged desktop playback passed; screenshot bytes: $((Get-Item -LiteralPath $shot).Length); PCM blocks: $blockCount"
           }
 
+      - name: Exercise Agent Bridge against the packaged desktop
+        shell: pwsh
+        run: |
+          $exe = Join-Path (Resolve-Path "build/packaging-stage/PULSAR").Path "bin/pulsar-desktop.exe"
+          $client = Join-Path (Split-Path -Parent $exe) "pulsar-agent-client.exe"
+          .\tools\ci\run-desktop-agent-bridge-qa.ps1 `
+            -Exe $exe -Client $client `
+            -Workspace (Join-Path $env:RUNNER_TEMP "pulsar-agent-desktop-qa") -Offscreen
+
       - name: Upload Windows QA smoke evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -319,6 +328,14 @@ jobs:
           name: pulsar-windows-qa-smoke
           if-no-files-found: warn
           path: ${{ runner.temp }}/pulsar-real-desktop-smoke/
+
+      - name: Upload Agent Bridge desktop evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pulsar-windows-agent-bridge-qa
+          if-no-files-found: warn
+          path: ${{ runner.temp }}/pulsar-agent-desktop-qa/
 
       - name: Generate Windows SHA256SUMS
         shell: pwsh

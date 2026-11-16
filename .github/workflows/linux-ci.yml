@@ -66,6 +66,22 @@ jobs:
           QT_QPA_PLATFORM: offscreen
         run: ctest --test-dir build --output-on-failure
 
+      - name: Exercise Agent Bridge against the real desktop
+        shell: pwsh
+        run: |
+          ./tools/ci/run-desktop-agent-bridge-qa.ps1 `
+            -Exe ./build/apps/pulsar-desktop/pulsar-desktop `
+            -Client ./build/apps/pulsar-desktop/pulsar-agent-client `
+            -Workspace (Join-Path $env:RUNNER_TEMP "pulsar-agent-desktop-qa") -Offscreen
+
+      - name: Upload Agent Bridge desktop evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pulsar-linux-agent-bridge-qa
+          if-no-files-found: warn
+          path: ${{ runner.temp }}/pulsar-agent-desktop-qa/
+
   package:
     name: package-linux
     if: >-
