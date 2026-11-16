@@ -175,6 +175,7 @@ Panel {
             // Anything that lives on VIDEO 1: footage, photos and colour cards.
             readonly property bool isVideo: model.kind === "video" || model.kind === "image" || model.kind === "color"
             readonly property bool isAudio: model.kind === "audio"
+            readonly property bool isPng: model.kind === "image" && model.name.toLowerCase().lastIndexOf(".png") === model.name.length - 4
             // Actions only on the selected asset: one quiet row, no per-row buttons.
             readonly property bool showActions: current && (isVideo || isAudio)
             width: mediaList.width
@@ -242,7 +243,9 @@ Panel {
                 anchors.leftMargin: 12; anchors.rightMargin: 12; anchors.bottomMargin: 8
                 spacing: 6
                 PButton { visible: model.available; width: assetRow.isAudio ? parent.width : (parent.width - 6) / 2; height: Theme.controlHeightSmall; primary: true; text: assetRow.isAudio ? "Insertar en el cabezal" : "Insertar"; onClicked: controller.insertAssetAtPlayhead(model.mediaId) }
-                PButton { visible: model.available && !assetRow.isAudio; width: (parent.width - 6) / 2; height: Theme.controlHeightSmall; text: "Al final"; onClicked: controller.appendAssetToVideoTrack(model.mediaId) }
+                PButton { visible: model.available && !assetRow.isAudio; width: (parent.width - 6) / 2; height: Theme.controlHeightSmall;
+                          text: assetRow.isPng ? "Como overlay" : "Al final"
+                          onClicked: assetRow.isPng ? controller.insertAssetAsOverlay(model.mediaId) : controller.appendAssetToVideoTrack(model.mediaId) }
                 PButton { visible: !model.available; width: parent.width; height: Theme.controlHeightSmall; primary: true; text: "Relinkear archivo…"; onClicked: mediaPanel.relinkRequested(model.mediaId) }
             }
         }

@@ -126,6 +126,7 @@ jobs:
         shell: pwsh
         env:
           QT_QPA_PLATFORM: offscreen
+          PULSAR_OVERLAY_EVIDENCE_DIR: ${{ runner.temp }}/pulsar-overlay-qa
         run: ctest --test-dir build -C Release --output-on-failure
 
       # Packaging must not depend on the test gate: a runnable .exe is
@@ -320,6 +321,23 @@ jobs:
           .\tools\ci\run-desktop-agent-bridge-qa.ps1 `
             -Exe $exe -Client $client `
             -Workspace (Join-Path $env:RUNNER_TEMP "pulsar-agent-desktop-qa") -Offscreen
+
+      - name: Capture overlay states in the packaged desktop
+        shell: pwsh
+        run: |
+          $exe = Join-Path (Resolve-Path "build/packaging-stage/PULSAR").Path "bin/pulsar-desktop.exe"
+          $client = Join-Path (Split-Path -Parent $exe) "pulsar-agent-client.exe"
+          .\tools\ci\capture-desktop-overlay-evidence.ps1 `
+            -Exe $exe -Client $client `
+            -Workspace (Join-Path $env:RUNNER_TEMP "pulsar-overlay-qa") -Offscreen
+
+      - name: Upload overlay preview and export evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pulsar-windows-overlay-qa
+          if-no-files-found: warn
+          path: ${{ runner.temp }}/pulsar-overlay-qa/
 
       - name: Upload Windows QA smoke evidence
         if: always()

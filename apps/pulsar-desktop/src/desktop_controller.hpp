@@ -135,6 +135,7 @@ class DesktopController final : public QObject {
   Q_PROPERTY(int viewerCanvasPixelHeight READ viewerCanvasPixelHeight NOTIFY mediaChanged)
   Q_PROPERTY(bool selectedClipOnScreen READ selectedClipOnScreen NOTIFY selectedClipOnScreenChanged)
   Q_PROPERTY(bool selectedClipHasTransition READ selectedClipHasTransition NOTIFY timelineChanged)
+  Q_PROPERTY(bool selectedClipIsOverlay READ selectedClipIsOverlay NOTIFY timelineChanged)
   Q_PROPERTY(bool canDuplicate READ canDuplicate NOTIFY timelineChanged)
   Q_PROPERTY(QString selectedClipKind READ selectedClipKind NOTIFY timelineChanged)   // video | image | color | audio | ""
   Q_PROPERTY(bool selectedClipHasAudio READ selectedClipHasAudio NOTIFY timelineChanged)
@@ -253,6 +254,7 @@ public:
   [[nodiscard]] int viewerCanvasPixelHeight() const;
   [[nodiscard]] bool selectedClipOnScreen() const;
   [[nodiscard]] bool selectedClipHasTransition() const { return active_session_ && active_session_->selected_clip_has_transition(); }
+  [[nodiscard]] bool selectedClipIsOverlay() const;
   [[nodiscard]] bool canDuplicate() const { return active_session_ && active_session_->can_duplicate_selected(); }
   [[nodiscard]] bool selectedClipHasAudio() const {
     return active_session_ && active_session_->selected_clip().has_value() &&
@@ -436,6 +438,9 @@ public:
   Q_INVOKABLE void selectAsset(const QString& media_id);
   Q_INVOKABLE void insertAssetAtPlayhead(const QString& media_id);
   Q_INVOKABLE void appendAssetToVideoTrack(const QString& media_id);
+  // Creator-facing PNG workflow: place one still on the single visual layer above Video 1.
+  // Track creation, clip insertion and the useful logo transform are one undoable edit.
+  Q_INVOKABLE void insertAssetAsOverlay(const QString& media_id);
   Q_INVOKABLE void createColorCard(const QString& color);   // "#rrggbb": a 5 s colour clip
   // Save / export destination helpers (see PathPromptDialog).
   Q_INVOKABLE QString suggestedPath(const QString& purpose) const;

@@ -284,9 +284,10 @@ using WideInt = domain::WideInteger;
 }
 
 // ---- Stills ---------------------------------------------------------------------------------
-// A photograph or colour card is decoded once into an opaque, upright RGBA picture that is held
-// for the whole clip. Transparent pixels are flattened over black (the project canvas is black),
-// and the EXIF orientation that phones write is applied so portrait photos are not sideways.
+// A photograph, transparent PNG or colour card is decoded once into an upright RGBA picture that
+// is held for the whole clip. Alpha stays straight (not premultiplied): the shared visual
+// compositor applies it identically in preview and export. EXIF orientation is applied so phone
+// photos are not sideways.
 constexpr std::int64_t max_still_pixels = 100'000'000;
 
 [[nodiscard]] FramePtr new_rgba_frame(int width, int height) {
@@ -341,33 +342,20 @@ constexpr std::int64_t max_still_pixels = 100'000'000;
     sws_setColorspaceDetails(sws.get(), coefficients, full_range ? 1 : 0, coefficients, 1, 0,
                              1 << 16, 1 << 16);
   }
-  FramePtr flat = new_rgba_frame(width, height);
-  if (sws_scale(sws.get(), source.data, source.linesize, 0, height, flat->data, flat->linesize) !=
+  FramePtr rgba = new_rgba_frame(width, height);
+  if (sws_scale(sws.get(), source.data, source.linesize, 0, height, rgba->data, rgba->linesize) !=
       height) {
     throw MediaDecodeError{MediaDecodeErrorCode::DecodeFailed,
                            "libswscale did not convert the complete still image"};
   }
-  for (int y = 0; y < height; ++y) {
-    std::uint8_t* row = flat->data[0] + static_cast<std::ptrdiff_t>(y) * flat->linesize[0];
-    for (int x = 0; x < width; ++x) {
-      std::uint8_t* px = row + x * 4;
-      const unsigned alpha = px[3];
-      if (alpha != 255) {
-        px[0] = static_cast<std::uint8_t>((px[0] * alpha + 127) / 255);
-        px[1] = static_cast<std::uint8_t>((px[1] * alpha + 127) / 255);
-        px[2] = static_cast<std::uint8_t>((px[2] * alpha + 127) / 255);
-        px[3] = 255;
-      }
-    }
-  }
   const int turns = clockwise_quarter_turns(source);
-  if (turns == 0) return flat;
+  if (turns == 0) return rgba;
 
   const int out_width = (turns % 2 == 0) ? width : height;
   const int out_height = (turns % 2 == 0) ? height : width;
   FramePtr upright = new_rgba_frame(out_width, out_height);
   for (int y = 0; y < height; ++y) {
-    const std::uint8_t* from = flat->data[0] + static_cast<std::ptrdiff_t>(y) * flat->linesize[0];
+    const std::uint8_t* from = rgba->data[0] + static_cast<std::ptrdiff_t>(y) * rgba->linesize[0];
     for (int x = 0; x < width; ++x) {
       int dx = x;
       int dy = y;

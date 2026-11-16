@@ -112,9 +112,11 @@ Panel {
     readonly property bool trackSelected: !titleSelected && !clipSelected && controller.selectedVisualTrackKey.length > 0
     readonly property var selectedTrack: controller.timelineTracks.find(function(t) { return String(t.id) === controller.selectedVisualTrackKey }) || null
     readonly property string contextLabel: titleSelected ? "TÍTULO"
-        : (!clipSelected ? (trackSelected ? "PISTA" : "") : (controller.selectedClipKind === "image" ? "FOTO"
-        : (controller.selectedClipKind === "color" ? "PLACA"
-        : (controller.selectedClipKind === "audio" ? "AUDIO" : "VIDEO"))))
+        : controller.selectedClipIsOverlay ? "OVERLAY"
+        : !clipSelected ? (trackSelected ? "PISTA" : "")
+        : controller.selectedClipKind === "image" ? "FOTO"
+        : controller.selectedClipKind === "color" ? "PLACA"
+        : controller.selectedClipKind === "audio" ? "AUDIO" : "VIDEO"
     onContextLabelChanged: {
         // Follow a newly selected audio-only clip; preserve an explicit Effects
         // choice until editing context genuinely changes.
@@ -434,7 +436,7 @@ Panel {
             // ---- TRANSFORMACIÓN (E2.1 mínimo) ----------------------------------
             InspectorSection {
                 visible: inspector.currentTab === 0 && inspector.clipSelected && controller.selectedClipKind !== "audio"
-                heading: "TRANSFORMACIÓN · PRECISIÓN"
+                heading: controller.selectedClipIsOverlay ? "OVERLAY · POSICIÓN Y TAMAÑO" : "TRANSFORMACIÓN · PRECISIÓN"
                 Rectangle {
                     width: parent.width; height: precisionHelp.implicitHeight + 2 * Theme.spaceS
                     radius: Theme.radiusM; color: Theme.accentDim

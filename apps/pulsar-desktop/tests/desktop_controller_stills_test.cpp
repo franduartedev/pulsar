@@ -49,6 +49,16 @@ QString kind_of(DesktopController& c, const QString& name) {
   }
   return {};
 }
+QString clip_key_named(DesktopController& c, const QString& name) {
+  auto* model = c.timelineClips();
+  for (int row = 0; row < model->rowCount(); ++row) {
+    const auto index = model->index(row, 0);
+    if (index.data(TimelineClipListModel::NameRole).toString() == name) {
+      return index.data(TimelineClipListModel::ClipKeyRole).toString();
+    }
+  }
+  return {};
+}
 
 pulsar::media::ffmpeg::FFmpegPreviewFrame frame_at(const fs::path& path, MediaTime time) {
   pulsar::media::ffmpeg::FFmpegVideoDecodeSession session{path, 0};
@@ -207,6 +217,117 @@ int main(int argc, char** argv) {
   const auto card = frame_at(destination, MediaTime{17, Rational{1, 1}});
   REQUIRE(27, std::abs(mean_channel(card, 0, 0.0, 0.0, 1.0, 1.0) - 255) < 12 && std::abs(mean_channel(card, 1, 0.0, 0.0, 1.0, 1.0) - 136) < 12 &&
               mean_channel(card, 2, 0.0, 0.0, 1.0, 1.0) < 16);   // the generated colour, edge to edge (16:9 into 16:9)
+
+  // 8. A transparent PNG becomes a creator-facing overlay: one upper visual
+  // layer, a useful default logo transform and one undo step for track+clip.
+  controller.openPath(QString::fromStdString((fixtures / "still_alpha.png").string()));
+  REQUIRE(200, wait_until([&] { return controller.mediaAssets()->rowCount() == 6 && !controller.busy(); }));
+  controller.seekNormalized(1.0 / 19.0);
+  REQUIRE(201, wait_until([&] {
+    return controller.viewerState() == QStringLiteral("frame") &&
+           controller.displayedPreviewProjectRevision() == controller.projectRevision() &&
+           !provider.image().isNull();
+  }));
+  const QImage background = provider.image();
+  controller.insertAssetAsOverlay(id_of(controller, QStringLiteral("still_alpha.png")));
+  REQUIRE(202, controller.errorMessage().isEmpty() && controller.selectedClipIsOverlay() &&
+                   controller.timelineTracks().size() == 2 &&
+                   std::abs(controller.selectedClipScale() - 0.25) < 1e-9);
+  const QString overlay_key = controller.selectedClipKey();
+  controller.undoEdit();
+  REQUIRE(203, controller.timelineTracks().size() == 1 && clip_key_named(controller, QStringLiteral("still_alpha.png")).isEmpty());
+  controller.redoEdit();
+  REQUIRE(204, controller.timelineTracks().size() == 2 && !clip_key_named(controller, QStringLiteral("still_alpha.png")).isEmpty());
+  controller.selectTimelineClip(overlay_key);
+  controller.setSelectedClipTransform(0.0, 0.0, 1.0, 0.0, 1.0);
+  REQUIRE(205, wait_until([&] {
+    return controller.displayedPreviewProjectRevision() == controller.projectRevision() &&
+           provider.image().width() == 320 && provider.image().height() == 180;
+  }));
+  const QImage centred = provider.image();
+  REQUIRE(206, centred.pixelColor(40, 90).red() > 220 &&
+                   std::abs(centred.pixelColor(280, 90).red() - background.pixelColor(280, 90).red()) < 4 &&
+                   std::abs(centred.pixelColor(280, 90).green() - background.pixelColor(280, 90).green()) < 4);
+  const auto evidence = qEnvironmentVariable("PULSAR_OVERLAY_EVIDENCE_DIR");
+  if (!evidence.isEmpty()) {
+    fs::create_directories(evidence.toStdString());
+    centred.save(evidence + QStringLiteral("/overlay-position-a.png"));
+  }
+  const auto overlay_a_project = root / "overlay-position-a.pulsar";
+  REQUIRE(2060, controller.saveProject(QString::fromStdString(overlay_a_project.string())));
+  controller.setSelectedClipTransform(-0.25, 0.20, 0.40, 0.0, 0.55);
+  REQUIRE(207, wait_until([&] {
+    return controller.displayedPreviewProjectRevision() == controller.projectRevision() &&
+           std::abs(controller.selectedClipOpacity() - 0.55) < 1e-9;
+  }));
+  const QImage moved = provider.image();
+  // Position A showed the opaque logo far from the centre; B moved and scaled it
+  // away from (100,30), and the 55% opacity blends red with the green background.
+  REQUIRE(2065, std::abs(moved.pixelColor(100, 30).red() - background.pixelColor(100, 30).red()) < 6 &&
+                    std::abs(moved.pixelColor(100, 30).green() - background.pixelColor(100, 30).green()) < 6);
+  REQUIRE(2066, moved.pixelColor(40, 120).red() > 100 && moved.pixelColor(40, 120).red() < 200 &&
+                    moved.pixelColor(40, 120).green() > 20 && moved.pixelColor(40, 120).green() < 100);
+  if (!evidence.isEmpty()) moved.save(evidence + QStringLiteral("/overlay-position-b.png"));
+  controller.undoEdit();
+  REQUIRE(208, std::abs(controller.selectedClipScale() - 1.0) < 1e-9 &&
+                   std::abs(controller.selectedClipOpacity() - 1.0) < 1e-9);
+  controller.redoEdit();
+  REQUIRE(209, std::abs(controller.selectedClipPosX() + 0.25) < 1e-9 &&
+                   std::abs(controller.selectedClipPosY() - 0.20) < 1e-9 &&
+                   std::abs(controller.selectedClipScale() - 0.40) < 1e-9 &&
+                   std::abs(controller.selectedClipOpacity() - 0.55) < 1e-9);
+
+  const auto overlay_project = root / "overlay.pulsar";
+  REQUIRE(210, controller.saveProject(QString::fromStdString(overlay_project.string())) &&
+                   controller.openProject(QString::fromStdString(overlay_project.string())));
+  REQUIRE(211, wait_until([&] { return controller.hasVideoMedia() && !controller.busy(); }));
+  controller.selectTimelineClip(clip_key_named(controller, QStringLiteral("still_alpha.png")));
+  REQUIRE(212, controller.selectedClipIsOverlay() &&
+                   std::abs(controller.selectedClipPosX() + 0.25) < 1e-9 &&
+                   std::abs(controller.selectedClipScale() - 0.40) < 1e-9 &&
+                   std::abs(controller.selectedClipOpacity() - 0.55) < 1e-9);
+  controller.seekNormalized(1.5 / 19.0);
+  REQUIRE(213, wait_until([&] {
+    return controller.displayedPreviewProjectRevision() == controller.projectRevision() &&
+           provider.image().width() == 320 && provider.image().height() == 180;
+  }));
+  const QImage preview_overlay = provider.image();
+  REQUIRE(2130, preview_overlay.pixelColor(40, 120).red() > 100 &&
+                    preview_overlay.pixelColor(40, 120).red() < 210 &&
+                    preview_overlay.pixelColor(40, 120).green() > 15 &&
+                    preview_overlay.pixelColor(40, 120).green() < 110);   // persisted above the video
+  const auto overlay_export = root / "overlay-export.mp4";
+  controller.exportProjectWithPreset(QString::fromStdString(overlay_export.string()), QStringLiteral("original"));
+  REQUIRE(214, wait_until([&] { return !controller.exportRunning(); }, 120'000) && fs::exists(overlay_export));
+  const auto exported_overlay = frame_at(overlay_export, MediaTime{1500, Rational{1, 1000}});
+  const auto exported_red = exported_overlay.pixels[std::size_t(120) * exported_overlay.stride_bytes + 40 * 4];
+  const auto exported_green = exported_overlay.pixels[std::size_t(120) * exported_overlay.stride_bytes + 40 * 4 + 1];
+  REQUIRE(2140, exported_red > 90 && exported_red < 215 && exported_green > 10 && exported_green < 115);
+  double parity_drift = 0; long parity_samples = 0;
+  for (int y = 0; y < 180; ++y) for (int x = 0; x < 320; ++x) for (int c = 0; c < 3; ++c) {
+    const auto preview_pixel = preview_overlay.pixelColor(x, y);
+    const int preview_channel = c == 0 ? preview_pixel.red() : (c == 1 ? preview_pixel.green() : preview_pixel.blue());
+    parity_drift += std::abs(int(exported_overlay.pixels[std::size_t(y) * exported_overlay.stride_bytes + x * 4 + c]) -
+                             preview_channel);
+    ++parity_samples;
+  }
+  REQUIRE(215, parity_drift / parity_samples < 12.0);
+  const auto after_overlay = frame_at(overlay_export, MediaTime{4500, Rational{1, 1000}});
+  double interval_drift = 0; long interval_samples = 0;
+  for (int y = 0; y < 180; ++y) for (int x = 0; x < 320; ++x) for (int c = 0; c < 3; ++c) {
+    interval_drift += std::abs(int(after_overlay.pixels[std::size_t(y) * after_overlay.stride_bytes + x * 4 + c]) -
+                               int(early.pixels[std::size_t(y) * early.stride_bytes + x * 4 + c]));
+    ++interval_samples;
+  }
+  REQUIRE(216, interval_drift / interval_samples < 7.0);  // overlay ended with its background clip
+  if (!evidence.isEmpty()) {
+    fs::copy_file(overlay_a_project, fs::path{evidence.toStdString()} / "overlay-position-a.pulsar",
+                  fs::copy_options::overwrite_existing);
+    fs::copy_file(overlay_project, fs::path{evidence.toStdString()} / "overlay.pulsar",
+                  fs::copy_options::overwrite_existing);
+    fs::copy_file(overlay_export, fs::path{evidence.toStdString()} / "overlay-export.mp4",
+                  fs::copy_options::overwrite_existing);
+  }
   fs::remove_all(root);
   return 0;
 }

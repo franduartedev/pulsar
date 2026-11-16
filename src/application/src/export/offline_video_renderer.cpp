@@ -200,7 +200,8 @@ const OfflineVideoSourceFrame* OfflineVideoRenderer::select_source_frame(
 
 void OfflineVideoRenderer::compose_frame(composition::RgbaSurface& canvas, ActiveSource& active,
                                          const OfflineVideoSourceFrame& source_frame,
-                                         const domain::VisualTransform& transform) {
+                                         const domain::VisualTransform& transform,
+                                         bool may_have_alpha) {
   const auto& source = *source_frame.image;
   const auto source_size = checked_buffer_size(source.width, source.height, source.stride_bytes);
   if (source.pixels.size() < source_size) {
@@ -213,7 +214,9 @@ void OfflineVideoRenderer::compose_frame(composition::RgbaSurface& canvas, Activ
   const auto geometry = composition::fit_geometry(source.width, source.height, static_cast<int>(output_width),
                                                   static_cast<int>(output_height));
   // Default transform keeps the exact E1 opaque path (bars included, top wins).
-  if (transform.is_default()) {
+  // A PNG still is the one exception: its alpha must reach the shared
+  // source-over compositor even when the transform is the identity.
+  if (transform.is_default() && !may_have_alpha) {
     const composition::RgbaSurface* placed = &source;
     const auto scaled_width = static_cast<std::int64_t>(geometry.scaled_width);
     const auto scaled_height = static_cast<std::int64_t>(geometry.scaled_height);
@@ -365,7 +368,8 @@ OfflineVideoFrame OfflineVideoRenderer::render_time(domain::FrameNumber frame_in
       if (layer.transform.opacity <= 0.0) continue;
       const auto* frame = select_source_frame(layer.track_id, layer, layer.source_time);
       if (frame) {
-        compose_frame(canvas, *active_sources_.at(layer.clip_id.value()), *frame, layer.transform);
+        compose_frame(canvas, *active_sources_.at(layer.clip_id.value()), *frame, layer.transform,
+                      layer.may_have_alpha);
       }
     }
 #ifndef NDEBUG

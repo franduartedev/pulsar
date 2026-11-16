@@ -1,4 +1,4 @@
-// Stills through the real FFmpeg adapter: probe, one held frame at every instant, flattened alpha,
+// Stills through the real FFmpeg adapter: probe, one held frame at every instant, preserved alpha,
 // EXIF orientation and generated colour cards.
 #include <pulsar/application/media/still_media.hpp>
 #include <pulsar/media/ffmpeg/ffmpeg_media_probe.hpp>
@@ -80,12 +80,13 @@ int main() {
     if (!a || !b || a->pixels != b->pixels) return fail("identical pixels at any time");
   }
 
-  // ---- Alpha is flattened over black ------------------------------------------------------------
+  // ---- PNG alpha is preserved as straight RGBA --------------------------------------------------
   {
     const auto frame = frame_at(fixtures / "still_alpha.png", secs(2));
     if (!frame || frame->width != 64 || frame->height != 32) return fail("alpha size");
     if (!near(pixel(*frame, 5, 5), 255, 0, 0)) return fail("opaque pixel kept");
-    if (!near(pixel(*frame, 50, 5), 0, 0, 0)) return fail("transparent pixel flattened to black");
+    const auto transparent = pixel(*frame, 50, 5);
+    if (transparent.a != 0) return fail("transparent pixel alpha preserved");
   }
 
   // ---- EXIF orientation is applied (stored 60x30, rotated to 30x60) -----------------------------

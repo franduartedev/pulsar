@@ -245,10 +245,11 @@ Panel {
             radius: Theme.radiusS
             color: addTrackMouse.containsMouse ? Theme.bgHover : Theme.bgElevated
             border.width: 1; border.color: Theme.borderStrong
-            Text { anchors.centerIn: parent; text: "+ Video"; color: Theme.textPrimary; font.pixelSize: Theme.fontSizeXS }
+            Text { anchors.centerIn: parent; text: "+ Overlay"; color: Theme.textPrimary; font.pixelSize: Theme.fontSizeXS }
             MouseArea {
                 id: addTrackMouse
                 anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                enabled: controller.timelineTracks.filter(function(t) { return t.kind === "video" }).length < 2
                 onClicked: controller.addVisualTrack()
             }
         }

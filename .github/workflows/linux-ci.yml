@@ -64,7 +64,26 @@ jobs:
       - name: Test
         env:
           QT_QPA_PLATFORM: offscreen
+          PULSAR_OVERLAY_EVIDENCE_DIR: ${{ runner.temp }}/pulsar-overlay-qa
         run: ctest --test-dir build --output-on-failure
+
+      - name: Capture overlay states in the real desktop
+        shell: pwsh
+        run: |
+          chmod +x ./build/apps/pulsar-desktop/pulsar-desktop ./build/apps/pulsar-desktop/pulsar-agent-client
+          chmod +x ./tools/ci/capture-desktop-overlay-evidence.ps1
+          ./tools/ci/capture-desktop-overlay-evidence.ps1 `
+            -Exe ./build/apps/pulsar-desktop/pulsar-desktop `
+            -Client ./build/apps/pulsar-desktop/pulsar-agent-client `
+            -Workspace (Join-Path $env:RUNNER_TEMP "pulsar-overlay-qa") -Offscreen
+
+      - name: Upload overlay preview and export evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pulsar-linux-overlay-qa
+          if-no-files-found: warn
+          path: ${{ runner.temp }}/pulsar-overlay-qa/
 
       - name: Exercise Agent Bridge against the real desktop
         shell: pwsh

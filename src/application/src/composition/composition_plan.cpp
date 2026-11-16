@@ -1,8 +1,9 @@
 #include <pulsar/application/composition/composition_plan.hpp>
 #include <pulsar/application/composition/visual_composition_resolver.hpp>
 
-#include <utility>
 #include <algorithm>
+#include <cctype>
+#include <utility>
 
 namespace pulsar::application {
 
@@ -15,6 +16,15 @@ CompositionPlan evaluate_composition_plan(const ProjectSnapshot& snapshot,
   if (context.width <= 0 || context.height <= 0) {
     throw std::invalid_argument{"composition plan requires a valid render size"};
   }
+  const auto asset_may_have_alpha = [&snapshot](domain::MediaId media_id) {
+    const auto asset = std::find_if(snapshot.assets.begin(), snapshot.assets.end(),
+                                    [media_id](const auto& item) { return item.id() == media_id; });
+    if (asset == snapshot.assets.end() || !asset->is_still()) return false;
+    auto extension = asset->source_locator().extension().string();
+    std::transform(extension.begin(), extension.end(), extension.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return extension == ".png";
+  };
   const auto resolved = resolve_visual_composition(snapshot, timeline_position);
   CompositionPlan plan{timeline_position, context.width, context.height, {}};
   plan.layers.reserve(resolved.layers.size());
@@ -22,7 +32,8 @@ CompositionPlan evaluate_composition_plan(const ProjectSnapshot& snapshot,
     if (const auto* clip = std::get_if<ResolvedClip>(&layer.source)) {
       plan.layers.push_back(VisualLayerPlan{layer.track_id, clip->clip_id, clip->media_id,
                                              clip->source_time, clip->visual_transform,
-                                             clip->source_locator, clip->video_stream_index});
+                                             clip->source_locator, clip->video_stream_index,
+                                             asset_may_have_alpha(clip->media_id)});
     } else if (std::holds_alternative<MissingClipMedia>(layer.source)) {
       throw CompositionPlanError{CompositionPlanErrorCode::MissingMedia,
                                  "offline video clip references missing media"};
@@ -58,7 +69,8 @@ CompositionPlan evaluate_composition_plan(const ProjectSnapshot& snapshot,
     transform.opacity *= std::clamp(progress, 0.0, 1.0);
     VisualLayerPlan incoming_plan{transition.track_id, incoming->id(), incoming->media_id(),
         incoming->source_range().start() + (timeline_position - edit), transform,
-        asset->source_locator(), asset->video_stream_index()};
+        asset->source_locator(), asset->video_stream_index(),
+        asset_may_have_alpha(incoming->media_id())};
     const auto outgoing_layer = std::find_if(plan.layers.begin(), plan.layers.end(), [&](const auto& item) {
       return item.clip_id == transition.outgoing_clip_id;
     });

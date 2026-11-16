@@ -1291,6 +1291,74 @@ void DesktopController::selectAsset(const QString& media_id) {
 void DesktopController::insertAssetAtPlayhead(const QString& media_id) { ingestVideoAsset(media_id, false); }
 void DesktopController::appendAssetToVideoTrack(const QString& media_id) { ingestVideoAsset(media_id, true); }
 
+void DesktopController::insertAssetAsOverlay(const QString& media_id) {
+  if (!active_session_) return;
+  bool ok = false;
+  const auto numeric = media_id.toULongLong(&ok);
+  const auto asset = ok ? active_session_->document().find_asset(pulsar::domain::MediaId{numeric})
+                        : std::optional<pulsar::application::MediaAsset>{};
+  if (!asset || !asset->is_still() ||
+      QString::fromStdString(asset->source_locator().extension().string())
+              .compare(QStringLiteral(".png"), Qt::CaseInsensitive) != 0) {
+    setError(QStringLiteral("Elegí una imagen PNG para usarla como overlay."));
+    return;
+  }
+  const auto position = active_session_->playback_position();
+  const auto* base = active_session_->document().timeline().find_track(
+      active_session_->document().video_track_id());
+  const pulsar::domain::Clip* background = nullptr;
+  if (base) {
+    const auto found = std::find_if(base->clips().begin(), base->clips().end(),
+        [position](const auto& clip) { return clip.timeline_range().contains(position); });
+    if (found != base->clips().end()) background = &*found;
+  }
+  if (!background) {
+    setError(QStringLiteral("Llevá el cabezal sobre un video de fondo antes de agregar el overlay."));
+    return;
+  }
+  const auto duration = std::min(asset->default_clip_duration(),
+                                 background->timeline_range().end() - position);
+  const pulsar::domain::TimeRange destination{position, position + duration};
+  auto visual_ids = active_session_->document().visual_track_ids();
+  std::optional<pulsar::domain::TrackId> overlay_track;
+  if (visual_ids.size() > 1) overlay_track = visual_ids[1];
+  if (overlay_track) {
+    const auto* track = active_session_->document().timeline().find_track(*overlay_track);
+    if (!track || std::any_of(track->clips().begin(), track->clips().end(),
+                             [&destination](const auto& clip) {
+                               return destination.overlaps(clip.timeline_range());
+                             })) {
+      setError(QStringLiteral("No hay espacio para el overlay en ese intervalo."));
+      return;
+    }
+  }
+  try {
+    std::optional<pulsar::domain::ClipId> clip;
+    active_session_->processor().run_as_one_edit([&] {
+      if (!overlay_track) {
+        overlay_track = active_session_->processor().add_track(pulsar::domain::TrackKind::Video);
+      }
+      const auto added = active_session_->processor().add_clip(
+          *overlay_track, asset->id(),
+          pulsar::domain::TimeRange{MediaTime::zero(), duration}, position);
+      clip = added;
+      active_session_->processor().set_clip_visual_transform(
+          added, pulsar::domain::VisualTransform{0.32, -0.32, 0.25, 0.0, 1.0});
+    });
+    active_session_->select_clip(*clip);
+    active_session_->synchronize_document_state();
+    selected_visual_track_key_ = QString::number(overlay_track->value());
+    clearError();
+    setStatus(QStringLiteral("Overlay PNG agregado"));
+    clearProgram("loading");
+    applyAssetSelection(media_id);
+    publishTimeline();
+  } catch (const std::exception& error) {
+    logCause("insert overlay failed", error);
+    setError(QStringLiteral("No se pudo agregar el overlay PNG."));
+  }
+}
+
 void DesktopController::ingestVideoAsset(const QString& media_id, bool append) {
   if (!active_session_) return;
   bool ok = false;
@@ -2610,6 +2678,22 @@ QVariantMap DesktopController::agentStatus() const {
   result[QStringLiteral("project_revision")] = QVariant::fromValue(projectRevision());
   result[QStringLiteral("status")] = status();
   return result;
+}
+bool DesktopController::selectedClipIsOverlay() const {
+  if (!active_session_ || !active_session_->selected_clip()) return false;
+  const auto selected = *active_session_->selected_clip();
+  for (const auto& track : active_session_->document().timeline().tracks()) {
+    if (track.kind() == pulsar::domain::TrackKind::Video &&
+        track.id() != active_session_->document().video_track_id() && track.find_clip(selected)) {
+      const auto* clip = track.find_clip(selected);
+      const auto asset = clip ? active_session_->document().find_asset(clip->media_id())
+                              : std::optional<pulsar::application::MediaAsset>{};
+      return asset && asset->is_still() &&
+             QString::fromStdString(asset->source_locator().extension().string())
+                     .compare(QStringLiteral(".png"), Qt::CaseInsensitive) == 0;
+    }
+  }
+  return false;
 }
 
 QVariantList DesktopController::agentTimelineState() const {

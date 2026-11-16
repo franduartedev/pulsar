@@ -140,7 +140,7 @@ private:
 
   void compose_frame(composition::RgbaSurface& canvas, ActiveSource& active,
                      const OfflineVideoSourceFrame& source_frame,
-                     const domain::VisualTransform& transform);
+                     const domain::VisualTransform& transform, bool may_have_alpha);
   [[nodiscard]] const OfflineVideoSourceFrame* select_source_frame(
       domain::TrackId track_id, const VisualLayerPlan& layer, domain::MediaTime source_time);
   void open_source(domain::TrackId track_id, const VisualLayerPlan& layer, domain::MediaTime source_time);

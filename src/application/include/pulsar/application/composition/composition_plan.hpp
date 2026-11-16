@@ -21,6 +21,9 @@ struct VisualLayerPlan {
   domain::VisualTransform transform;
   std::filesystem::path source_locator;
   int video_stream_index{-1};
+  // True only for a PNG still: its alpha is editorial, so even the default
+  // transform must take the source-over path instead of the opaque fast path.
+  bool may_have_alpha{false};
 };
 
 // Bottom-to-top active layers only. Gaps are omitted (transparent); an active
