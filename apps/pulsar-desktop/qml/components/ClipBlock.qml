@@ -172,7 +172,9 @@ Rectangle {
         pendingColor: Theme.waveformPending
         unavailableColor: Theme.waveformUnavailable
         baselineColor: Theme.waveformBaseline
-        visible: width >= 10 && height >= 8
+        // Only clips whose media carries audio ask the waveform cache: a video
+        // still or colour card must not advertise "Onda no disponible".
+        visible: block.hasAudio && width >= 10 && height >= 8
         Component.onCompleted: controller.attachWaveformItem(block.clipKey, waveform)
         Component.onDestruction: controller.detachWaveformItem(waveform)
     }

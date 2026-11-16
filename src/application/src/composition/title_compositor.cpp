@@ -88,4 +88,27 @@ FitGeometry fit_geometry(int source_width, int source_height, int output_width, 
   return geometry;
 }
 
+FitGeometry cover_geometry(int source_width, int source_height, int output_width, int output_height) {
+  FitGeometry geometry;
+  if (source_width <= 0 || source_height <= 0 || output_width <= 0 || output_height <= 0) return geometry;
+  const auto scaled = [](std::int64_t numerator, std::int64_t denominator) {
+    return static_cast<int>(std::max<std::int64_t>(1, (numerator + denominator / 2) / denominator));
+  };
+  // Cover uses the limiting dimension like contain, but crops is now the larger
+  // scale: compare the source against the output the other way around.
+  const bool width_limited = static_cast<std::int64_t>(output_width) * source_height >=
+                             static_cast<std::int64_t>(output_height) * source_width;
+  geometry.scaled_width = width_limited
+      ? output_width
+      : scaled(static_cast<std::int64_t>(output_height) * source_width, source_height);
+  geometry.scaled_height = width_limited
+      ? scaled(static_cast<std::int64_t>(output_width) * source_height, source_width)
+      : output_height;
+  geometry.scaled_width = std::max(geometry.scaled_width, output_width);
+  geometry.scaled_height = std::max(geometry.scaled_height, output_height);
+  geometry.offset_x = (output_width - geometry.scaled_width) / 2;
+  geometry.offset_y = (output_height - geometry.scaled_height) / 2;
+  return geometry;
+}
+
 } // namespace pulsar::application::composition

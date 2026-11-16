@@ -58,6 +58,12 @@ void composite_transformed_layer(RgbaSurface& canvas, const RgbaSurface& fitted,
 // no high-quality scaler is supplied. Deterministic.
 [[nodiscard]] RgbaSurface fitted_image_nearest(const RgbaSurface& source, FitGeometry geometry);
 
+// Deterministic pixel-exact window copy. Used by Fill: the cover-scaled picture
+// is cropped to the canvas before the shared transform is applied. The window
+// must lie inside `source`.
+[[nodiscard]] RgbaSurface crop_surface(const RgbaSurface& source, int x, int y, int width,
+                                       int height);
+
 [[nodiscard]] RgbaSurface compose_opaque_layers(
     int width, int height, std::span<const RgbaSurface* const> layers);
 

@@ -453,6 +453,22 @@ Panel {
                         color: Theme.textPrimary; font.pixelSize: Theme.fontSizeS
                     }
                 }
+                // Ajustar = whole picture with bars; Rellenar = cover the canvas
+                // and crop the overflow. Both keep the source untouched and the
+                // manual position/scale/rotation controls fully available.
+                FieldRow {
+                    label: "Encuadre"
+                    PButton {
+                        width: 74; height: Theme.controlHeightSmall; text: "Ajustar"
+                        checked: controller.selectedClipFitMode === "contain"
+                        onClicked: controller.setSelectedClipFitMode("contain")
+                    }
+                    PButton {
+                        width: 74; height: Theme.controlHeightSmall; text: "Rellenar"
+                        checked: controller.selectedClipFitMode === "fill"
+                        onClicked: controller.setSelectedClipFitMode("fill")
+                    }
+                }
                 FieldRow {
                     label: "Pos X"
                     Stepper {

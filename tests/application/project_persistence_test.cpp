@@ -446,6 +446,18 @@ void visual_transform_v6_roundtrip_and_validation() {
   assert((restored.timeline().find_clip(clip_id)->visual_transform() ==
           domain::VisualTransform{0.125, -0.25, 0.75, 32.5, 0.4}));
 
+  auto fill_snapshot = snapshot;
+  fill_snapshot.timeline.restore_clip(snapshot.video_track_id,
+      domain::Clip{original->id(), original->media_id(), original->source_range(),
+                   original->timeline_start(), original->audio_gain_db(), original->muted(),
+                   original->fade_in(), original->fade_out(),
+                   {0.125, -0.25, 0.75, 32.5, 0.4, domain::VisualFit::Fill}});
+  const auto fill_encoded = ProjectCodec::encode(fill_snapshot);
+  assert(fill_encoded.starts_with("PULSAR_PROJECT 15\n"));
+  assert(fill_encoded.find("CLIP_TRANSFORM 0.125 -0.25 0.75 32.5 0.40000000000000002 FIT_FILL") != std::string::npos);
+  const auto fill_restored = ProjectDocument::restore(ProjectCodec::decode(fill_encoded));
+  assert(fill_restored.timeline().find_clip(clip_id)->visual_transform().fit == domain::VisualFit::Fill);
+
   const auto default_bytes = ProjectCodec::encode(make_document().snapshot());
   assert(default_bytes.find("CLIP_TRANSFORM") == std::string::npos);
   assert(ProjectDocument::restore(ProjectCodec::decode(default_bytes))

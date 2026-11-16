@@ -2,6 +2,7 @@
 #include <pulsar/application/composition/composition_plan.hpp>
 #include <pulsar/application/composition/project_canvas.hpp>
 #include <pulsar/application/composition/visual_compositor.hpp>
+#include <pulsar/application/composition/visual_composition_resolver.hpp>
 #include <pulsar/application/export/offline_video_renderer.hpp>
 #include <pulsar/application/media/media_probe.hpp>
 #include <pulsar/application/project/project_codec.hpp>
@@ -173,6 +174,18 @@ void transparent_layer_leaves_canvas_untouched() {
   pixel(canvas, 0, 0, 0, 0, 0);
 }
 
+void fill_geometry_covers_canvas_and_crops_centre() {
+  // A 4:2 horizontal source covers a 2:4 portrait canvas at 8:4; its centred
+  // crop is 2:4. Fill therefore has canvas-sized interactive geometry.
+  const auto cover = comp::cover_geometry(4, 2, 2, 4);
+  assert(cover.scaled_width == 8 && cover.scaled_height == 4);
+  assert(cover.offset_x == -3 && cover.offset_y == 0);
+  const auto geometry = comp::visual_layer_geometry(
+      4, 2, 2, 4, domain::VisualTransform{0, 0, 1, 0, 1, domain::VisualFit::Fill});
+  assert(geometry.width == 2.0 && geometry.height == 4.0);
+  assert(geometry.center_x == 1.0 && geometry.center_y == 2.0);
+}
+
 application::ProjectSnapshot two_layer_snapshot() {
   application::ProjectDocument document;
   application::CommandProcessor processor{document};
@@ -261,6 +274,25 @@ void renderer_default_is_e1_exact_and_parity_holds() {
   const auto t0 = domain::MediaTime{0, {1, 1}};
   assert(texport.render_at(t0).pixels == tpreview.render_at(t0).pixels);
   assert(texport.render_at(t0).pixels != via_export.pixels);
+
+  // Fill opts into composition even with identity numeric transforms; preview
+  // and export use the same cover/crop path and remain pixel-identical.
+  application::ProjectDocument fill_document;
+  application::CommandProcessor fill_processor{fill_document};
+  const auto fill_media = fill_processor.import_asset("video.mp4", probe);
+  const auto fill_clip = fill_processor.add_clip(fill_media,
+      domain::TimeRange{{0, {1, 1}}, {10, {1, 1}}}, {0, {1, 1}});
+  fill_processor.set_project_canvas(application::ProjectCanvas{2, 4, domain::FrameRate{30, 1}});
+  fill_processor.set_clip_visual_transform(
+      fill_clip, {0, 0, 1, 0, 1, domain::VisualFit::Fill});
+  const auto fill_snapshot = fill_document.snapshot();
+  assert(application::requires_visual_composition(fill_snapshot));
+  const auto fill_plan = exporting::ExportPlan::build(fill_snapshot);
+  exporting::OfflineVideoRenderer fill_export{fill_plan, factory};
+  exporting::OfflineVideoRenderer fill_preview{fill_plan.snapshot(), fill_plan.visual_context(), factory};
+  const auto fill_frame = fill_export.render_at(t0);
+  assert(fill_frame.width == 2 && fill_frame.height == 4);
+  assert(fill_frame.pixels == fill_preview.render_at(t0).pixels);
 }
 
 void undo_redo_restores_transform_exactly() {
@@ -399,6 +431,7 @@ int main() {
   rotation_180_swaps_corners_exactly();
   opacity_blends_over_lower_layer();
   transparent_layer_leaves_canvas_untouched();
+  fill_geometry_covers_canvas_and_crops_centre();
   plan_preserves_order_and_transforms();
   renderer_default_is_e1_exact_and_parity_holds();
   scaled_and_translated_layers_composite_in_order();

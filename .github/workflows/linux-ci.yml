@@ -65,6 +65,7 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
           PULSAR_OVERLAY_EVIDENCE_DIR: ${{ runner.temp }}/pulsar-overlay-qa
+          PULSAR_SOCIAL_EVIDENCE_DIR: ${{ runner.temp }}/pulsar-social-qa
         run: ctest --test-dir build --output-on-failure
 
       - name: Capture overlay states in the real desktop
@@ -84,6 +85,14 @@ jobs:
           name: pulsar-linux-overlay-qa
           if-no-files-found: warn
           path: ${{ runner.temp }}/pulsar-overlay-qa/
+
+      - name: Upload vertical creator evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pulsar-linux-social-qa
+          if-no-files-found: warn
+          path: ${{ runner.temp }}/pulsar-social-qa/
 
       - name: Exercise Agent Bridge against the real desktop
         shell: pwsh

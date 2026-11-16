@@ -129,7 +129,9 @@ class DesktopController final : public QObject {
   Q_PROPERTY(double selectedClipScale READ selectedClipScale NOTIFY timelineChanged)
   Q_PROPERTY(double selectedClipRotation READ selectedClipRotation NOTIFY timelineChanged)
   Q_PROPERTY(double selectedClipOpacity READ selectedClipOpacity NOTIFY timelineChanged)
+  Q_PROPERTY(QString selectedClipFitMode READ selectedClipFitMode NOTIFY timelineChanged)
   Q_PROPERTY(QVariantMap selectedClipVisualGeometry READ selectedClipVisualGeometry NOTIFY timelineChanged)
+  Q_PROPERTY(QString canvasPreset READ canvasPreset NOTIFY mediaChanged)
   Q_PROPERTY(double viewerCanvasAspectRatio READ viewerCanvasAspectRatio NOTIFY mediaChanged)
   Q_PROPERTY(int viewerCanvasPixelWidth READ viewerCanvasPixelWidth NOTIFY mediaChanged)
   Q_PROPERTY(int viewerCanvasPixelHeight READ viewerCanvasPixelHeight NOTIFY mediaChanged)
@@ -248,7 +250,9 @@ public:
   [[nodiscard]] double selectedClipScale() const;
   [[nodiscard]] double selectedClipRotation() const;
   [[nodiscard]] double selectedClipOpacity() const;
+  [[nodiscard]] QString selectedClipFitMode() const;
   [[nodiscard]] QVariantMap selectedClipVisualGeometry() const;
+  [[nodiscard]] QString canvasPreset() const;
   [[nodiscard]] double viewerCanvasAspectRatio() const;
   [[nodiscard]] int viewerCanvasPixelWidth() const;
   [[nodiscard]] int viewerCanvasPixelHeight() const;
@@ -350,6 +354,8 @@ public:
   Q_INVOKABLE void removeSelectedDistantMusicGainKeyframe(int index);
   Q_INVOKABLE void setSelectedClipTransform(double pos_x, double pos_y, double scale,
                                              double rotation_degrees, double opacity);
+  // Editorial framing mode: "contain" (Ajustar) or "fill" (Rellenar).
+  Q_INVOKABLE void setSelectedClipFitMode(const QString& mode);
   Q_INVOKABLE void resetSelectedClipTransform();
   Q_INVOKABLE void beginSelectedClipTransform();
   Q_INVOKABLE void updateSelectedClipTransform(double pos_x, double pos_y, double scale,

@@ -48,7 +48,8 @@ void validate_visual_transform(const VisualTransform& value) {
       !std::isfinite(value.opacity) || value.position_x < -10.0 || value.position_x > 10.0 ||
       value.position_y < -10.0 || value.position_y > 10.0 || value.scale < 0.01 ||
       value.scale > 100.0 || value.rotation_degrees < -36000.0 ||
-      value.rotation_degrees > 36000.0 || value.opacity < 0.0 || value.opacity > 1.0) {
+      value.rotation_degrees > 36000.0 || value.opacity < 0.0 || value.opacity > 1.0 ||
+      (value.fit != VisualFit::Contain && value.fit != VisualFit::Fill)) {
     throw std::invalid_argument{"visual transform is non-finite or outside supported range"};
   }
 }

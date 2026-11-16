@@ -127,6 +127,7 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
           PULSAR_OVERLAY_EVIDENCE_DIR: ${{ runner.temp }}/pulsar-overlay-qa
+          PULSAR_SOCIAL_EVIDENCE_DIR: ${{ runner.temp }}/pulsar-social-qa
         run: ctest --test-dir build -C Release --output-on-failure
 
       # Packaging must not depend on the test gate: a runnable .exe is
@@ -338,6 +339,14 @@ jobs:
           name: pulsar-windows-overlay-qa
           if-no-files-found: warn
           path: ${{ runner.temp }}/pulsar-overlay-qa/
+
+      - name: Upload vertical creator evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pulsar-windows-social-qa
+          if-no-files-found: warn
+          path: ${{ runner.temp }}/pulsar-social-qa/
 
       - name: Upload Windows QA smoke evidence
         if: always()

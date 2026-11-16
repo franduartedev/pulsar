@@ -82,5 +82,9 @@ struct FitGeometry {
 // Aspect-preserving fit of a source into an output canvas (bars where the aspect differs).
 [[nodiscard]] FitGeometry fit_geometry(int source_width, int source_height, int output_width,
                                        int output_height);
+// Aspect-preserving cover of an output canvas (the source overflows; offsets are
+// negative). Crop the centred output-sized window to fill without distortion.
+[[nodiscard]] FitGeometry cover_geometry(int source_width, int source_height, int output_width,
+                                         int output_height);
 
 } // namespace pulsar::application::composition

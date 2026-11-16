@@ -52,7 +52,11 @@ VisualLayerGeometry visual_layer_geometry(int source_width, int source_height,
     throw std::invalid_argument{"invalid visual canvas geometry"};
   }
   domain::validate_visual_transform(transform);
-  const auto fitted = fit_geometry(source_width, source_height, canvas_width, canvas_height);
+  // Fill is rendered as a canvas-sized cover crop, so its untransformed layer
+  // already occupies the whole canvas; contain keeps the letterboxed picture.
+  const auto fitted = transform.fit == domain::VisualFit::Fill
+      ? FitGeometry{canvas_width, canvas_height, 0, 0}
+      : fit_geometry(source_width, source_height, canvas_width, canvas_height);
   if (fitted.scaled_width <= 0 || fitted.scaled_height <= 0) {
     throw std::invalid_argument{"invalid visual source geometry"};
   }
@@ -121,6 +125,25 @@ RgbaSurface fitted_image_nearest(const RgbaSurface& source, FitGeometry geometry
         std::copy_n(from + static_cast<std::size_t>(sx) * 4, 4, to + static_cast<std::size_t>(x) * 4);
       }
     }
+  }
+  return output;
+}
+
+RgbaSurface crop_surface(const RgbaSurface& source, int x, int y, int width, int height) {
+  validate_surface(source);
+  if (width <= 0 || height <= 0 || x < 0 || y < 0 ||
+      static_cast<std::int64_t>(x) + width > source.width ||
+      static_cast<std::int64_t>(y) + height > source.height) {
+    throw std::invalid_argument{"invalid crop window"};
+  }
+  const int stride = width * 4;
+  RgbaSurface output{width, height, stride,
+                     std::vector<std::uint8_t>(surface_size(width, height, stride))};
+  for (int row = 0; row < height; ++row) {
+    const auto* from = source.pixels.data() + static_cast<std::size_t>(y + row) * source.stride_bytes +
+                       static_cast<std::size_t>(x) * 4;
+    auto* to = output.pixels.data() + static_cast<std::size_t>(row) * output.stride_bytes;
+    std::copy_n(from, static_cast<std::size_t>(width) * 4, to);
   }
   return output;
 }

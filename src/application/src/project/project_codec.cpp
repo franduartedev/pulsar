@@ -216,10 +216,12 @@ std::string ProjectCodec::encode(const ProjectSnapshot& snapshot) {
   bool has_underwater_keyframes = false;
   bool has_audio_effect_order = false;
   bool has_telephone_keyframes = false;
+  bool has_fill = false;
   for (const auto& track : snapshot.timeline.tracks()) {
     if (track.audio_state() != domain::AudioTrackState{}) has_audio_track_state = true;
     for (const auto& clip : track.clips()) {
       if (!clip.visual_transform().is_default()) has_visual_transforms = true;
+      if (clip.visual_transform().fit != domain::VisualFit::Contain) has_fill = true;
       if (clip.distant_music().enabled) has_distant_music = true;
       if (clip.distant_music().enabled && !clip.distant_music().gain_keyframes.empty()) {
         has_distant_music_keyframes = true;
@@ -256,9 +258,10 @@ std::string ProjectCodec::encode(const ProjectSnapshot& snapshot) {
     }
   }
   // Version 4 adds clip fades; every file that does not need a newer feature keeps its old version.
-  const int version = has_telephone_keyframes ? 14 : has_audio_effect_order ? 13 : has_underwater_keyframes ? 12
-      : has_underwater ? 11 : has_telephone ? 10 : has_subtitles ? 9 : has_distant_music_keyframes ? 8
-      : has_distant_music ? 7 : needs_v6_layout ? 6 : needs_v5 ? 5 : needs_v4 ? 4 : has_titles ? 3 : 2;
+  const int version = has_fill ? 15 : has_telephone_keyframes ? 14 : has_audio_effect_order ? 13
+      : has_underwater_keyframes ? 12 : has_underwater ? 11 : has_telephone ? 10 : has_subtitles ? 9
+      : has_distant_music_keyframes ? 8 : has_distant_music ? 7 : needs_v6_layout ? 6 : needs_v5 ? 5
+      : needs_v4 ? 4 : has_titles ? 3 : 2;
   // Every version from 6 onward carries the VISUAL_TRACKS record, including
   // when only a later feature raised the version number. The decoder requires
   // that section for these versions.
@@ -379,6 +382,7 @@ std::string ProjectCodec::encode(const ProjectSnapshot& snapshot) {
         output << " CLIP_TRANSFORM " << std::setprecision(17) << transform.position_x << ' '
                << transform.position_y << ' ' << transform.scale << ' '
                << transform.rotation_degrees << ' ' << transform.opacity;
+        if (transform.fit == domain::VisualFit::Fill) output << " FIT_FILL";
       }
       if (clip.distant_music().enabled) {
         const auto& fx = clip.distant_music();
@@ -489,6 +493,7 @@ ProjectRestoreState ProjectCodec::decode(std::string_view bytes) {
   bool version12 = false;
   bool version13 = false;
   bool version14 = false;
+  bool version15 = false;
   bool allocator = false;
   bool ended = false;
   enum class Section { Header, Timeline, Tracks, VideoTrack, VisualTracks, Assets, Clips, Transitions, Titles, Subtitles, Allocator, End };
@@ -523,11 +528,12 @@ ProjectRestoreState ProjectCodec::decode(std::string_view bytes) {
 
     try {
       if (tokens[0].text == "PULSAR_PROJECT") {
-        if (header || tokens.size() != 2 || (tokens[1].text != "1" && tokens[1].text != "2" && tokens[1].text != "3" && tokens[1].text != "4" && tokens[1].text != "5" && tokens[1].text != "6" && tokens[1].text != "7" && tokens[1].text != "8" && tokens[1].text != "9" && tokens[1].text != "10" && tokens[1].text != "11" && tokens[1].text != "12" && tokens[1].text != "13" && tokens[1].text != "14")) {
+        if (header || tokens.size() != 2 || (tokens[1].text != "1" && tokens[1].text != "2" && tokens[1].text != "3" && tokens[1].text != "4" && tokens[1].text != "5" && tokens[1].text != "6" && tokens[1].text != "7" && tokens[1].text != "8" && tokens[1].text != "9" && tokens[1].text != "10" && tokens[1].text != "11" && tokens[1].text != "12" && tokens[1].text != "13" && tokens[1].text != "14" && tokens[1].text != "15")) {
           parse_fail(line_number, "invalid header/version");
         }
         header = true;
-        version14 = tokens[1].text == "14";
+        version15 = tokens[1].text == "15";
+        version14 = tokens[1].text == "14" || version15;
         version13 = tokens[1].text == "13" || version14;
         version7 = tokens[1].text == "7" || tokens[1].text == "8" || tokens[1].text == "9" || tokens[1].text == "10" || tokens[1].text == "11" || tokens[1].text == "12" || tokens[1].text == "13" || version14;
         version8 = tokens[1].text == "8" || tokens[1].text == "9" || tokens[1].text == "10" || tokens[1].text == "11" || tokens[1].text == "12" || tokens[1].text == "13" || version14;
@@ -747,6 +753,10 @@ ProjectRestoreState ProjectCodec::decode(std::string_view bytes) {
             visual_transform.scale = double_number(tokens[i++], line_number, "clip scale");
             visual_transform.rotation_degrees = double_number(tokens[i++], line_number, "clip rotation");
             visual_transform.opacity = double_number(tokens[i++], line_number, "clip opacity");
+            if (version15 && i < tokens.size() && !tokens[i].quoted && tokens[i].text == "FIT_FILL") {
+              visual_transform.fit = domain::VisualFit::Fill;
+              ++i;
+            }
           } else if (version7 && !tokens[i].quoted && tokens[i].text == "CLIP_DISTANT_MUSIC" && !saw_distant_music) {
             saw_distant_music = true;
             if (i + 6 >= tokens.size()) parse_fail(line_number, "invalid CLIP_DISTANT_MUSIC");

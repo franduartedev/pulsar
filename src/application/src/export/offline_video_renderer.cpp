@@ -211,6 +211,61 @@ void OfflineVideoRenderer::compose_frame(composition::RgbaSurface& canvas, Activ
 
   const auto output_width = context_.width;
   const auto output_height = context_.height;
+
+  // Fill: scale to cover, crop the centred canvas-sized window, then run the
+  // same canvas-space transform as contain. The crop is render-time only; the
+  // source media is never modified.
+  if (transform.fit == domain::VisualFit::Fill) {
+    if (transform.opacity <= 0.0) return; // fully transparent: lower layers show through
+    const int out_w = static_cast<int>(output_width);
+    const int out_h = static_cast<int>(output_height);
+    const auto cover = composition::cover_geometry(source.width, source.height, out_w, out_h);
+    if (cover.scaled_width <= 0 || cover.scaled_height <= 0) {
+      throw OfflineVideoRenderError{OfflineVideoRenderErrorCode::ConversionFailed,
+                                    "invalid cover geometry"};
+    }
+    const composition::RgbaSurface* covered = &source;
+    composition::RgbaSurface covered_owned;
+    const auto scaled_width = static_cast<std::int64_t>(cover.scaled_width);
+    const auto scaled_height = static_cast<std::int64_t>(cover.scaled_height);
+    if (scaled_width != source.width || scaled_height != source.height) {
+      if (options_.scaler != nullptr) {
+        if (!active.scaled_cache || active.scaled_cache->source != source_frame.image ||
+            active.scaled_cache->width != scaled_width || active.scaled_cache->height != scaled_height) {
+          active.scaled_cache.reset();
+          const auto start = std::chrono::steady_clock::now();
+          active.scaled_cache = ActiveSource::ScaledCache{source_frame.image, scaled_width, scaled_height,
+              options_.scaler->scale(source, static_cast<int>(scaled_width), static_cast<int>(scaled_height))};
+          metrics_.scale_nanoseconds += static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+              std::chrono::steady_clock::now() - start).count());
+        }
+        covered = &active.scaled_cache->scaled;
+      } else {
+        try {
+          covered_owned = composition::fitted_image_nearest(source, cover);
+        } catch (const std::invalid_argument& error) {
+          throw OfflineVideoRenderError{OfflineVideoRenderErrorCode::ConversionFailed, error.what()};
+        }
+        covered = &covered_owned;
+      }
+    }
+    if (covered->width != scaled_width || covered->height != scaled_height) {
+      throw OfflineVideoRenderError{OfflineVideoRenderErrorCode::ConversionFailed,
+                                    "cover-scaled picture has unexpected size"};
+    }
+    try {
+      const auto cropped = composition::crop_surface(*covered, -cover.offset_x, -cover.offset_y,
+                                                     out_w, out_h);
+      const auto start = std::chrono::steady_clock::now();
+      composition::composite_transformed_layer(canvas, cropped, transform);
+      metrics_.composite_nanoseconds += static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+          std::chrono::steady_clock::now() - start).count());
+    } catch (const std::invalid_argument& error) {
+      throw OfflineVideoRenderError{OfflineVideoRenderErrorCode::ConversionFailed, error.what()};
+    }
+    return;
+  }
+
   const auto geometry = composition::fit_geometry(source.width, source.height, static_cast<int>(output_width),
                                                   static_cast<int>(output_height));
   // Default transform keeps the exact E1 opaque path (bars included, top wins).

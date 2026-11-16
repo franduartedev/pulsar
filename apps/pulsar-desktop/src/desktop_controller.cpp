@@ -22,6 +22,7 @@
 #include <pulsar/media/ffmpeg/ffmpeg_offline_audio_source.hpp>
 #include <pulsar/media/ffmpeg/ffmpeg_export_media_writer.hpp>
 #include <pulsar/application/export/export_job.hpp>
+#include <pulsar/application/composition/project_canvas.hpp>
 #include <pulsar/application/composition/visual_compositor.hpp>
 #include <pulsar/application/timeline/timeline_clip_resolver.hpp>
 #if defined(PULSAR_HAS_QT_AUDIO)
@@ -80,6 +81,18 @@ std::chrono::nanoseconds percentile_sorted(const std::vector<std::chrono::nanose
 
 std::int64_t to_microseconds(std::chrono::nanoseconds value) {
   return std::chrono::duration_cast<std::chrono::microseconds>(value).count();
+}
+
+[[nodiscard]] std::pair<int, int> export_output_box(const QString& preset, int canvas_width,
+                                                    int canvas_height) {
+  int long_edge = 0;
+  int short_edge = 0;
+  if (preset == QStringLiteral("1080p")) { long_edge = 1920; short_edge = 1080; }
+  else if (preset == QStringLiteral("720p")) { long_edge = 1280; short_edge = 720; }
+  else return {0, 0};
+  if (canvas_height > canvas_width) return {short_edge, long_edge};
+  if (canvas_height == canvas_width) return {short_edge, short_edge};
+  return {long_edge, short_edge};
 }
 } // namespace
 
@@ -499,18 +512,22 @@ void DesktopController::relinkAsset(const QString& media_id, const QString& path
   }
 }
 void DesktopController::setCanvasPreset(const QString& preset) {
-  if (!active_session_ || !active_session_->document().canvas()) return;
-  const auto current = *active_session_->document().canvas();
-  int width = current.width;
-  int height = current.height;
+  if (!active_session_) return;
+  int width = 1080;
+  int height = 1920;
   if (preset == QStringLiteral("landscape")) { width = 1920; height = 1080; }
   else if (preset == QStringLiteral("portrait")) { width = 1080; height = 1920; }
   else if (preset == QStringLiteral("square")) { width = 1080; height = 1080; }
+  else if (preset == QStringLiteral("portrait45")) { width = 1080; height = 1350; }
   else { setError(QStringLiteral("Preset de lienzo desconocido.")); return; }
+  const auto effective = pulsar::application::effective_project_canvas(
+      active_session_->document().snapshot());
+  const auto frame_rate = effective ? effective->frame_rate : pulsar::domain::FrameRate{30, 1};
   try {
     active_session_->set_project_canvas(pulsar::application::ProjectCanvas{
-        width, height, current.frame_rate, false});
+        width, height, frame_rate, false});
     clearError();
+    clearProgram(has_video_media_ ? "loading" : "empty");
     publishTimeline();
     emit mediaChanged();
   } catch (const std::exception&) {
@@ -1358,6 +1375,18 @@ void DesktopController::insertAssetAsOverlay(const QString& media_id) {
     setError(QStringLiteral("No se pudo agregar el overlay PNG."));
   }
 }
+QString DesktopController::canvasPreset() const {
+  if (!active_session_) return QString();
+  const auto canvas = active_session_->document().canvas();
+  if (!canvas) return QString();
+  const std::int64_t w = canvas->width;
+  const std::int64_t h = canvas->height;
+  if (w == h) return QStringLiteral("square");
+  if (w * 9 == h * 16) return QStringLiteral("landscape");
+  if (w * 16 == h * 9) return QStringLiteral("portrait");
+  if (w * 5 == h * 4) return QStringLiteral("portrait45");
+  return QStringLiteral("custom");
+}
 
 void DesktopController::ingestVideoAsset(const QString& media_id, bool append) {
   if (!active_session_) return;
@@ -2186,6 +2215,12 @@ double DesktopController::selectedClipOpacity() const {
   const auto* clip = active_session_->document().timeline().find_clip(*active_session_->selected_clip());
   return clip ? clip->visual_transform().opacity : 1.0;
 }
+QString DesktopController::selectedClipFitMode() const {
+  if (!active_session_ || !active_session_->selected_clip()) return QStringLiteral("contain");
+  const auto* clip = active_session_->document().timeline().find_clip(*active_session_->selected_clip());
+  return clip && clip->visual_transform().fit == pulsar::domain::VisualFit::Fill
+      ? QStringLiteral("fill") : QStringLiteral("contain");
+}
 QVariantMap DesktopController::selectedClipVisualGeometry() const {
   QVariantMap result;
   if (!active_session_ || !active_session_->selected_clip() || !active_session_->document().canvas()) {
@@ -2230,10 +2265,13 @@ bool DesktopController::selectedClipOnScreen() const {
 void DesktopController::setSelectedClipTransform(double pos_x, double pos_y, double scale,
                                                   double rotation_degrees, double opacity) {
   if (!active_session_ || !active_session_->selected_clip()) return;
+  const auto* current = active_session_->document().timeline().find_clip(
+      *active_session_->selected_clip());
+  const auto fit = current ? current->visual_transform().fit : pulsar::domain::VisualFit::Contain;
   try {
     active_session_->set_clip_visual_transform(
         *active_session_->selected_clip(),
-        pulsar::domain::VisualTransform{pos_x, pos_y, scale, rotation_degrees, opacity});
+        pulsar::domain::VisualTransform{pos_x, pos_y, scale, rotation_degrees, opacity, fit});
 #ifndef NDEBUG
     qInfo().noquote() << "preview_pipeline transform_commit projectRevision="
                       << active_session_->document().document_generation();
@@ -2246,10 +2284,34 @@ void DesktopController::setSelectedClipTransform(double pos_x, double pos_y, dou
     setError(QStringLiteral("Esa transformación no es válida."));
   }
 }
+void DesktopController::setSelectedClipFitMode(const QString& mode) {
+  if (!active_session_ || !active_session_->selected_clip()) return;
+  pulsar::domain::VisualFit fit;
+  if (mode == QStringLiteral("fill")) fit = pulsar::domain::VisualFit::Fill;
+  else if (mode == QStringLiteral("contain")) fit = pulsar::domain::VisualFit::Contain;
+  else { setError(QStringLiteral("Modo de encuadre desconocido.")); return; }
+  const auto* clip = active_session_->document().timeline().find_clip(*active_session_->selected_clip());
+  if (clip == nullptr) return;
+  auto transform = clip->visual_transform();
+  if (transform.fit == fit) return;
+  transform.fit = fit;
+  try {
+    active_session_->set_clip_visual_transform(*active_session_->selected_clip(), transform);
+    clearError();
+    clearProgram(has_video_media_ ? "loading" : "empty");
+    publishTimeline();
+  } catch (const std::exception& error) {
+    logCause("fit mode change failed", error);
+    setError(QStringLiteral("No se pudo cambiar el modo de encuadre."));
+  }
+}
 void DesktopController::resetSelectedClipTransform() {
   if (!active_session_ || !active_session_->selected_clip()) return;
+  const auto* clip = active_session_->document().timeline().find_clip(*active_session_->selected_clip());
+  const auto fit = clip ? clip->visual_transform().fit : pulsar::domain::VisualFit::Contain;
   try {
-    active_session_->reset_clip_visual_transform(*active_session_->selected_clip());
+    active_session_->set_clip_visual_transform(
+        *active_session_->selected_clip(), pulsar::domain::VisualTransform{0.0, 0.0, 1.0, 0.0, 1.0, fit});
     clearError();
     clearProgram(has_video_media_ ? "loading" : "empty");
     publishTimeline();
@@ -2270,9 +2332,12 @@ void DesktopController::beginSelectedClipTransform() {
 void DesktopController::updateSelectedClipTransform(double pos_x, double pos_y, double scale,
                                                      double rotation_degrees, double opacity) {
   if (!active_session_ || !active_session_->selected_clip()) return;
+  const auto* current = active_session_->document().timeline().find_clip(
+      *active_session_->selected_clip());
+  const auto fit = current ? current->visual_transform().fit : pulsar::domain::VisualFit::Contain;
   try {
     active_session_->update_clip_visual_transform(
-        pulsar::domain::VisualTransform{pos_x, pos_y, scale, rotation_degrees, opacity});
+        pulsar::domain::VisualTransform{pos_x, pos_y, scale, rotation_degrees, opacity, fit});
 #ifndef NDEBUG
     qInfo().noquote() << "preview_pipeline transform_update projectRevision="
                       << active_session_->document().document_generation();
@@ -3746,9 +3811,7 @@ bool DesktopController::showTitleOverGap() {
 QString DesktopController::exportSizeNote(const QString& preset) const {
   const auto canvas = projectCanvasSize();
   if (!canvas) return {};
-  int box_w = 0, box_h = 0;
-  if (preset == QStringLiteral("1080p")) { box_w = 1920; box_h = 1080; }
-  else if (preset == QStringLiteral("720p")) { box_w = 1280; box_h = 720; }
+  const auto [box_w, box_h] = export_output_box(preset, canvas->first, canvas->second);
   int out_w = canvas->first, out_h = canvas->second;
   bool reduced = false;
   if (box_w > 0 && (out_w > box_w || out_h > box_h)) {
@@ -3828,8 +3891,11 @@ void DesktopController::exportLoop(pulsar::application::ProjectSnapshot snapshot
     pulsar::application::exporting::ExportJob job{video_sources, audio_sources, writers, publisher};
     double last_published = -1.0;
     auto profile = pulsar::application::exporting::ExportProfile::beta_v01();
-    if (preset == QStringLiteral("1080p")) profile = profile.with_max_output(1920, 1080);
-    else if (preset == QStringLiteral("720p")) profile = profile.with_max_output(1280, 720);
+    const auto canvas = pulsar::application::effective_project_canvas(snapshot);
+    if (canvas) {
+      const auto [box_w, box_h] = export_output_box(preset, canvas->width, canvas->height);
+      if (box_w > 0) profile = profile.with_max_output(box_w, box_h);
+    }
     auto subtitle_titles = subtitle_overlays(snapshot.subtitles);
     snapshot.titles.insert(snapshot.titles.end(), subtitle_titles.begin(), subtitle_titles.end());
     // Export-quality scaler + a compositor of its own (same rasteriser as the preview).

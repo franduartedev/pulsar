@@ -62,9 +62,14 @@ Rectangle {
         PButton { visible: header.width >= 1280; flat: true; text: "Exportar SRT"; onClicked: header.exportSubtitlesRequested() }
         Row { visible: header.width >= 1180; spacing: 2
             Text { anchors.verticalCenter: parent.verticalCenter; text: "Lienzo"; color: Theme.textMuted; font.pixelSize: Theme.fontSizeXS }
-            PButton { flat: true; text: "16:9"; onClicked: controller.setCanvasPreset("landscape") }
-            PButton { flat: true; text: "9:16"; onClicked: controller.setCanvasPreset("portrait") }
-            PButton { flat: true; text: "1:1"; onClicked: controller.setCanvasPreset("square") }
+            PButton { flat: true; text: "16:9"; checked: controller.canvasPreset === "landscape"
+                onClicked: controller.setCanvasPreset("landscape") }
+            PButton { flat: true; text: "9:16"; checked: controller.canvasPreset === "portrait"
+                onClicked: controller.setCanvasPreset("portrait") }
+            PButton { flat: true; text: "1:1"; checked: controller.canvasPreset === "square"
+                onClicked: controller.setCanvasPreset("square") }
+            PButton { flat: true; text: "4:5"; checked: controller.canvasPreset === "portrait45"
+                onClicked: controller.setCanvasPreset("portrait45") }
         }
         Item { width: Theme.spaceM; height: 1 }
         PButton { text: "Cancelar"; visible: controller.exportRunning; onClicked: controller.cancelExport() }

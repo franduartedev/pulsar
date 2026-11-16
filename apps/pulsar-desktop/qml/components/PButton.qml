@@ -10,6 +10,9 @@ Rectangle {
     property alias text: label.text
     property bool primary: false
     property bool flat: false
+    // Persistent selected state (canvas presets, framing modes): a quiet accent
+    // fill that survives hover, unlike the transient hover highlight.
+    property bool checked: false
     signal clicked()
     activeFocusOnTab: true
     Keys.onReturnPressed: button.clicked()
@@ -29,6 +32,7 @@ Rectangle {
         if (mouse.containsMouse) {
             return Theme.bgHover
         }
+        if (button.checked) return Theme.accentDim
         return flat ? "transparent" : Theme.bgElevated
     }
     border.width: button.activeFocus ? 1 : 0
@@ -37,7 +41,8 @@ Rectangle {
     Text {
         id: label
         anchors.centerIn: parent
-        color: button.primary ? Theme.textOnAccent : Theme.textPrimary
+        color: button.primary ? Theme.textOnAccent
+            : (button.checked ? Theme.accent : Theme.textPrimary)
         font.pixelSize: Theme.fontSizeM
         font.bold: button.primary
     }
