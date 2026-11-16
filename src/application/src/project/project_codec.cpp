@@ -432,7 +432,8 @@ std::string ProjectCodec::encode(const ProjectSnapshot& snapshot) {
 
   for (const auto& transition : snapshot.transitions) {
     output << "TRANSITION " << (transition.type == domain::TransitionType::DipToBlack ? "DIP_TO_BLACK" : "CROSS_DISSOLVE") << ' '
-           << transition.outgoing_clip_id.value() << ' ' << transition.incoming_clip_id.value() << ' ';
+           << transition.track_id.value() << ' ' << transition.outgoing_clip_id.value() << ' '
+           << transition.incoming_clip_id.value() << ' ';
     append_time(output, transition.duration);
     output << "\n";
   }

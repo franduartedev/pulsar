@@ -93,42 +93,51 @@ int main(int argc, char** argv) {
                  std::abs(controller.selectedTransitionDuration() - 0.5) < 1e-8);
   controller.undoEdit(); REQUIRE(5, !controller.selectedClipHasTransition());
   controller.redoEdit(); REQUIRE(6, controller.selectedClipHasTransition());
+  REQUIRE(7, controller.agentSeekSeconds(a_end - 0.25, &problem) &&
+                 wait_until([&] { return !provider.image().isNull(); }));
+  const auto crossfade_preview = root / "crossfade-preview.png";
+  provider.image().save(QString::fromStdString(crossfade_preview.string()));
+  // The model intentionally permits one transition per clip association. Remove
+  // the first edit before exercising the independent dip-to-black edit.
+  controller.removeSelectedTransition();
+  REQUIRE(8, !controller.selectedClipHasTransition());
 
   const auto b_end = primary_track(controller).value(QStringLiteral("clips")).toList().back().toMap()
                          .value(QStringLiteral("end_seconds")).toDouble();
   const auto c = controller.agentAddClip(asset_id(controller, QStringLiteral("e6_video_rational.mp4")).toULongLong(),
                                          video_track, b_end, 0.0, 1.0, &problem);
-  REQUIRE(7, c.has_value());
+  REQUIRE(9, c.has_value());
   controller.selectTimelineClip(clip_key(controller, QStringLiteral("e6_video_b.mp4")));
   controller.addDipToBlack();
-  REQUIRE(8, controller.selectedClipHasTransition() && controller.selectedTransitionType() == QStringLiteral("dip") &&
+  REQUIRE(10, controller.selectedClipHasTransition() && controller.selectedTransitionType() == QStringLiteral("dip") &&
                  std::abs(controller.selectedTransitionDuration() - 0.5) < 1e-8);
   controller.insertAssetAsOverlay(asset_id(controller, QStringLiteral("still_alpha.png")));
-  REQUIRE(9, controller.selectedClipIsOverlay());
+  REQUIRE(11, controller.selectedClipIsOverlay());
 
   const auto project = root / "transitions.pulsar";
-  REQUIRE(10, controller.saveProject(QString::fromStdString(project.string())));
-  REQUIRE(11, controller.openProject(QString::fromStdString(project.string())) &&
+  REQUIRE(12, controller.saveProject(QString::fromStdString(project.string())));
+  REQUIRE(13, controller.openProject(QString::fromStdString(project.string())) &&
                   wait_until([&] { return controller.hasVideoMedia() && !controller.busy(); }));
-  controller.selectTimelineClip(clip_key(controller, QStringLiteral("e6_video_a.mp4")));
-  REQUIRE(12, controller.selectedClipHasTransition() && controller.selectedTransitionType() == QStringLiteral("crossfade"));
-  REQUIRE(13, controller.agentSeekSeconds(a_end - 0.25, &problem) &&
+  controller.selectTimelineClip(clip_key(controller, QStringLiteral("e6_video_b.mp4")));
+  REQUIRE(14, controller.selectedClipHasTransition() && controller.selectedTransitionType() == QStringLiteral("dip"));
+  REQUIRE(15, controller.agentSeekSeconds(b_end - 0.25, &problem) &&
                   wait_until([&] { return !provider.image().isNull(); }));
 
   const auto landscape = root / "transitions-landscape.mp4";
   controller.exportProjectWithPreset(QString::fromStdString(landscape.string()), QStringLiteral("720p"));
-  REQUIRE(14, wait_until([&] { return !controller.exportRunning(); }, 180'000) && fs::exists(landscape));
+  REQUIRE(16, wait_until([&] { return !controller.exportRunning(); }, 180'000) && fs::exists(landscape));
   controller.setCanvasPreset(QStringLiteral("portrait"));
   const auto portrait = root / "transitions-portrait.mp4";
   controller.exportProjectWithPreset(QString::fromStdString(portrait.string()), QStringLiteral("720p"));
-  REQUIRE(15, wait_until([&] { return !controller.exportRunning(); }, 180'000) && fs::exists(portrait));
+  REQUIRE(17, wait_until([&] { return !controller.exportRunning(); }, 180'000) && fs::exists(portrait));
   const auto portrait_probe = pulsar::media::ffmpeg::FFmpegMediaProbe{}.probe(portrait);
-  REQUIRE(16, portrait_probe.video_streams.front().width == 720 && portrait_probe.video_streams.front().height == 1280);
+  REQUIRE(18, portrait_probe.video_streams.front().width == 720 && portrait_probe.video_streams.front().height == 1280);
 
   const auto evidence = qEnvironmentVariable("PULSAR_TRANSITION_EVIDENCE_DIR");
   if (!evidence.isEmpty()) {
     fs::create_directories(evidence.toStdString());
-    provider.image().save(evidence + QStringLiteral("/crossfade-preview.png"));
+    fs::copy_file(crossfade_preview, fs::path{evidence.toStdString()} / "crossfade-preview.png", fs::copy_options::overwrite_existing);
+    provider.image().save(evidence + QStringLiteral("/dip-preview.png"));
     fs::copy_file(project, fs::path{evidence.toStdString()} / "transitions.pulsar", fs::copy_options::overwrite_existing);
     fs::copy_file(landscape, fs::path{evidence.toStdString()} / "transitions-landscape.mp4", fs::copy_options::overwrite_existing);
     fs::copy_file(portrait, fs::path{evidence.toStdString()} / "transitions-portrait.mp4", fs::copy_options::overwrite_existing);
