@@ -2595,6 +2595,111 @@ bool DesktopController::saveProject(const QString& path) {
 }
 bool DesktopController::openProject(const QString& path) { return openProjectImpl(path, std::nullopt); }
 
+QVariantMap DesktopController::agentStatus() const {
+  QVariantMap result;
+  result[QStringLiteral("project_open")] = active_session_ && has_media_;
+  result[QStringLiteral("project_path")] = activeProjectPath();
+  result[QStringLiteral("dirty")] = projectDirty();
+  result[QStringLiteral("playing")] = playing();
+  result[QStringLiteral("busy")] = busy();
+  result[QStringLiteral("position_seconds")] = agentPlaybackPositionSeconds();
+  result[QStringLiteral("duration_seconds")] =
+      active_session_ ? secondsAsDouble(active_session_->timeline_duration()) : 0.0;
+  result[QStringLiteral("project_revision")] = QVariant::fromValue(projectRevision());
+  result[QStringLiteral("status")] = status();
+  return result;
+}
+
+QVariantList DesktopController::agentTimelineState() const {
+  QVariantList tracks;
+  if (!active_session_) return tracks;
+  for (const auto& track : active_session_->document().timeline().tracks()) {
+    QVariantMap track_json;
+    track_json[QStringLiteral("id")] = QVariant::fromValue<qulonglong>(track.id().value());
+    track_json[QStringLiteral("kind")] = track.kind() == pulsar::domain::TrackKind::Video
+                                                ? QStringLiteral("video")
+                                                : QStringLiteral("audio");
+    QVariantList clips;
+    for (const auto& clip : track.clips()) {
+      QVariantMap clip_json;
+      clip_json[QStringLiteral("id")] = QVariant::fromValue<qulonglong>(clip.id().value());
+      clip_json[QStringLiteral("media_id")] =
+          QVariant::fromValue<qulonglong>(clip.media_id().value());
+      clip_json[QStringLiteral("start_seconds")] = secondsAsDouble(clip.timeline_range().start());
+      clip_json[QStringLiteral("end_seconds")] = secondsAsDouble(clip.timeline_range().end());
+      clip_json[QStringLiteral("source_start_seconds")] = secondsAsDouble(clip.source_range().start());
+      clip_json[QStringLiteral("source_end_seconds")] = secondsAsDouble(clip.source_range().end());
+      clips.push_back(clip_json);
+    }
+    track_json[QStringLiteral("clips")] = clips;
+    tracks.push_back(track_json);
+  }
+  return tracks;
+}
+
+double DesktopController::agentPlaybackPositionSeconds() const {
+  return active_session_ ? secondsAsDouble(active_session_->playback_position()) : 0.0;
+}
+
+bool DesktopController::agentSeekSeconds(double seconds, QString* error) {
+  if (!active_session_ || !std::isfinite(seconds) || seconds < 0.0) {
+    if (error) *error = QStringLiteral("invalid seek position or no project is open");
+    return false;
+  }
+  const auto target = MediaTime{static_cast<std::int64_t>(std::llround(seconds * 1'000'000.0)),
+                                Rational{1, 1'000'000}};
+  if (target > active_session_->timeline_duration()) {
+    if (error) *error = QStringLiteral("seek position is outside the timeline");
+    return false;
+  }
+  ++seek_count_;
+  active_session_->seek(target);
+  clearProgram(has_video_media_ ? "loading" : "empty");
+  updatePositionProperties();
+  return true;
+}
+
+std::optional<qulonglong> DesktopController::agentSplitClip(qulonglong clip_id, double seconds,
+                                                            QString* error) {
+  if (!active_session_ || clip_id == 0 || !std::isfinite(seconds)) {
+    if (error) *error = QStringLiteral("invalid split request or no project is open");
+    return std::nullopt;
+  }
+  const auto id = pulsar::domain::ClipId{static_cast<std::uint64_t>(clip_id)};
+  const auto target = MediaTime{static_cast<std::int64_t>(std::llround(seconds * 1'000'000.0)),
+                                Rational{1, 1'000'000}};
+  const pulsar::domain::Clip* found = nullptr;
+  for (const auto& track : active_session_->document().timeline().tracks()) {
+    const auto match = std::find_if(track.clips().begin(), track.clips().end(),
+                                    [id](const auto& clip) { return clip.id() == id; });
+    if (match != track.clips().end()) {
+      found = &*match;
+      break;
+    }
+  }
+  if (!found) {
+    if (error) *error = QStringLiteral("clip id was not found");
+    return std::nullopt;
+  }
+  if (target <= found->timeline_range().start() || target >= found->timeline_range().end()) {
+    if (error) *error = QStringLiteral("split position must be strictly inside the clip");
+    return std::nullopt;
+  }
+  try {
+    active_session_->select_clip(id);
+    active_session_->seek(target);
+    const auto created = active_session_->split_selected_at_playhead();
+    clearError();
+    clearProgram(has_video_media_ ? "loading" : "empty");
+    updatePositionProperties();
+    publishTimeline();
+    return static_cast<qulonglong>(created.value());
+  } catch (const std::exception& exception) {
+    if (error) *error = QString::fromUtf8(exception.what());
+    return std::nullopt;
+  }
+}
+
 bool DesktopController::importSubtitles(const QString& path) {
   if (!active_session_ || path.trimmed().isEmpty()) return false;
   std::ifstream input{std::filesystem::path{path.toStdString()}, std::ios::binary};

@@ -1,13 +1,15 @@
 # Embedded as a C string literal; normalize Windows backslashes.
 file(TO_CMAKE_PATH "${CMAKE_SOURCE_DIR}" PULSAR_SOURCE_DIR)
 
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Qml Quick)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Network Qml Quick)
 if(PULSAR_BUILD_QT_AUDIO)
   find_package(Qt6 REQUIRED COMPONENTS Multimedia)
 endif()
 
 qt_add_executable(pulsar_desktop
   src/main.cpp
+  src/desktop_agent_bridge.cpp
+  src/desktop_agent_bridge.hpp
   src/desktop_controller.cpp
   src/desktop_controller.hpp
   src/builtin_sound_catalog.hpp
@@ -99,6 +101,7 @@ target_link_libraries(pulsar_desktop
   PRIVATE
     Qt6::Core
     Qt6::Gui
+    Qt6::Network
     Qt6::Qml
     Qt6::Quick
     pulsar::media_ffmpeg
@@ -106,6 +109,12 @@ target_link_libraries(pulsar_desktop
     pulsar::domain
     pulsar::project_file
 )
+
+qt_add_executable(pulsar_agent_client src/agent_client_main.cpp)
+set_target_properties(pulsar_agent_client PROPERTIES OUTPUT_NAME pulsar-agent-client)
+target_link_libraries(pulsar_agent_client PRIVATE Qt6::Core Qt6::Network)
+pulsar_apply_project_options(pulsar_agent_client)
+pulsar_apply_compiler_warnings(pulsar_agent_client)
 
 if(PULSAR_BUILD_QT_AUDIO)
   target_compile_definitions(pulsar_desktop PRIVATE PULSAR_HAS_QT_AUDIO=1)
@@ -296,7 +305,7 @@ endif()
 #   bin/pulsar-desktop, share/pulsar/assets/sounds/*, share/applications/pulsar.desktop,
 #   share/icons/hicolor/{scalable,256x256}/apps/pulsar.*
 include(GNUInstallDirs)
-install(TARGETS pulsar_desktop RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+install(TARGETS pulsar_desktop pulsar_agent_client RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 install(DIRECTORY "${CMAKE_SOURCE_DIR}/assets/" DESTINATION ${CMAKE_INSTALL_DATADIR}/pulsar/assets)
 install(FILES "${CMAKE_SOURCE_DIR}/packaging/linux/pulsar.desktop" DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
 install(FILES "${CMAKE_SOURCE_DIR}/packaging/linux/pulsar.svg"

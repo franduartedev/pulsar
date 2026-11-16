@@ -1,4 +1,5 @@
 #include "desktop_controller.hpp"
+#include "desktop_agent_bridge.hpp"
 #include "builtin_sound_catalog.hpp"
 #include "preview_image_provider.hpp"
 #include "thumbnail_service.hpp"
@@ -73,6 +74,8 @@ int main(int argc, char** argv) {
   std::optional<int> qa_playback_ms;
   std::optional<int> qa_pause_after_ms;
   std::optional<int> qa_resume_after_ms;
+  bool agent_bridge_requested = false;
+  std::optional<QString> agent_workspace;
   bool dump_performance_on_exit = false;
   for (int index = 1; index < argc; ++index) {
     const QString argument = QString::fromLocal8Bit(argv[index]);
@@ -107,6 +110,10 @@ int main(int argc, char** argv) {
       bool ok = false;
       const int value = QString::fromLocal8Bit(argv[++index]).toInt(&ok);
       if (ok && value > 0) qa_resume_after_ms = value;
+    } else if (argument == QStringLiteral("--agent-bridge")) {
+      agent_bridge_requested = true;
+    } else if (argument == QStringLiteral("--workspace") && index + 1 < argc) {
+      agent_workspace = QString::fromLocal8Bit(argv[++index]);
     } else if (!argument.startsWith(QLatin1String("--")) && !initial_path.has_value()) {
       initial_path = argument;
     }
@@ -132,6 +139,28 @@ int main(int argc, char** argv) {
       if (initial_path->endsWith(QStringLiteral(".pulsar"), Qt::CaseInsensitive)) controller.openProject(*initial_path);
       else controller.openPath(*initial_path);
     });
+  }
+
+  std::unique_ptr<DesktopAgentBridge> agent_bridge;
+  if (agent_bridge_requested) {
+    if (!agent_workspace.has_value() || engine.rootObjects().isEmpty()) {
+      std::cerr << "--agent-bridge requires --workspace <existing-directory> and a desktop window\n";
+      return 2;
+    }
+    auto* window = qobject_cast<QQuickWindow*>(engine.rootObjects().constFirst());
+    if (!window) {
+      std::cerr << "agent bridge requires a QQuickWindow\n";
+      return 2;
+    }
+    agent_bridge = std::make_unique<DesktopAgentBridge>(
+        controller, *window, std::filesystem::path{agent_workspace->toStdString()});
+    QString bridge_error;
+    if (!agent_bridge->start(&bridge_error)) {
+      std::cerr << "agent bridge start failed: " << bridge_error.toStdString() << '\n';
+      return 2;
+    }
+    std::cout << "PULSAR_AGENT_BRIDGE descriptor="
+              << agent_bridge->descriptorPath().toStdString() << '\n' << std::flush;
   }
   if (qa_playback_ms.has_value()) {
     QTimer::singleShot(1800, &controller, [&controller] { controller.play(); });

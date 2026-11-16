@@ -412,6 +412,14 @@ public:
   Q_INVOKABLE bool saveProject(const QString& path);
   // Returns false (and keeps the current project untouched) if the file cannot be opened.
   Q_INVOKABLE bool openProject(const QString& path);
+  // Agent Bridge adapter. These methods intentionally operate on the same
+  // EditorSession as the UI; they do not maintain a parallel document model.
+  [[nodiscard]] QVariantMap agentStatus() const;
+  [[nodiscard]] QVariantList agentTimelineState() const;
+  [[nodiscard]] double agentPlaybackPositionSeconds() const;
+  bool agentSeekSeconds(double seconds, QString* error = nullptr);
+  [[nodiscard]] std::optional<qulonglong> agentSplitClip(
+      qulonglong clip_id, double seconds, QString* error = nullptr);
   Q_INVOKABLE bool importSubtitles(const QString& path);
   Q_INVOKABLE bool exportSubtitles(const QString& path);
   Q_INVOKABLE void analyzeSelectedAudio();
