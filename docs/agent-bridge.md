@@ -41,6 +41,11 @@ Supported desktop commands:
 - `status`
 - `open_project {"path":"project.pulsar"}`
 - `save_project {"path":"saved/project.pulsar"}`
+- `import_media {"path":"media/take.mp4"}`
+- `media_assets`
+- `add_clip {"media_id":10,"track_id":8,"timeline_start_seconds":0.0}`
+- `add_clip {"media_id":11,"track_id":9,"timeline_start_seconds":0.0,"source_start_seconds":1.0,"source_end_seconds":5.0}`
+- `remove_clip {"clip_id":20}`
 - `timeline_state`
 - `split_clip {"clip_id":20,"position_seconds":4.0}`
 - `seek {"position_seconds":0.0}`
@@ -54,10 +59,20 @@ Every file path is relative to the authorized workspace. Absolute paths,
 after canonicalization. There is no shell command, process launch, arbitrary
 file read/delete, plug-in loading, TCP listener or remote-control endpoint.
 
+`import_media` accepts supported video/audio files already inside the workspace
+and queues the normal FFmpeg import worker with automatic placement disabled.
+It returns `accepted:true` before probing finishes. Poll `media_assets` until
+`busy:false` and `import_pending:0`; its `assets` array supplies stable media
+IDs, kind, duration and availability. `add_clip` and `remove_clip` execute the
+same `CommandProcessor`/`EditorSession` edits as the GUI, including overlap,
+track compatibility, source-range and undo-history rules. No source locator is
+returned by `media_assets`.
+
 `tools/ci/run-desktop-agent-bridge-qa.ps1` is the executable-level acceptance
-test. It opens a real project with video and audio, queries the timeline, splits
-a clip at 4 s, saves and reopens it, compares the timeline, plays, reads real
-metrics and captures the window without mouse input.
+test. It generates small video and WAV fixtures, opens a real project, imports
+both through FFmpeg, places them on requested tracks, splits/removes/re-adds a
+clip, saves and reopens it, compares the timeline and asset library, plays,
+reads real metrics and captures the window without mouse input.
 
 PCM captured by that QA path is taken before the audio device. It validates the
 real mixer/playback path, but physical audibility still requires loopback.

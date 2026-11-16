@@ -416,6 +416,13 @@ public:
   // EditorSession as the UI; they do not maintain a parallel document model.
   [[nodiscard]] QVariantMap agentStatus() const;
   [[nodiscard]] QVariantList agentTimelineState() const;
+  [[nodiscard]] QVariantList agentMediaAssets() const;
+  bool agentImportMedia(const QString& path, QString* error = nullptr);
+  [[nodiscard]] std::optional<qulonglong> agentAddClip(
+      qulonglong media_id, qulonglong track_id, double timeline_start_seconds,
+      std::optional<double> source_start_seconds = std::nullopt,
+      std::optional<double> source_end_seconds = std::nullopt, QString* error = nullptr);
+  bool agentRemoveClip(qulonglong clip_id, QString* error = nullptr);
   [[nodiscard]] double agentPlaybackPositionSeconds() const;
   bool agentSeekSeconds(double seconds, QString* error = nullptr);
   [[nodiscard]] std::optional<qulonglong> agentSplitClip(
@@ -452,7 +459,12 @@ signals:
   void soundLibraryChanged(); void assetsChanged();
   void analysisChanged();
 private:
-  struct WorkerCommand { std::filesystem::path path; std::uint64_t generation; bool auto_place{true}; };
+  struct WorkerCommand {
+    std::filesystem::path path;
+    std::uint64_t generation;
+    bool auto_place{true};
+    bool library_only{false};
+  };
   static constexpr std::size_t kMaxQueuedImports = 500;
   struct WaveformItemStamp {
     std::optional<pulsar::domain::ClipId> clip_id;
@@ -472,7 +484,7 @@ private:
   void exportLoop(pulsar::application::ProjectSnapshot snapshot, QString preset,
                   std::filesystem::path destination, std::filesystem::path project_file,
                   std::uint64_t generation);
-  void postOpen(std::filesystem::path path, bool auto_place);
+  void postOpen(std::filesystem::path path, bool auto_place, bool library_only = false);
   void resetImportQueue();
   void finishImportItem(bool ok, const std::filesystem::path& path);
   [[nodiscard]] std::unique_ptr<pulsar::desktop::EditorSession> makeEditorSession();
@@ -503,7 +515,8 @@ private:
   void refreshWaveformItems();
   void loadSoundLibrary();
   void refreshWaveformItem(WaveformQuickItem* item);
-  bool installTimelineAsset(const pulsar::application::MediaProbeResult&, bool auto_place = true);
+  bool installTimelineAsset(const pulsar::application::MediaProbeResult&, bool auto_place = true,
+                            bool library_only = false);
   void presentTimeline(const pulsar::application::TimelinePresentation&);
   void clearProgram(QString state);
   void displayLease(const pulsar::application::TimelinePresentSample&);

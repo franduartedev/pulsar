@@ -24,29 +24,32 @@ $ffmpeg = if ($env:PULSAR_TEST_FFMPEG_CLI) {
 
 Remove-Item -Recurse -Force $Workspace -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force -Path $Workspace | Out-Null
-$media = Join-Path $Workspace 'agent fixture [QA] #1.mp4'
+$video = Join-Path $Workspace 'agent video [QA] #1.mp4'
+$audio = Join-Path $Workspace 'agent audio [QA] #2.wav'
 & $ffmpeg -y -hide_banner -loglevel error `
-  -f lavfi -i 'testsrc=size=320x180:rate=30' `
-  -f lavfi -i 'sine=frequency=440:sample_rate=48000:duration=4' `
-  -f lavfi -i 'sine=frequency=880:sample_rate=48000:duration=4' `
-  -filter_complex '[1:a][2:a]concat=n=2:v=0:a=1[a]' `
-  -map 0:v -map '[a]' -t 8 `
-  -c:v mpeg4 -q:v 5 -pix_fmt yuv420p -c:a aac -b:a 128k $media
-if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $media -PathType Leaf)) {
-  throw 'Agent QA fixture generation failed.'
+  -f lavfi -i 'testsrc=size=320x180:rate=24:duration=6' `
+  -an -c:v mpeg4 -q:v 6 -pix_fmt yuv420p $video
+if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $video -PathType Leaf)) {
+  throw 'Agent video fixture generation failed.'
+}
+& $ffmpeg -y -hide_banner -loglevel error `
+  -f lavfi -i 'sine=frequency=440:sample_rate=48000:duration=3' `
+  -f lavfi -i 'sine=frequency=880:sample_rate=48000:duration=3' `
+  -filter_complex '[0:a][1:a]concat=n=2:v=0:a=1[a]' `
+  -map '[a]' -c:a pcm_s16le $audio
+if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $audio -PathType Leaf)) {
+  throw 'Agent audio fixture generation failed.'
 }
 
-$mediaLocator = $media.Replace('\', '/')
 $project = Join-Path $Workspace 'agent-input.pulsar'
 $saved = Join-Path $Workspace 'agent-saved.pulsar'
 $projectLines = @(
-  'PULSAR_PROJECT 1'
+  'PULSAR_PROJECT 2'
   'TIMELINE 4'
   'TRACK 8 VIDEO'
+  'TRACK 9 AUDIO'
   'VIDEO_TRACK 8'
-  "ASSET 2 0 8 1 1 `"$mediaLocator`" `"mpeg4`" 320 180 1 15360 30 1 `"mov,mp4,m4a,3gp,3g2,mj2`" AUDIO 1 48000 1 1 48000 8 1 1"
-  'CLIP 20 8 2 0 1 1 8 1 1 0 1 1'
-  'ALLOCATOR 10 30 5 9'
+  'ALLOCATOR 10 20 5 10'
   'END'
 )
 [IO.File]::WriteAllText($project, ($projectLines -join "`n") + "`n", (New-Object Text.UTF8Encoding($false)))
@@ -92,20 +95,51 @@ try {
 
   $status = Invoke-Agent @{ id = 'status-1'; command = 'status' }
   $open = Invoke-Agent @{ id = 'open-1'; command = 'open_project'; path = 'agent-input.pulsar' }
-  $before = Invoke-Agent @{ id = 'timeline-before'; command = 'timeline_state' }
-  $beforeJson = $before.tracks | ConvertTo-Json -Depth 10 -Compress
-  if ($before.tracks[0].clips.Count -ne 1 -or $before.tracks[0].clips[0].id -ne 20) {
-    throw "Unexpected timeline before split: $beforeJson"
+
+  $importVideo = Invoke-Agent @{ id = 'import-video'; command = 'import_media'; path = 'agent video [QA] #1.mp4' }
+  $importAudio = Invoke-Agent @{ id = 'import-audio'; command = 'import_media'; path = 'agent audio [QA] #2.wav' }
+  $assetDeadline = [DateTime]::UtcNow.AddSeconds(15)
+  do {
+    $assets = Invoke-Agent @{ id = 'assets-poll'; command = 'media_assets' }
+    if (-not $assets.busy -and $assets.import_pending -eq 0) { break }
+    if ([DateTime]::UtcNow -ge $assetDeadline) { throw 'Timed out waiting for real media imports.' }
+    Start-Sleep -Milliseconds 100
+  } while ($true)
+  if ($assets.assets.Count -ne 2) {
+    throw "Expected two imported assets: $($assets.assets | ConvertTo-Json -Depth 6 -Compress)"
+  }
+  $videoAsset = $assets.assets | Where-Object name -eq 'agent video [QA] #1.mp4'
+  $audioAsset = $assets.assets | Where-Object name -eq 'agent audio [QA] #2.wav'
+  if (-not $videoAsset -or $videoAsset.kind -ne 'video' -or -not $audioAsset -or $audioAsset.kind -ne 'audio') {
+    throw "Imported asset identities or kinds are wrong: $($assets.assets | ConvertTo-Json -Depth 6 -Compress)"
   }
 
-  $split = Invoke-Agent @{ id = 'split-1'; command = 'split_clip'; clip_id = 20; position_seconds = 4.0 }
+  $videoClip = Invoke-Agent @{ id = 'add-video'; command = 'add_clip'; media_id = $videoAsset.id; track_id = 8; timeline_start_seconds = 0.0 }
+  $audioClip = Invoke-Agent @{ id = 'add-audio'; command = 'add_clip'; media_id = $audioAsset.id; track_id = 9; timeline_start_seconds = 0.0 }
+  $before = Invoke-Agent @{ id = 'timeline-before'; command = 'timeline_state' }
+  $beforeJson = $before.tracks | ConvertTo-Json -Depth 10 -Compress
+  if ($before.tracks.Count -ne 2 -or $before.tracks[0].clips.Count -ne 1 -or $before.tracks[1].clips.Count -ne 1) {
+    throw "The two real clips were not placed on their requested tracks: $beforeJson"
+  }
+
+  $split = Invoke-Agent @{ id = 'split-1'; command = 'split_clip'; clip_id = $videoClip.clip_id; position_seconds = 3.0 }
   $after = Invoke-Agent @{ id = 'timeline-after'; command = 'timeline_state' }
   $afterJson = $after.tracks | ConvertTo-Json -Depth 10 -Compress
-  if ($after.tracks[0].clips.Count -ne 2) { throw "Split did not create two clips: $afterJson" }
+  if ($after.tracks[0].clips.Count -ne 2 -or $after.tracks[1].clips.Count -ne 1) {
+    throw "Split did not preserve the independent audio clip: $afterJson"
+  }
   $clips = @($after.tracks[0].clips | Sort-Object start_seconds)
-  if ([Math]::Abs($clips[0].end_seconds - 4.0) -gt 0.000001 -or
-      [Math]::Abs($clips[1].start_seconds - 4.0) -gt 0.000001) {
-    throw "Split boundary is not 4 seconds: $afterJson"
+  if ([Math]::Abs($clips[0].end_seconds - 3.0) -gt 0.000001 -or
+      [Math]::Abs($clips[1].start_seconds - 3.0) -gt 0.000001) {
+    throw "Split boundary is not 3 seconds: $afterJson"
+  }
+
+  $remove = Invoke-Agent @{ id = 'remove-1'; command = 'remove_clip'; clip_id = $split.created_clip_id }
+  $replacement = Invoke-Agent @{ id = 'add-replacement'; command = 'add_clip'; media_id = $videoAsset.id; track_id = 8; timeline_start_seconds = 3.0; source_start_seconds = 3.0; source_end_seconds = $videoAsset.duration_seconds }
+  $final = Invoke-Agent @{ id = 'timeline-final'; command = 'timeline_state' }
+  $finalJson = $final.tracks | ConvertTo-Json -Depth 10 -Compress
+  if ($final.tracks[0].clips.Count -ne 2 -or $final.tracks[1].clips.Count -ne 1) {
+    throw "Remove/re-add did not produce the expected montage: $finalJson"
   }
 
   $save = Invoke-Agent @{ id = 'save-1'; command = 'save_project'; path = 'agent-saved.pulsar' }
@@ -113,9 +147,11 @@ try {
   $reopen = Invoke-Agent @{ id = 'open-2'; command = 'open_project'; path = 'agent-saved.pulsar' }
   $reopened = Invoke-Agent @{ id = 'timeline-reopened'; command = 'timeline_state' }
   $reopenedJson = $reopened.tracks | ConvertTo-Json -Depth 10 -Compress
-  if ($reopenedJson -ne $afterJson) {
-    throw "Timeline changed after save/reopen.`nBefore: $afterJson`nAfter: $reopenedJson"
+  if ($reopenedJson -ne $finalJson) {
+    throw "Timeline changed after save/reopen.`nBefore: $finalJson`nAfter: $reopenedJson"
   }
+  $reopenedAssets = Invoke-Agent @{ id = 'assets-reopened'; command = 'media_assets' }
+  if ($reopenedAssets.assets.Count -ne 2) { throw 'Imported media did not persist after reopen.' }
 
   $seek = Invoke-Agent @{ id = 'seek-1'; command = 'seek'; position_seconds = 0.0 }
   $play = Invoke-Agent @{ id = 'play-1'; command = 'play' }
@@ -138,6 +174,16 @@ try {
   if (Test-Path -LiteralPath (Join-Path (Split-Path -Parent $Workspace) 'agent-escape.pulsar')) {
     throw 'Workspace escape created a file.'
   }
+  $mediaEscape = @{ id = 'media-escape'; command = 'import_media'; path = '../outside.mp4' } |
+    ConvertTo-Json -Compress | & $Client --workspace $Workspace --timeout-ms 5000 | ConvertFrom-Json
+  if ($mediaEscape.ok -or $mediaEscape.error.code -ne 'invalid_request') {
+    throw 'Media workspace escape was not rejected.'
+  }
+  $absoluteMedia = @{ id = 'media-absolute'; command = 'import_media'; path = $video } |
+    ConvertTo-Json -Compress | & $Client --workspace $Workspace --timeout-ms 5000 | ConvertFrom-Json
+  if ($absoluteMedia.ok -or $absoluteMedia.error.code -ne 'invalid_request') {
+    throw 'Absolute media path was not rejected.'
+  }
   $badTimeout = @{ id = 'timeout-1'; command = 'status'; timeout_ms = 6000 } |
     ConvertTo-Json -Compress | & $Client --workspace $Workspace --timeout-ms 5000 | ConvertFrom-Json
   if ($badTimeout.ok -or $badTimeout.error.code -ne 'invalid_timeout') {
@@ -149,7 +195,7 @@ try {
     throw 'Unknown/arbitrary command was not rejected.'
   }
 
-  Write-Host "Agent desktop QA passed: clip 20 split at 4s, persisted and reopened."
+  Write-Host 'Agent desktop media QA passed: video/audio imported, placed, split, removed, re-added, persisted and reopened.'
   Write-Host "Playback metrics collected; screenshot bytes: $((Get-Item -LiteralPath $shot).Length)."
   Write-Host "PCM capture is pre-device evidence only; physical audibility still requires loopback."
   Write-Host "Evidence directory: $Workspace"

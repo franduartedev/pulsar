@@ -14,10 +14,12 @@
 #include <QQuickWindow>
 #include <QRandomGenerator>
 #include <QSaveFile>
+#include <QStringList>
 #include <QVariant>
 
 #include <algorithm>
 #include <cstring>
+#include <optional>
 #include <stdexcept>
 #include <system_error>
 
@@ -265,6 +267,57 @@ QJsonObject DesktopAgentBridge::dispatch(const QJsonObject& request) {
     if (command == QStringLiteral("timeline_state")) {
       return success(id, {{QStringLiteral("tracks"),
                            QJsonArray::fromVariantList(controller_.agentTimelineState())}});
+    }
+    if (command == QStringLiteral("import_media")) {
+      const auto path = safePath(request.value(QStringLiteral("path")).toString(), true, "media");
+      auto extension = QString::fromStdString(path.extension().string()).toLower();
+      static const QStringList supported{QStringLiteral(".mp4"), QStringLiteral(".mov"),
+                                         QStringLiteral(".mkv"), QStringLiteral(".avi"),
+                                         QStringLiteral(".webm"), QStringLiteral(".m4v"),
+                                         QStringLiteral(".wav"), QStringLiteral(".mp3"),
+                                         QStringLiteral(".m4a"), QStringLiteral(".aac"),
+                                         QStringLiteral(".flac")};
+      if (!supported.contains(extension)) {
+        throw std::invalid_argument{"media must use a supported video or audio extension"};
+      }
+      QString problem;
+      if (!controller_.agentImportMedia(QString::fromStdString(path.string()), &problem)) {
+        return failure(id, QStringLiteral("import_rejected"), problem);
+      }
+      return success(id, {{QStringLiteral("accepted"), true},
+                          {QStringLiteral("path"), QString::fromStdString(path.generic_string())}});
+    }
+    if (command == QStringLiteral("media_assets")) {
+      return success(id, {{QStringLiteral("assets"),
+                           QJsonArray::fromVariantList(controller_.agentMediaAssets())},
+                          {QStringLiteral("import_pending"), controller_.importPending()},
+                          {QStringLiteral("busy"), controller_.busy()}});
+    }
+    if (command == QStringLiteral("add_clip")) {
+      QString problem;
+      std::optional<double> source_start;
+      std::optional<double> source_end;
+      if (request.contains(QStringLiteral("source_start_seconds"))) {
+        source_start = request.value(QStringLiteral("source_start_seconds")).toDouble(-1.0);
+      }
+      if (request.contains(QStringLiteral("source_end_seconds"))) {
+        source_end = request.value(QStringLiteral("source_end_seconds")).toDouble(-1.0);
+      }
+      const auto created = controller_.agentAddClip(
+          request.value(QStringLiteral("media_id")).toVariant().toULongLong(),
+          request.value(QStringLiteral("track_id")).toVariant().toULongLong(),
+          request.value(QStringLiteral("timeline_start_seconds")).toDouble(-1.0),
+          source_start, source_end, &problem);
+      if (!created) return failure(id, QStringLiteral("edit_rejected"), problem);
+      return success(id, {{QStringLiteral("clip_id"), static_cast<qint64>(*created)}});
+    }
+    if (command == QStringLiteral("remove_clip")) {
+      const auto clip_id = request.value(QStringLiteral("clip_id")).toVariant().toULongLong();
+      QString problem;
+      if (!controller_.agentRemoveClip(clip_id, &problem)) {
+        return failure(id, QStringLiteral("edit_rejected"), problem);
+      }
+      return success(id, {{QStringLiteral("removed_clip_id"), static_cast<qint64>(clip_id)}});
     }
     if (command == QStringLiteral("split_clip")) {
       QString problem;

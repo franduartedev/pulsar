@@ -1,0 +1,9 @@
+{"id":"open","command":"open_project","path":"agent-input.pulsar"}
+{"id":"import-video","command":"import_media","path":"agent video [QA] #1.mp4"}
+{"id":"import-audio","command":"import_media","path":"agent audio [QA] #2.wav"}
+{"id":"assets","command":"media_assets"}
+{"id":"add-video","command":"add_clip","media_id":10,"track_id":8,"timeline_start_seconds":0.0}
+{"id":"add-audio","command":"add_clip","media_id":11,"track_id":9,"timeline_start_seconds":0.0}
+{"id":"split","command":"split_clip","clip_id":20,"position_seconds":3.0}
+{"id":"timeline","command":"timeline_state"}
+{"id":"save","command":"save_project","path":"agent-saved.pulsar"}

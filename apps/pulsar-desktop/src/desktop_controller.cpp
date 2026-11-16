@@ -1164,7 +1164,8 @@ void DesktopController::refreshWaveformItem(WaveformQuickItem* item) {
   stamp.generated_frames = progress.generated_frames;
   stamp.initialized = true;
 }
-bool DesktopController::installTimelineAsset(const pulsar::application::MediaProbeResult& result, bool auto_place) {
+bool DesktopController::installTimelineAsset(const pulsar::application::MediaProbeResult& result,
+                                             bool auto_place, bool library_only) {
   if (!active_session_ || (result.video_streams.empty() && result.audio_streams.empty())) return false;
   try {
     StaticProbe probe{result};
@@ -1183,7 +1184,8 @@ bool DesktopController::installTimelineAsset(const pulsar::application::MediaPro
       // Audio tracks may keep the global timeline non-empty while VIDEO 1 is
       // empty. Auto-place imported video only according to VIDEO 1 occupancy; a photo from a
       // batch stays in the library (only a deliberate single import places it).
-      if (duration && *duration > MediaTime::zero() && video_track_empty && (!still || auto_place)) {
+      if (!library_only && duration && *duration > MediaTime::zero() && video_track_empty &&
+          (!still || auto_place)) {
         (void)active_session_->processor().add_clip(
             media, pulsar::domain::TimeRange{MediaTime::zero(), *duration}, MediaTime::zero());
       }
@@ -2637,6 +2639,134 @@ QVariantList DesktopController::agentTimelineState() const {
   return tracks;
 }
 
+QVariantList DesktopController::agentMediaAssets() const {
+  QVariantList assets;
+  if (!active_session_) return assets;
+  for (const auto& asset : active_session_->document().asset_list()) {
+    if (asset.source_locator().string().rfind("pulsar-sound:", 0) == 0) continue;
+    QVariantMap value;
+    value[QStringLiteral("id")] = QVariant::fromValue<qulonglong>(asset.id().value());
+    value[QStringLiteral("name")] = QString::fromStdString(asset.source_locator().filename().string());
+    value[QStringLiteral("kind")] = asset.has_video() ? QStringLiteral("video")
+                                                       : QStringLiteral("audio");
+    value[QStringLiteral("duration_seconds")] = secondsAsDouble(asset.default_clip_duration());
+    value[QStringLiteral("has_audio")] = asset.audio().has_value();
+    value[QStringLiteral("available")] =
+        asset.availability() == pulsar::application::MediaAvailability::Available;
+    assets.push_back(value);
+  }
+  return assets;
+}
+
+bool DesktopController::agentImportMedia(const QString& path, QString* error) {
+  if (!active_session_) {
+    if (error) *error = QStringLiteral("no project is open");
+    return false;
+  }
+  const std::filesystem::path media_path{path.toStdString()};
+  std::error_code path_error;
+  const auto canonical = std::filesystem::weakly_canonical(media_path, path_error);
+  if (path_error || !std::filesystem::is_regular_file(canonical)) {
+    if (error) *error = QStringLiteral("media file does not exist");
+    return false;
+  }
+  for (const auto& asset : active_session_->document().asset_list()) {
+    std::error_code asset_error;
+    const auto existing = std::filesystem::weakly_canonical(asset.source_locator(), asset_error);
+    if (!asset_error && existing == canonical) {
+      if (error) *error = QStringLiteral("media is already imported");
+      return false;
+    }
+  }
+  postOpen(canonical, false, true);
+  return true;
+}
+
+std::optional<qulonglong> DesktopController::agentAddClip(
+    qulonglong media_id, qulonglong track_id, double timeline_start_seconds,
+    std::optional<double> source_start_seconds, std::optional<double> source_end_seconds,
+    QString* error) {
+  if (!active_session_ || media_id == 0 || track_id == 0 ||
+      !std::isfinite(timeline_start_seconds) || timeline_start_seconds < 0.0) {
+    if (error) *error = QStringLiteral("invalid clip request or no project is open");
+    return std::nullopt;
+  }
+  const auto media = pulsar::domain::MediaId{static_cast<std::uint64_t>(media_id)};
+  const auto track = pulsar::domain::TrackId{static_cast<std::uint64_t>(track_id)};
+  const auto asset = active_session_->document().find_asset(media);
+  const auto* destination = active_session_->document().timeline().find_track(track);
+  if (!asset) {
+    if (error) *error = QStringLiteral("media id was not found");
+    return std::nullopt;
+  }
+  if (!destination) {
+    if (error) *error = QStringLiteral("track id was not found");
+    return std::nullopt;
+  }
+  if (asset->availability() != pulsar::application::MediaAvailability::Available) {
+    if (error) *error = QStringLiteral("media is not available");
+    return std::nullopt;
+  }
+  if (destination->kind() == pulsar::domain::TrackKind::Video && !asset->has_video()) {
+    if (error) *error = QStringLiteral("audio-only media cannot be placed on a video track");
+    return std::nullopt;
+  }
+  if (destination->kind() == pulsar::domain::TrackKind::Audio && !asset->audio()) {
+    if (error) *error = QStringLiteral("media has no audio stream for an audio track");
+    return std::nullopt;
+  }
+  const double source_start = source_start_seconds.value_or(0.0);
+  const double source_end = source_end_seconds.value_or(secondsAsDouble(asset->default_clip_duration()));
+  if (!std::isfinite(source_start) || !std::isfinite(source_end) || source_start < 0.0 ||
+      source_end <= source_start) {
+    if (error) *error = QStringLiteral("source range must be finite, non-negative and non-empty");
+    return std::nullopt;
+  }
+  const auto start = mediaTimeFromSeconds(source_start);
+  const auto end = mediaTimeFromSeconds(source_end);
+  if (end > asset->default_clip_duration()) {
+    if (error) *error = QStringLiteral("source range exceeds media duration");
+    return std::nullopt;
+  }
+  try {
+    const auto clip = active_session_->processor().add_clip(
+        track, media, pulsar::domain::TimeRange{start, end},
+        mediaTimeFromSeconds(timeline_start_seconds));
+    active_session_->select_clip(clip);
+    active_session_->synchronize_document_state();
+    clearError();
+    clearProgram(has_video_media_ ? "loading" : "empty");
+    publishTimeline();
+    return static_cast<qulonglong>(clip.value());
+  } catch (const std::exception& exception) {
+    if (error) *error = QString::fromUtf8(exception.what());
+    return std::nullopt;
+  }
+}
+
+bool DesktopController::agentRemoveClip(qulonglong clip_id, QString* error) {
+  if (!active_session_ || clip_id == 0) {
+    if (error) *error = QStringLiteral("invalid clip id or no project is open");
+    return false;
+  }
+  const auto id = pulsar::domain::ClipId{static_cast<std::uint64_t>(clip_id)};
+  if (!active_session_->document().timeline().find_clip(id)) {
+    if (error) *error = QStringLiteral("clip id was not found");
+    return false;
+  }
+  try {
+    active_session_->select_clip(id);
+    active_session_->delete_selected();
+    clearError();
+    clearProgram(has_video_media_ ? "loading" : "empty");
+    publishTimeline();
+    return true;
+  } catch (const std::exception& exception) {
+    if (error) *error = QString::fromUtf8(exception.what());
+    return false;
+  }
+}
+
 double DesktopController::agentPlaybackPositionSeconds() const {
   return active_session_ ? secondsAsDouble(active_session_->playback_position()) : 0.0;
 }
@@ -3736,14 +3866,14 @@ pulsar::application::AudioPlaybackSourceFactory DesktopController::makeAudioSour
   };
 }
 
-void DesktopController::postOpen(std::filesystem::path path, bool auto_place) {
+void DesktopController::postOpen(std::filesystem::path path, bool auto_place, bool library_only) {
   setBusy(true);
   setStatus("Preparando…");
   setTechnicalStatus("Probing");
   clearError();
   ++import_total_;
   emit importProgressChanged();
-  { std::lock_guard lock{mutex_}; import_queue_.push_back(WorkerCommand{std::move(path), import_request_generation_, auto_place}); }
+  { std::lock_guard lock{mutex_}; import_queue_.push_back(WorkerCommand{std::move(path), import_request_generation_, auto_place, library_only}); }
   wake_.notify_one();
 }
 void DesktopController::workerLoop() {
@@ -3760,9 +3890,12 @@ void DesktopController::workerLoop() {
       FFmpegMediaProbe probe;
       auto result = probe.probe(command.path);
       if (result.video_streams.empty() && result.audio_streams.empty()) throw std::runtime_error{"media has no usable video or audio stream"};
-      QMetaObject::invokeMethod(this, [this, generation = command.generation, auto_place = command.auto_place, result = std::move(result)]() mutable {
+      QMetaObject::invokeMethod(this, [this, generation = command.generation,
+                                      auto_place = command.auto_place,
+                                      library_only = command.library_only,
+                                      result = std::move(result)]() mutable {
         if (generation != import_request_generation_) { ++stale_visual_frames_; return; }
-        const bool ok = installTimelineAsset(result, auto_place);
+        const bool ok = installTimelineAsset(result, auto_place, library_only);
         finishImportItem(ok, result.path);
       }, Qt::QueuedConnection);
     } catch (const std::exception& error) {
