@@ -233,8 +233,11 @@ void ProjectDocument::validate_transition(const domain::Transition& transition) 
       outgoing->timeline_range().end() != incoming->timeline_range().start()) {
     throw std::invalid_argument{"transition clips are not adjacent at one edit point"};
   }
-  if (transition.duration > outgoing->duration() ||
-      incoming->source_range().start() < transition.duration) {
+  const bool insufficient_handles = transition.type == domain::TransitionType::CrossDissolve
+      ? transition.duration > outgoing->duration() ||
+            incoming->source_range().start() < transition.duration
+      : transition.duration > outgoing->duration() || transition.duration > incoming->duration();
+  if (insufficient_handles) {
     throw std::invalid_argument{"transition duration exceeds available clip handles"};
   }
 }

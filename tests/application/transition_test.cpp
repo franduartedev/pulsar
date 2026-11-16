@@ -1,6 +1,7 @@
 #include <pulsar/application/commands/command_processor.hpp>
 #include <pulsar/application/composition/composition_plan.hpp>
 #include <pulsar/application/composition/visual_render_context.hpp>
+#include <pulsar/application/composition/project_canvas.hpp>
 #include <pulsar/application/export/offline_video_renderer.hpp>
 #include <pulsar/application/media/media_probe.hpp>
 #include <pulsar/application/project/project_codec.hpp>
@@ -121,9 +122,83 @@ void invalid_transition_is_rejected_atomically() {
   } catch (const std::invalid_argument&) { rejected = true; }
   assert(rejected && document.transitions().empty() && commands.undo_size() == history);
 }
+
+void dip_to_black_is_persistent_and_reaches_black_at_edit() {
+  application::ProjectDocument document;
+  application::CommandProcessor commands{document};
+  Probe probe;
+  const auto red = commands.import_asset("red.mp4", probe);
+  const auto blue = commands.import_asset("blue.mp4", probe);
+  const auto outgoing = commands.add_clip(red, {{0, {1, 1}}, {5, {1, 1}}}, {0, {1, 1}});
+  const auto incoming = commands.add_clip(blue, {{0, {1, 1}}, {5, {1, 1}}}, {5, {1, 1}});
+  const domain::Transition dip{document.video_track_id(), outgoing, incoming,
+                               domain::TransitionType::DipToBlack, {1, {1, 1}}};
+  commands.add_transition(dip);
+  const auto snapshot = document.snapshot();
+  const auto context = application::VisualRenderContext::build(snapshot);
+  Factory factory;
+  factory.colors["red.mp4"] = {255, 0, 0}; factory.colors["blue.mp4"] = {0, 0, 255};
+  application::exporting::OfflineVideoRenderer preview{snapshot, context, factory};
+  application::exporting::OfflineVideoRenderer exported{snapshot, context, factory};
+  const auto before = preview.render_at({9, {1, 2}}); // halfway to edit: half red
+  assert(before.pixels[0] >= 126 && before.pixels[0] <= 128 && before.pixels[2] == 0);
+  const auto at_edit = preview.render_at({5, {1, 1}});
+  assert(at_edit.pixels[0] == 0 && at_edit.pixels[1] == 0 && at_edit.pixels[2] == 0);
+  assert(at_edit.pixels == exported.render_at({5, {1, 1}}).pixels);
+  const auto encoded = application::ProjectCodec::encode(snapshot);
+  assert(encoded.starts_with("PULSAR_PROJECT 16\n") && encoded.find("DIP_TO_BLACK") != std::string::npos);
+  assert(application::ProjectDocument::restore(application::ProjectCodec::decode(encoded)).transitions() ==
+         std::vector<domain::Transition>{dip});
+  assert(commands.undo() && document.transitions().empty());
+  assert(commands.redo() && document.transitions() == std::vector<domain::Transition>{dip});
+}
+
+void transition_boundaries_short_clips_and_vertical_canvas_are_deterministic() {
+  application::ProjectDocument document;
+  application::CommandProcessor commands{document};
+  Probe probe;
+  commands.set_project_canvas({1080, 1920, {30, 1}});
+  const auto red = commands.import_asset("red.mp4", probe);
+  const auto blue = commands.import_asset("blue.mp4", probe);
+  const auto outgoing = commands.add_clip(red, {{0, {1, 1}}, {1, {1, 1}}}, {0, {1, 1}});
+  const auto incoming = commands.add_clip(blue, {{0, {1, 1}}, {1, {1, 1}}}, {1, {1, 1}});
+  const domain::Transition dip{document.video_track_id(), outgoing, incoming,
+                               domain::TransitionType::DipToBlack, {1, {2, 1}}};
+  commands.add_transition(dip);
+  const auto snapshot = document.snapshot();
+  const auto context = application::VisualRenderContext::build(snapshot);
+  assert(context.width == 1080 && context.height == 1920);
+  const auto at_start = application::evaluate_composition_plan(snapshot, context, {1, {2, 1}});
+  const auto at_edit = application::evaluate_composition_plan(snapshot, context, {1, {1, 1}});
+  const auto at_end = application::evaluate_composition_plan(snapshot, context, {3, {2, 1}});
+  assert(at_start.layers.size() == 1 && std::abs(at_start.layers[0].transform.opacity - 1.0) < 1e-12);
+  assert(at_edit.layers.size() == 1 && at_edit.layers[0].clip_id == incoming &&
+         std::abs(at_edit.layers[0].transform.opacity) < 1e-12);
+  assert(at_end.layers.size() == 1 && at_end.layers[0].clip_id == incoming &&
+         std::abs(at_end.layers[0].transform.opacity - 1.0) < 1e-12);
+
+  const auto history = commands.undo_size();
+  bool zero_rejected = false;
+  try {
+    commands.remove_transition(dip);
+    commands.add_transition({document.video_track_id(), outgoing, incoming,
+                             domain::TransitionType::DipToBlack, {0, {1, 1}}});
+  } catch (const std::invalid_argument&) { zero_rejected = true; }
+  assert(zero_rejected && document.transitions().empty());
+  // The removal is valid; the rejected zero-duration add must not create a history entry.
+  assert(commands.undo_size() == history + 1);
+  bool too_long_rejected = false;
+  try {
+    commands.add_transition({document.video_track_id(), outgoing, incoming,
+                             domain::TransitionType::DipToBlack, {3, {2, 1}}});
+  } catch (const std::invalid_argument&) { too_long_rejected = true; }
+  assert(too_long_rejected && document.transitions().empty());
+}
 } // namespace
 
 int main() {
   cross_dissolve_is_explicit_persistent_and_undoable();
   invalid_transition_is_rejected_atomically();
+  dip_to_black_is_persistent_and_reaches_black_at_edit();
+  transition_boundaries_short_clips_and_vertical_canvas_are_deterministic();
 }

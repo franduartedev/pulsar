@@ -270,8 +270,11 @@ public:
   void end_clip_visual_transform();
   void cancel_clip_visual_transform();
   void add_cross_dissolve_at_selected_edit();
+  void add_dip_to_black_at_selected_edit();
+  void set_selected_transition(domain::TransitionType type, domain::MediaTime duration);
   void remove_selected_clip_transition();
   [[nodiscard]] bool selected_clip_has_transition() const;
+  [[nodiscard]] const domain::Transition* selected_clip_transition() const;
   void set_track_audio_state(domain::TrackId track, domain::AudioTrackState state);
   void set_project_canvas(application::ProjectCanvas canvas);
   // "Duplicar": a copy of the selected clip (or title) right after the original, on the same

@@ -721,10 +721,14 @@ void EditorSession::cancel_clip_visual_transform() {
 }
 
 bool EditorSession::selected_clip_has_transition() const {
-  if (!selected_clip_) return false;
-  return std::any_of(document_.transitions().begin(), document_.transitions().end(), [&](const auto& transition) {
+  return selected_clip_transition() != nullptr;
+}
+const domain::Transition* EditorSession::selected_clip_transition() const {
+  if (!selected_clip_) return nullptr;
+  const auto found = std::find_if(document_.transitions().begin(), document_.transitions().end(), [&](const auto& transition) {
     return transition.outgoing_clip_id == *selected_clip_ || transition.incoming_clip_id == *selected_clip_;
   });
+  return found == document_.transitions().end() ? nullptr : &*found;
 }
 
 void EditorSession::add_cross_dissolve_at_selected_edit() {
@@ -742,8 +746,8 @@ void EditorSession::add_cross_dissolve_at_selected_edit() {
         outgoing = &clips[i - 1]; incoming = &clips[i];
       }
       if (outgoing == nullptr) throw std::invalid_argument{"selected clip has no adjacent edit"};
-      const auto one_second = domain::MediaTime{1, domain::Rational{1, 1}};
-      auto duration = one_second;
+      const auto half_second = domain::MediaTime{1, domain::Rational{2, 1}};
+      auto duration = half_second;
       if (duration > outgoing->duration()) duration = outgoing->duration();
       if (duration > incoming->source_range().start()) duration = incoming->source_range().start();
       if (duration <= domain::MediaTime::zero()) {
@@ -756,6 +760,44 @@ void EditorSession::add_cross_dissolve_at_selected_edit() {
     }
   }
   throw std::invalid_argument{"selected clip is not on a video track"};
+}
+
+void EditorSession::add_dip_to_black_at_selected_edit() {
+  if (!selected_clip_) throw std::invalid_argument{"select a clip beside the edit"};
+  for (const auto& track : document_.timeline().tracks()) {
+    if (track.kind() != domain::TrackKind::Video) continue;
+    const auto& clips = track.clips();
+    for (std::size_t i = 0; i < clips.size(); ++i) {
+      if (clips[i].id() != *selected_clip_) continue;
+      const domain::Clip* outgoing = nullptr;
+      const domain::Clip* incoming = nullptr;
+      if (i + 1 < clips.size() && clips[i].timeline_range().end() == clips[i + 1].timeline_range().start()) {
+        outgoing = &clips[i]; incoming = &clips[i + 1];
+      } else if (i > 0 && clips[i - 1].timeline_range().end() == clips[i].timeline_range().start()) {
+        outgoing = &clips[i - 1]; incoming = &clips[i];
+      }
+      if (!outgoing) throw std::invalid_argument{"selected clip has no adjacent edit"};
+      auto duration = domain::MediaTime{1, domain::Rational{2, 1}};
+      if (duration > outgoing->duration()) duration = outgoing->duration();
+      if (duration > incoming->duration()) duration = incoming->duration();
+      if (duration <= domain::MediaTime::zero()) throw std::invalid_argument{"clips are too short for a dip"};
+      processor_.add_transition({track.id(), outgoing->id(), incoming->id(),
+                                 domain::TransitionType::DipToBlack, duration});
+      synchronize_document_state();
+      return;
+    }
+  }
+  throw std::invalid_argument{"selected clip is not on a video track"};
+}
+
+void EditorSession::set_selected_transition(domain::TransitionType type, domain::MediaTime duration) {
+  const auto* current = selected_clip_transition();
+  if (!current) throw std::invalid_argument{"selected clip has no transition"};
+  auto replacement = *current;
+  replacement.type = type;
+  replacement.duration = duration;
+  processor_.run_as_one_edit([&] { processor_.remove_transition(*current); processor_.add_transition(replacement); });
+  synchronize_document_state();
 }
 
 void EditorSession::remove_selected_clip_transition() {

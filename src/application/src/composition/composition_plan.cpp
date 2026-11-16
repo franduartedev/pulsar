@@ -55,6 +55,27 @@ CompositionPlan evaluate_composition_plan(const ProjectSnapshot& snapshot,
     }
     const auto edit = incoming->timeline_range().start();
     const auto start = edit - transition.duration;
+    const auto end = edit + transition.duration;
+    if (transition.type == domain::TransitionType::DipToBlack) {
+      if (timeline_position >= start && timeline_position < edit) {
+        const auto outgoing_layer = std::find_if(plan.layers.begin(), plan.layers.end(), [&](const auto& item) {
+          return item.clip_id == transition.outgoing_clip_id;
+        });
+        if (outgoing_layer == plan.layers.end()) throw std::invalid_argument{"transition outgoing clip is not active"};
+        const double progress = static_cast<double>(timeline_position - start) /
+                                static_cast<double>(transition.duration);
+        outgoing_layer->transform.opacity *= 1.0 - std::clamp(progress, 0.0, 1.0);
+      } else if (timeline_position >= edit && timeline_position < end) {
+        const auto incoming_layer = std::find_if(plan.layers.begin(), plan.layers.end(), [&](const auto& item) {
+          return item.clip_id == transition.incoming_clip_id;
+        });
+        if (incoming_layer == plan.layers.end()) throw std::invalid_argument{"transition incoming clip is not active"};
+        const double progress = static_cast<double>(timeline_position - edit) /
+                                static_cast<double>(transition.duration);
+        incoming_layer->transform.opacity *= std::clamp(progress, 0.0, 1.0);
+      }
+      continue;
+    }
     if (timeline_position < start || timeline_position >= edit) continue;
     const auto asset = std::find_if(snapshot.assets.begin(), snapshot.assets.end(), [&](const auto& item) {
       return item.id() == incoming->media_id();

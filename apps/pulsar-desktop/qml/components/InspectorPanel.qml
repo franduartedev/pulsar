@@ -521,7 +521,29 @@ Panel {
                     text: controller.selectedClipHasTransition ? "Quitar fundido cruzado" : "Agregar fundido cruzado"
                     onClicked: controller.selectedClipHasTransition ? controller.removeSelectedTransition() : controller.addCrossDissolve()
                 }
-                Text { width: parent.width; wrapMode: Text.WordWrap; text: "Entre dos clips contiguos. Usa hasta 1 s del margen del segundo clip."; color: Theme.textMuted; font.pixelSize: Theme.fontSizeXS }
+                Row {
+                    visible: !controller.selectedClipHasTransition
+                    spacing: 4
+                    PButton { width: 112; height: Theme.controlHeightSmall; text: "Fundido a negro"; onClicked: controller.addDipToBlack() }
+                }
+                FieldRow {
+                    visible: controller.selectedClipHasTransition
+                    label: "Tipo"
+                    PButton { width: 78; height: Theme.controlHeightSmall; text: "Disolvencia"; checked: controller.selectedTransitionType === "crossfade"
+                        onClicked: controller.setSelectedTransition("crossfade", controller.selectedTransitionDuration) }
+                    PButton { width: 72; height: Theme.controlHeightSmall; text: "A negro"; checked: controller.selectedTransitionType === "dip"
+                        onClicked: controller.setSelectedTransition("dip", controller.selectedTransitionDuration) }
+                }
+                FieldRow {
+                    visible: controller.selectedClipHasTransition
+                    label: "Duración"
+                    Stepper {
+                        valueText: Number(controller.selectedTransitionDuration).toFixed(2) + " s"
+                        onDecrement: controller.setSelectedTransition(controller.selectedTransitionType, Math.max(0.05, controller.selectedTransitionDuration - 0.05))
+                        onIncrement: controller.setSelectedTransition(controller.selectedTransitionType, controller.selectedTransitionDuration + 0.05)
+                    }
+                }
+                Text { width: parent.width; wrapMode: Text.WordWrap; text: "Entre dos clips contiguos. La disolvencia usa margen de origen del segundo clip; el fundido a negro funciona sin preroll."; color: Theme.textMuted; font.pixelSize: Theme.fontSizeXS }
             }
 
             // ---- AUDIO ---------------------------------------------------------

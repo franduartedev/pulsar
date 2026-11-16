@@ -2744,6 +2744,40 @@ QVariantMap DesktopController::agentStatus() const {
   result[QStringLiteral("status")] = status();
   return result;
 }
+QString DesktopController::selectedTransitionType() const {
+  const auto* transition = active_session_ ? active_session_->selected_clip_transition() : nullptr;
+  return transition && transition->type == pulsar::domain::TransitionType::DipToBlack
+      ? QStringLiteral("dip") : QStringLiteral("crossfade");
+}
+double DesktopController::selectedTransitionDuration() const {
+  const auto* transition = active_session_ ? active_session_->selected_clip_transition() : nullptr;
+  return transition ? static_cast<double>(transition->duration) : 0.5;
+}
+void DesktopController::addDipToBlack() {
+  if (!active_session_) return;
+  try {
+    active_session_->add_dip_to_black_at_selected_edit();
+    clearError(); setStatus(QStringLiteral("Fundido a negro agregado"));
+    clearProgram(has_video_media_ ? "loading" : "empty"); publishTimeline();
+  } catch (const std::exception& error) {
+    logCause("dip to black add failed", error);
+    setError(QStringLiteral("No se puede agregar el fundido a negro: necesitás dos clips contiguos."));
+  }
+}
+void DesktopController::setSelectedTransition(const QString& type, double duration_seconds) {
+  if (!active_session_ || !std::isfinite(duration_seconds) || duration_seconds <= 0.0) return;
+  const auto transition_type = type == QStringLiteral("dip") ? pulsar::domain::TransitionType::DipToBlack
+                                                               : pulsar::domain::TransitionType::CrossDissolve;
+  try {
+    active_session_->set_selected_transition(transition_type,
+        pulsar::domain::MediaTime{static_cast<std::int64_t>(std::llround(duration_seconds * 1000.0)),
+                                  pulsar::domain::Rational{1, 1000}});
+    clearError(); clearProgram(has_video_media_ ? "loading" : "empty"); publishTimeline();
+  } catch (const std::exception& error) {
+    logCause("transition edit failed", error);
+    setError(QStringLiteral("La duración no cabe en los clips o faltan márgenes de origen."));
+  }
+}
 bool DesktopController::selectedClipIsOverlay() const {
   if (!active_session_ || !active_session_->selected_clip()) return false;
   const auto selected = *active_session_->selected_clip();

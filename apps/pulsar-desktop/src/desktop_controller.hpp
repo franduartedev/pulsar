@@ -137,6 +137,8 @@ class DesktopController final : public QObject {
   Q_PROPERTY(int viewerCanvasPixelHeight READ viewerCanvasPixelHeight NOTIFY mediaChanged)
   Q_PROPERTY(bool selectedClipOnScreen READ selectedClipOnScreen NOTIFY selectedClipOnScreenChanged)
   Q_PROPERTY(bool selectedClipHasTransition READ selectedClipHasTransition NOTIFY timelineChanged)
+  Q_PROPERTY(QString selectedTransitionType READ selectedTransitionType NOTIFY timelineChanged)
+  Q_PROPERTY(double selectedTransitionDuration READ selectedTransitionDuration NOTIFY timelineChanged)
   Q_PROPERTY(bool selectedClipIsOverlay READ selectedClipIsOverlay NOTIFY timelineChanged)
   Q_PROPERTY(bool canDuplicate READ canDuplicate NOTIFY timelineChanged)
   Q_PROPERTY(QString selectedClipKind READ selectedClipKind NOTIFY timelineChanged)   // video | image | color | audio | ""
@@ -258,6 +260,8 @@ public:
   [[nodiscard]] int viewerCanvasPixelHeight() const;
   [[nodiscard]] bool selectedClipOnScreen() const;
   [[nodiscard]] bool selectedClipHasTransition() const { return active_session_ && active_session_->selected_clip_has_transition(); }
+  [[nodiscard]] QString selectedTransitionType() const;
+  [[nodiscard]] double selectedTransitionDuration() const;
   [[nodiscard]] bool selectedClipIsOverlay() const;
   [[nodiscard]] bool canDuplicate() const { return active_session_ && active_session_->can_duplicate_selected(); }
   [[nodiscard]] bool selectedClipHasAudio() const {
@@ -368,6 +372,8 @@ public:
   Q_INVOKABLE void debugViewerGesture(const QString& phase, const QVariantMap& data) const;
   Q_INVOKABLE void debugTimelineGesture(const QString& phase, const QVariantMap& data) const;
   Q_INVOKABLE void addCrossDissolve();
+  Q_INVOKABLE void addDipToBlack();
+  Q_INVOKABLE void setSelectedTransition(const QString& type, double duration_seconds);
   Q_INVOKABLE void removeSelectedTransition();
   Q_INVOKABLE void adjustTrackGain(const QString& track_key, double delta_db);
   Q_INVOKABLE void toggleTrackMute(const QString& track_key);

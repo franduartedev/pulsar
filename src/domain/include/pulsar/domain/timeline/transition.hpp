@@ -7,7 +7,7 @@
 
 namespace pulsar::domain {
 
-enum class TransitionType { CrossDissolve };
+enum class TransitionType { CrossDissolve, DipToBlack };
 
 // A transition belongs to one adjacent edit relationship, never to media.
 struct Transition {
@@ -22,7 +22,9 @@ struct Transition {
 
 inline void validate_transition_value(const Transition& transition) {
   if (transition.outgoing_clip_id == transition.incoming_clip_id ||
-      transition.duration <= MediaTime::zero()) {
+      transition.duration <= MediaTime::zero() ||
+      (transition.type != TransitionType::CrossDissolve &&
+       transition.type != TransitionType::DipToBlack)) {
     throw std::invalid_argument{"invalid transition value"};
   }
 }

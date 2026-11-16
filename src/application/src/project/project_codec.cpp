@@ -217,6 +217,8 @@ std::string ProjectCodec::encode(const ProjectSnapshot& snapshot) {
   bool has_audio_effect_order = false;
   bool has_telephone_keyframes = false;
   bool has_fill = false;
+  const bool has_dip_to_black = std::any_of(snapshot.transitions.begin(), snapshot.transitions.end(),
+      [](const auto& transition) { return transition.type == domain::TransitionType::DipToBlack; });
   for (const auto& track : snapshot.timeline.tracks()) {
     if (track.audio_state() != domain::AudioTrackState{}) has_audio_track_state = true;
     for (const auto& clip : track.clips()) {
@@ -258,7 +260,7 @@ std::string ProjectCodec::encode(const ProjectSnapshot& snapshot) {
     }
   }
   // Version 4 adds clip fades; every file that does not need a newer feature keeps its old version.
-  const int version = has_fill ? 15 : has_telephone_keyframes ? 14 : has_audio_effect_order ? 13
+  const int version = has_dip_to_black ? 16 : has_fill ? 15 : has_telephone_keyframes ? 14 : has_audio_effect_order ? 13
       : has_underwater_keyframes ? 12 : has_underwater ? 11 : has_telephone ? 10 : has_subtitles ? 9
       : has_distant_music_keyframes ? 8 : has_distant_music ? 7 : needs_v6_layout ? 6 : needs_v5 ? 5
       : needs_v4 ? 4 : has_titles ? 3 : 2;
@@ -429,7 +431,7 @@ std::string ProjectCodec::encode(const ProjectSnapshot& snapshot) {
   }
 
   for (const auto& transition : snapshot.transitions) {
-    output << "TRANSITION CROSS_DISSOLVE " << transition.track_id.value() << ' '
+    output << "TRANSITION " << (transition.type == domain::TransitionType::DipToBlack ? "DIP_TO_BLACK" : "CROSS_DISSOLVE") << ' '
            << transition.outgoing_clip_id.value() << ' ' << transition.incoming_clip_id.value() << ' ';
     append_time(output, transition.duration);
     output << "\n";
@@ -494,6 +496,7 @@ ProjectRestoreState ProjectCodec::decode(std::string_view bytes) {
   bool version13 = false;
   bool version14 = false;
   bool version15 = false;
+  bool version16 = false;
   bool allocator = false;
   bool ended = false;
   enum class Section { Header, Timeline, Tracks, VideoTrack, VisualTracks, Assets, Clips, Transitions, Titles, Subtitles, Allocator, End };
@@ -528,11 +531,12 @@ ProjectRestoreState ProjectCodec::decode(std::string_view bytes) {
 
     try {
       if (tokens[0].text == "PULSAR_PROJECT") {
-        if (header || tokens.size() != 2 || (tokens[1].text != "1" && tokens[1].text != "2" && tokens[1].text != "3" && tokens[1].text != "4" && tokens[1].text != "5" && tokens[1].text != "6" && tokens[1].text != "7" && tokens[1].text != "8" && tokens[1].text != "9" && tokens[1].text != "10" && tokens[1].text != "11" && tokens[1].text != "12" && tokens[1].text != "13" && tokens[1].text != "14" && tokens[1].text != "15")) {
+        if (header || tokens.size() != 2 || (tokens[1].text != "1" && tokens[1].text != "2" && tokens[1].text != "3" && tokens[1].text != "4" && tokens[1].text != "5" && tokens[1].text != "6" && tokens[1].text != "7" && tokens[1].text != "8" && tokens[1].text != "9" && tokens[1].text != "10" && tokens[1].text != "11" && tokens[1].text != "12" && tokens[1].text != "13" && tokens[1].text != "14" && tokens[1].text != "15" && tokens[1].text != "16")) {
           parse_fail(line_number, "invalid header/version");
         }
         header = true;
-        version15 = tokens[1].text == "15";
+        version16 = tokens[1].text == "16";
+        version15 = tokens[1].text == "15" || version16;
         version14 = tokens[1].text == "14" || version15;
         version13 = tokens[1].text == "13" || version14;
         version7 = tokens[1].text == "7" || tokens[1].text == "8" || tokens[1].text == "9" || tokens[1].text == "10" || tokens[1].text == "11" || tokens[1].text == "12" || tokens[1].text == "13" || version14;
@@ -890,7 +894,8 @@ ProjectRestoreState ProjectCodec::decode(std::string_view bytes) {
         section = Section::Clips;
       } else if (tokens[0].text == "TRANSITION") {
         if (!version6 || (section != Section::Clips && section != Section::Transitions) ||
-            tokens.size() != 8 || tokens[1].text != "CROSS_DISSOLVE") {
+            tokens.size() != 8 || (tokens[1].text != "CROSS_DISSOLVE" &&
+                                   (!version16 || tokens[1].text != "DIP_TO_BLACK"))) {
           parse_fail(line_number, "invalid TRANSITION");
         }
         std::size_t i = 2;
@@ -900,7 +905,9 @@ ProjectRestoreState ProjectCodec::decode(std::string_view bytes) {
         const auto duration = media_time(tokens, i, line_number, "transition duration");
         try {
           domain::Transition value{track_id, outgoing, incoming,
-                                   domain::TransitionType::CrossDissolve, duration};
+              tokens[1].text == "DIP_TO_BLACK" ? domain::TransitionType::DipToBlack
+                                                 : domain::TransitionType::CrossDissolve,
+              duration};
           domain::validate_transition_value(value);
           state.transitions.push_back(value);
         } catch (const std::exception& error) {
