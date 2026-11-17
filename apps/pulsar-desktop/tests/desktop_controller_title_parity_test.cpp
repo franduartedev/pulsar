@@ -13,6 +13,7 @@
 
 #include <QEventLoop>
 #include <QGuiApplication>
+#include <QRect>
 #include <QTimer>
 
 #include <cmath>
@@ -20,6 +21,7 @@
 #include <cstring>
 #include <filesystem>
 #include <functional>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -258,8 +260,42 @@ int main(int argc, char** argv) {
       if (std::memcmp(actual.constScanLine(y), expected_upper.pixels.data() +
           std::size_t(y) * expected_upper.stride_bytes, std::size_t(expected_upper.width) * 4) != 0) return false;
     }
-    return true;
-  }));
+      return true;
+    }));
+
+  // ---- Aspect-aware title layout: no preset may escape safe margins or crop an unbreakable word ----
+  const std::string unbreakable = "ZONALERO_SUPERCALIFRAGILISTICO_ÑANDU_0123456789";
+  const auto range = pulsar::domain::TimeRange{MediaTime::zero(), MediaTime{2, {1, 1}}};
+  const std::pair<int, int> canvases[] = {{1920, 1080}, {1080, 1920}, {720, 1280}, {1080, 1080}};
+  for (const auto& [width, height] : canvases) {
+    for (int preset = 0; preset <= 4; ++preset) {
+      const auto title = pulsar::domain::Title{pulsar::domain::TitleId{100 + preset}, unbreakable, range, 200,
+          0xFFD84DFFu, pulsar::domain::TitleHAlign::Center, pulsar::domain::TitleVAlign::Bottom, false,
+          pulsar::domain::TitleBackground::None, 100, pulsar::domain::TitlePosition{500, 990},
+          static_cast<pulsar::domain::TitlePreset>(preset), "SUBTITULO DE ALTO CONTRASTE", 0x59D9FFFFu};
+      QRect block;
+      const auto raster = QtTitleRasterizer::rasterizeWithBlock(title, width, height, &block);
+      const int safe_x = std::max(12, static_cast<int>(std::lround(width * (preset == 0 ? 0.05 : 0.06))));
+      const int safe_y = std::max(12, static_cast<int>(std::lround(height * (preset == 0 ? 0.06 : 0.07))));
+      REQUIRE(80 + preset, raster && block.width() > 0 && block.height() > 0 &&
+              block.left() >= safe_x && block.top() >= safe_y &&
+              block.right() < width - safe_x && block.bottom() < height - safe_y);
+    }
+  }
+  // A free-standing preset subtitle receives its own dark contrast plate; this
+  // keeps the chosen yellow/white text legible without mutating its colours.
+  const auto contrast_title = pulsar::domain::Title{pulsar::domain::TitleId{200}, "ZONALERO", range, 120,
+      0xFFD84DFFu, pulsar::domain::TitleHAlign::Center, pulsar::domain::TitleVAlign::Middle, false,
+      pulsar::domain::TitleBackground::None, 100, std::nullopt, pulsar::domain::TitlePreset::Hero,
+      "SUBTITULO LEGIBLE", 0x59D9FFFFu};
+  const auto contrast_raster = QtTitleRasterizer{}.rasterize(contrast_title, 720, 1280);
+  REQUIRE(90, contrast_raster.has_value());
+  bool has_dark_plate = false;
+  for (std::size_t pixel = 0; pixel + 3 < contrast_raster->premultiplied_rgba.size(); pixel += 4) {
+    const auto* rgba = contrast_raster->premultiplied_rgba.data() + pixel;
+    if (rgba[3] >= 180 && rgba[0] < 20 && rgba[1] < 25 && rgba[2] < 35) { has_dark_plate = true; break; }
+  }
+  REQUIRE(91, has_dark_plate);
   fs::remove_all(root);
   return 0;
 }

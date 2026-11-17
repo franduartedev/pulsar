@@ -12,6 +12,7 @@
 #include <QPainter>
 #include <QRect>
 #include <QRectF>
+#include <QRegularExpression>
 #include <QStringList>
 
 #include <algorithm>
@@ -36,6 +37,32 @@ QString QtTitleRasterizer::fontFamily() {
   if (family.isEmpty()) family = QStringLiteral("Sans Serif");   // bundle incomplete: still draws something
   return family;
 }
+
+namespace {
+
+// Word wrapping alone does not make an unbreakable word fit: QPainter keeps it
+// on one line and clips it. Fit the actual glyph metrics first, then use
+// TextWrapAnywhere as a final guard for strings which cannot fit even at the
+// readable minimum (for example a long URL or identifier).
+QFont fit_font_to_width(QFont font, const QString& text, int width) {
+  const auto words = text.split(QRegularExpression{QStringLiteral("\\s+")}, Qt::SkipEmptyParts);
+  const auto fits = [&](const QFont& candidate) {
+    const QFontMetricsF metrics{candidate};
+    return std::all_of(words.cbegin(), words.cend(), [&](const QString& word) {
+      return metrics.horizontalAdvance(word) <= width;
+    });
+  };
+  while (font.pixelSize() > 8 && !fits(font)) font.setPixelSize(font.pixelSize() - 1);
+  return font;
+}
+
+int title_flags(int alignment) {
+  // The font is reduced before layout; WrapAnywhere only becomes relevant to
+  // text that cannot fit even at the readable minimum.
+  return alignment | Qt::TextWrapAnywhere;
+}
+
+} // namespace
 
 std::optional<pulsar::application::composition::TitleRaster> QtTitleRasterizer::rasterize(
     const pulsar::domain::Title& title, int canvas_width, int canvas_height) {
@@ -66,26 +93,32 @@ std::optional<pulsar::application::composition::TitleRaster> QtTitleRasterizer::
     const bool hero = title.preset() == pulsar::domain::TitlePreset::Hero;
     const bool card = title.preset() == pulsar::domain::TitlePreset::LowerThird ||
                       title.preset() == pulsar::domain::TitlePreset::StatCard;
-    const int max_width = std::max(48, static_cast<int>(canvas_width * (hero ? 0.86 : card ? 0.72 : 0.82)));
+    const int initial_pad_x = std::max(10, static_cast<int>(std::lround(font_px * (card ? 0.48 : 0.16))));
+    const int initial_shadow = title.shadow() ? std::max(2, static_cast<int>(std::lround(font_px * 0.06))) : 0;
+    const int max_width = std::max(16, std::min(static_cast<int>(canvas_width * (hero ? 0.86 : card ? 0.72 : 0.82)),
+                                                canvas_width - 2 * safe_x - 2 * (initial_pad_x + initial_shadow)));
+    font = fit_font_to_width(font, primary, max_width);
     QFont secondary_font{font};
-    secondary_font.setPixelSize(std::max(10, static_cast<int>(std::lround(font_px * (hero ? 0.30 : 0.42)))));
+    secondary_font.setPixelSize(std::max(8, static_cast<int>(std::lround(font.pixelSize() * (hero ? 0.30 : 0.42)))));
     secondary_font.setWeight(QFont::DemiBold);
+    secondary_font = fit_font_to_width(secondary_font, secondary, max_width);
     QImage measure_image{1, 1, QImage::Format_ARGB32_Premultiplied};
     QPainter measure{&measure_image};
     measure.setFont(font);
-    const QRectF primary_bounds = measure.boundingRect(QRectF{0.0, 0.0, static_cast<qreal>(max_width), 100000.0}, Qt::TextWordWrap, primary);
+    const QRectF primary_bounds = measure.boundingRect(QRectF{0.0, 0.0, static_cast<qreal>(max_width), 100000.0}, title_flags(Qt::AlignLeft), primary);
     measure.setFont(secondary_font);
     const QRectF secondary_bounds = secondary.isEmpty() ? QRectF{} :
-        measure.boundingRect(QRectF{0.0, 0.0, static_cast<qreal>(max_width), 100000.0}, Qt::TextWordWrap, secondary);
+        measure.boundingRect(QRectF{0.0, 0.0, static_cast<qreal>(max_width), 100000.0}, title_flags(Qt::AlignLeft), secondary);
     measure.end();
-    const int pad_x = std::max(10, static_cast<int>(std::lround(font_px * (card ? 0.48 : 0.16))));
-    const int pad_y = std::max(8, static_cast<int>(std::lround(font_px * (card ? 0.34 : 0.14))));
-    const int accent_h = std::max(3, static_cast<int>(std::lround(font_px * 0.075)));
-    const int gap = secondary.isEmpty() ? 0 : std::max(4, static_cast<int>(std::lround(font_px * 0.14)));
+    const int actual_font_px = font.pixelSize();
+    const int pad_x = std::max(10, static_cast<int>(std::lround(actual_font_px * (card ? 0.48 : 0.16))));
+    const int pad_y = std::max(8, static_cast<int>(std::lround(actual_font_px * (card ? 0.34 : 0.14))));
+    const int accent_h = std::max(3, static_cast<int>(std::lround(actual_font_px * 0.075)));
+    const int gap = secondary.isEmpty() ? 0 : std::max(4, static_cast<int>(std::lround(actual_font_px * 0.14)));
     const int content_w = std::max(static_cast<int>(std::ceil(primary_bounds.width())), static_cast<int>(std::ceil(secondary_bounds.width())));
     const int content_h = static_cast<int>(std::ceil(primary_bounds.height() + secondary_bounds.height())) + gap;
-    const int shadow_pad = title.shadow() ? std::max(2, static_cast<int>(std::lround(font_px * 0.06))) : 0;
-    const int image_w = std::min(canvas_width, content_w + 2 * (pad_x + shadow_pad));
+    const int shadow_pad = title.shadow() ? std::max(2, static_cast<int>(std::lround(actual_font_px * 0.06))) : 0;
+    const int image_w = std::min(canvas_width - 2 * safe_x, content_w + 2 * (pad_x + shadow_pad));
     const int image_h = content_h + 2 * (pad_y + shadow_pad) + accent_h + std::max(3, gap);
     if (image_w <= 0 || image_h <= 0 || static_cast<long long>(image_w) * image_h > 64LL * 1024 * 1024) return std::nullopt;
     QImage image{image_w, image_h, QImage::Format_RGBA8888_Premultiplied};
@@ -100,18 +133,28 @@ std::optional<pulsar::application::composition::TitleRaster> QtTitleRasterizer::
       const bool light = title.background() == pulsar::domain::TitleBackground::Light;
       painter.setPen(Qt::NoPen);
       painter.setBrush(light ? QColor{255, 255, 255, 220} : QColor{8, 14, 25, card ? 205 : 165});
-      painter.drawRoundedRect(visible, font_px * 0.18, font_px * 0.18);
+      painter.drawRoundedRect(visible, actual_font_px * 0.18, actual_font_px * 0.18);
     }
     const auto accent = title.accent_rgba();
     const QColor accent_color{static_cast<int>((accent >> 24) & 0xFF), static_cast<int>((accent >> 16) & 0xFF),
                               static_cast<int>((accent >> 8) & 0xFF), static_cast<int>(accent & 0xFF)};
-    const double line_w = hero ? std::min<double>(content_w * 0.28, font_px * 3.0) : image_w - 2.0 * (pad_x + shadow_pad);
+    const double line_w = hero ? std::min<double>(content_w * 0.28, actual_font_px * 3.0) : image_w - 2.0 * (pad_x + shadow_pad);
     const double line_x = hero ? (image_w - line_w) / 2.0 : pad_x + shadow_pad;
     painter.setPen(Qt::NoPen); painter.setBrush(accent_color);
     painter.drawRoundedRect(QRectF{line_x, static_cast<qreal>(pad_y + shadow_pad), line_w, static_cast<qreal>(accent_h)}, accent_h / 2.0, accent_h / 2.0);
-    const int flags = (hero ? Qt::AlignHCenter : Qt::AlignLeft) | Qt::TextWordWrap;
+    const int flags = title_flags(hero ? Qt::AlignHCenter : Qt::AlignLeft);
     const QRectF primary_rect{static_cast<double>(pad_x + shadow_pad), static_cast<double>(pad_y + shadow_pad + accent_h + gap),
                               static_cast<double>(image_w - 2 * (pad_x + shadow_pad)), primary_bounds.height() + 3};
+    const QRectF secondary_rect{primary_rect.left(), primary_rect.bottom() + gap,
+                               primary_rect.width(), secondary_bounds.height() + 3};
+    // Keep the author-selected text and accent intact, while placing a subtle
+    // dark plate behind free-standing secondary copy. It gives predictable
+    // contrast over both light and dark footage without adding per-frame work.
+    if (!secondary.isEmpty() && !card && title.background() == pulsar::domain::TitleBackground::None) {
+      painter.setPen(Qt::NoPen); painter.setBrush(QColor{5, 10, 18, 190});
+      const auto plate = secondary_rect.adjusted(-pad_x * 0.25, -pad_y * 0.12, pad_x * 0.25, pad_y * 0.12);
+      painter.drawRoundedRect(plate, actual_font_px * 0.10, actual_font_px * 0.10);
+    }
     if (title.shadow()) {
       painter.setFont(font); painter.setPen(QColor{0, 0, 0, 170});
       painter.drawText(primary_rect.translated(shadow_pad, shadow_pad), flags, primary);
@@ -121,8 +164,6 @@ std::optional<pulsar::application::composition::TitleRaster> QtTitleRasterizer::
                                                  static_cast<int>((rgba >> 8) & 0xFF), static_cast<int>(rgba & 0xFF)});
     painter.drawText(primary_rect, flags, primary);
     if (!secondary.isEmpty()) {
-      const QRectF secondary_rect{primary_rect.left(), primary_rect.bottom() + gap,
-                                  primary_rect.width(), secondary_bounds.height() + 3};
       painter.setFont(secondary_font); painter.setPen(card ? accent_color : QColor{220, 230, 240, 230});
       painter.drawText(secondary_rect, flags, secondary);
     }
@@ -131,8 +172,8 @@ std::optional<pulsar::application::composition::TitleRaster> QtTitleRasterizer::
     int box_x = title.horizontal() == TitleHAlign::Left ? safe_x : title.horizontal() == TitleHAlign::Right ? canvas_width - safe_x - full_w : (canvas_width - full_w) / 2;
     int box_y = title.vertical() == TitleVAlign::Top ? safe_y : title.vertical() == TitleVAlign::Middle ? (canvas_height - full_h) / 2 : canvas_height - safe_y - full_h;
     if (const auto& free = title.position()) {
-      box_x = std::clamp(static_cast<int>(std::lround(free->x_permille / 1000.0 * canvas_width - full_w / 2.0)), 0, std::max(0, canvas_width - full_w));
-      box_y = std::clamp(static_cast<int>(std::lround(free->y_permille / 1000.0 * canvas_height - full_h / 2.0)), 0, std::max(0, canvas_height - full_h));
+      box_x = std::clamp(static_cast<int>(std::lround(free->x_permille / 1000.0 * canvas_width - full_w / 2.0)), safe_x, std::max(safe_x, canvas_width - safe_x - full_w));
+      box_y = std::clamp(static_cast<int>(std::lround(free->y_permille / 1000.0 * canvas_height - full_h / 2.0)), safe_y, std::max(safe_y, canvas_height - safe_y - full_h));
     }
     if (block != nullptr) *block = QRect{box_x, box_y, full_w, full_h};
     pulsar::application::composition::TitleRaster raster;
@@ -153,7 +194,8 @@ std::optional<pulsar::application::composition::TitleRaster> QtTitleRasterizer::
   const double max_width = std::max(16, canvas_width - 2 * side_margin - 2 * box_pad_x);
   const int qt_alignment = title.horizontal() == TitleHAlign::Left ? Qt::AlignLeft
                           : title.horizontal() == TitleHAlign::Right ? Qt::AlignRight : Qt::AlignHCenter;
-  const int flags = qt_alignment | Qt::TextWordWrap;
+  font = fit_font_to_width(font, text, static_cast<int>(max_width));
+  const int flags = title_flags(qt_alignment);
 
   // Measure on a scratch image so the final picture is exactly as large as the text.
   QImage scratch{1, 1, QImage::Format_ARGB32_Premultiplied};
@@ -207,10 +249,10 @@ std::optional<pulsar::application::composition::TitleRaster> QtTitleRasterizer::
              : title.vertical() == TitleVAlign::Middle ? (canvas_height - full_h) / 2
                                                       : canvas_height - vertical_margin - full_h;
   if (const auto& free = title.position()) {   // dragged placement: the block's centre, kept on screen
-    box_x = std::clamp(static_cast<int>(std::lround(free->x_permille / 1000.0 * canvas_width - full_w / 2.0)), 0,
-                       std::max(0, canvas_width - full_w));
-    box_y = std::clamp(static_cast<int>(std::lround(free->y_permille / 1000.0 * canvas_height - full_h / 2.0)), 0,
-                       std::max(0, canvas_height - full_h));
+    box_x = std::clamp(static_cast<int>(std::lround(free->x_permille / 1000.0 * canvas_width - full_w / 2.0)), side_margin,
+                       std::max(side_margin, canvas_width - side_margin - full_w));
+    box_y = std::clamp(static_cast<int>(std::lround(free->y_permille / 1000.0 * canvas_height - full_h / 2.0)), vertical_margin,
+                       std::max(vertical_margin, canvas_height - vertical_margin - full_h));
   }
   block_x = box_x; block_y = box_y; block_w = full_w; block_h = full_h;
   if (block != nullptr) *block = QRect{block_x, block_y, block_w, block_h};

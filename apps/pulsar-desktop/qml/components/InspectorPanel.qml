@@ -509,6 +509,12 @@ Panel {
                         onClicked: controller.setSelectedClipFitMode("fill")
                     }
                 }
+                Text {
+                    visible: controller.selectedClipFitMode === "fill"
+                    width: parent.width; wrapMode: Text.WordWrap
+                    text: "Rellenar cubre el lienzo y recorta los bordes de la fuente. Ajustá Pos X/Y para elegir el encuadre."
+                    color: Theme.warning; font.pixelSize: Theme.fontSizeXS
+                }
                 FieldRow {
                     label: "Pos X"
                     Stepper {
