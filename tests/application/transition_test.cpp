@@ -9,7 +9,6 @@
 #include <cassert>
 #include <array>
 #include <cmath>
-#include <cstdio>
 #include <map>
 #include <memory>
 
@@ -164,14 +163,14 @@ void transition_boundaries_short_clips_and_vertical_canvas_are_deterministic() {
   const auto outgoing = commands.add_clip(red, {{0, {1, 1}}, {1, {1, 1}}}, {0, {1, 1}});
   const auto incoming = commands.add_clip(blue, {{0, {1, 1}}, {1, {1, 1}}}, {1, {1, 1}});
   const domain::Transition dip{document.video_track_id(), outgoing, incoming,
-                               domain::TransitionType::DipToBlack, {1, {2, 1}}};
+                               domain::TransitionType::DipToBlack, {1, {1, 2}}};
   commands.add_transition(dip);
   const auto snapshot = document.snapshot();
   const auto context = application::VisualRenderContext::build(snapshot);
   assert(context.width == 1080 && context.height == 1920);
-  const auto at_start = application::evaluate_composition_plan(snapshot, context, {1, {2, 1}});
+  const auto at_start = application::evaluate_composition_plan(snapshot, context, {1, {1, 2}});
   const auto at_edit = application::evaluate_composition_plan(snapshot, context, {1, {1, 1}});
-  const auto at_end = application::evaluate_composition_plan(snapshot, context, {3, {2, 1}});
+  const auto at_end = application::evaluate_composition_plan(snapshot, context, {3, {1, 2}});
   assert(at_start.layers.size() == 1 && std::abs(at_start.layers[0].transform.opacity - 1.0) < 1e-12);
   assert(at_edit.layers.size() == 1 && at_edit.layers[0].clip_id == incoming &&
          std::abs(at_edit.layers[0].transform.opacity) < 1e-12);
@@ -198,12 +197,8 @@ void transition_boundaries_short_clips_and_vertical_canvas_are_deterministic() {
 } // namespace
 
 int main() {
-  try { cross_dissolve_is_explicit_persistent_and_undoable(); }
-  catch (const std::exception& error) { std::fprintf(stderr, "cross dissolve: %s\n", error.what()); return 1; }
-  try { invalid_transition_is_rejected_atomically(); }
-  catch (const std::exception& error) { std::fprintf(stderr, "invalid transition: %s\n", error.what()); return 1; }
-  try { dip_to_black_is_persistent_and_reaches_black_at_edit(); }
-  catch (const std::exception& error) { std::fprintf(stderr, "dip to black: %s\n", error.what()); return 1; }
-  try { transition_boundaries_short_clips_and_vertical_canvas_are_deterministic(); }
-  catch (const std::exception& error) { std::fprintf(stderr, "transition boundaries: %s\n", error.what()); return 1; }
+  cross_dissolve_is_explicit_persistent_and_undoable();
+  invalid_transition_is_rejected_atomically();
+  dip_to_black_is_persistent_and_reaches_black_at_edit();
+  transition_boundaries_short_clips_and_vertical_canvas_are_deterministic();
 }

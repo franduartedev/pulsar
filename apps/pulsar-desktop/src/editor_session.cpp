@@ -746,7 +746,7 @@ void EditorSession::add_cross_dissolve_at_selected_edit() {
         outgoing = &clips[i - 1]; incoming = &clips[i];
       }
       if (outgoing == nullptr) throw std::invalid_argument{"selected clip has no adjacent edit"};
-      const auto half_second = domain::MediaTime{1, domain::Rational{2, 1}};
+      const auto half_second = domain::MediaTime{1, domain::Rational{1, 2}};
       auto duration = half_second;
       if (duration > outgoing->duration()) duration = outgoing->duration();
       if (duration > incoming->source_range().start()) duration = incoming->source_range().start();
@@ -777,7 +777,7 @@ void EditorSession::add_dip_to_black_at_selected_edit() {
         outgoing = &clips[i - 1]; incoming = &clips[i];
       }
       if (!outgoing) throw std::invalid_argument{"selected clip has no adjacent edit"};
-      auto duration = domain::MediaTime{1, domain::Rational{2, 1}};
+      auto duration = domain::MediaTime{1, domain::Rational{1, 2}};
       if (duration > outgoing->duration()) duration = outgoing->duration();
       if (duration > incoming->duration()) duration = incoming->duration();
       if (duration <= domain::MediaTime::zero()) throw std::invalid_argument{"clips are too short for a dip"};
