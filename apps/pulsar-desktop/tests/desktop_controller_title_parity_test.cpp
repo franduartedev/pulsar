@@ -277,9 +277,14 @@ int main(int argc, char** argv) {
       const auto raster = QtTitleRasterizer::rasterizeWithBlock(title, width, height, &block);
       const int safe_x = std::max(12, static_cast<int>(std::lround(width * (preset == 0 ? 0.05 : 0.06))));
       const int safe_y = std::max(12, static_cast<int>(std::lround(height * (preset == 0 ? 0.06 : 0.07))));
-      REQUIRE(80 + preset, raster && block.width() > 0 && block.height() > 0 &&
-              block.left() >= safe_x && block.top() >= safe_y &&
-              block.right() < width - safe_x && block.bottom() < height - safe_y);
+      const bool inside_safe_area = raster && block.width() > 0 && block.height() > 0 &&
+          block.left() >= safe_x && block.top() >= safe_y &&
+          block.right() < width - safe_x && block.bottom() < height - safe_y;
+      if (!inside_safe_area) {
+        std::fprintf(stderr, "TITLES safe block preset=%d canvas=%dx%d block=%d,%d %dx%d safe=%d,%d\n",
+                     preset, width, height, block.x(), block.y(), block.width(), block.height(), safe_x, safe_y);
+      }
+      REQUIRE(80 + preset, inside_safe_area);
     }
   }
   // A free-standing preset subtitle receives its own dark contrast plate; this

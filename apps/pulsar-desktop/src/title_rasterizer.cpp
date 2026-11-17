@@ -191,7 +191,8 @@ std::optional<pulsar::application::composition::TitleRaster> QtTitleRasterizer::
   const bool boxed = title.background() != pulsar::domain::TitleBackground::None;
   const int box_pad_x = boxed ? static_cast<int>(std::lround(font_px * 0.45)) : 0;
   const int box_pad_y = boxed ? static_cast<int>(std::lround(font_px * 0.25)) : 0;
-  const double max_width = std::max(16, canvas_width - 2 * side_margin - 2 * box_pad_x);
+  // Leave room for the two-pixel measurement guard added to text_w below.
+  const double max_width = std::max(16, canvas_width - 2 * side_margin - 2 * box_pad_x - 2);
   const int qt_alignment = title.horizontal() == TitleHAlign::Left ? Qt::AlignLeft
                           : title.horizontal() == TitleHAlign::Right ? Qt::AlignRight : Qt::AlignHCenter;
   font = fit_font_to_width(font, text, static_cast<int>(max_width));
