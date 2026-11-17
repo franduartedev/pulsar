@@ -73,10 +73,10 @@ std::optional<pulsar::application::composition::TitleRaster> QtTitleRasterizer::
     QImage measure_image{1, 1, QImage::Format_ARGB32_Premultiplied};
     QPainter measure{&measure_image};
     measure.setFont(font);
-    const QRectF primary_bounds = measure.boundingRect(QRectF{0, 0, max_width, 100000}, Qt::TextWordWrap, primary);
+    const QRectF primary_bounds = measure.boundingRect(QRectF{0.0, 0.0, static_cast<qreal>(max_width), 100000.0}, Qt::TextWordWrap, primary);
     measure.setFont(secondary_font);
     const QRectF secondary_bounds = secondary.isEmpty() ? QRectF{} :
-        measure.boundingRect(QRectF{0, 0, max_width, 100000}, Qt::TextWordWrap, secondary);
+        measure.boundingRect(QRectF{0.0, 0.0, static_cast<qreal>(max_width), 100000.0}, Qt::TextWordWrap, secondary);
     measure.end();
     const int pad_x = std::max(10, static_cast<int>(std::lround(font_px * (card ? 0.48 : 0.16))));
     const int pad_y = std::max(8, static_cast<int>(std::lround(font_px * (card ? 0.34 : 0.14))));
@@ -108,7 +108,7 @@ std::optional<pulsar::application::composition::TitleRaster> QtTitleRasterizer::
     const double line_w = hero ? std::min<double>(content_w * 0.28, font_px * 3.0) : image_w - 2.0 * (pad_x + shadow_pad);
     const double line_x = hero ? (image_w - line_w) / 2.0 : pad_x + shadow_pad;
     painter.setPen(Qt::NoPen); painter.setBrush(accent_color);
-    painter.drawRoundedRect(QRectF{line_x, pad_y + shadow_pad, line_w, accent_h}, accent_h / 2.0, accent_h / 2.0);
+    painter.drawRoundedRect(QRectF{line_x, static_cast<qreal>(pad_y + shadow_pad), line_w, static_cast<qreal>(accent_h)}, accent_h / 2.0, accent_h / 2.0);
     const int flags = (hero ? Qt::AlignHCenter : Qt::AlignLeft) | Qt::TextWordWrap;
     const QRectF primary_rect{static_cast<double>(pad_x + shadow_pad), static_cast<double>(pad_y + shadow_pad + accent_h + gap),
                               static_cast<double>(image_w - 2 * (pad_x + shadow_pad)), primary_bounds.height() + 3};
