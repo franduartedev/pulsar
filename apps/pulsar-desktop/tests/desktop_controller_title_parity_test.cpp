@@ -17,6 +17,7 @@
 #include <QTimer>
 
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
@@ -269,7 +270,7 @@ int main(int argc, char** argv) {
   const std::pair<int, int> canvases[] = {{1920, 1080}, {1080, 1920}, {720, 1280}, {1080, 1080}};
   for (const auto& [width, height] : canvases) {
     for (int preset = 0; preset <= 4; ++preset) {
-      const auto title = pulsar::domain::Title{pulsar::domain::TitleId{100 + preset}, unbreakable, range, 200,
+      const auto title = pulsar::domain::Title{pulsar::domain::TitleId{static_cast<std::uint64_t>(100 + preset)}, unbreakable, range, 200,
           0xFFD84DFFu, pulsar::domain::TitleHAlign::Center, pulsar::domain::TitleVAlign::Bottom, false,
           pulsar::domain::TitleBackground::None, 100, pulsar::domain::TitlePosition{500, 990},
           static_cast<pulsar::domain::TitlePreset>(preset), "SUBTITULO DE ALTO CONTRASTE", 0x59D9FFFFu};
