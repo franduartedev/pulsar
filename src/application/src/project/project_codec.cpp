@@ -217,6 +217,10 @@ std::string ProjectCodec::encode(const ProjectSnapshot& snapshot) {
   bool has_audio_effect_order = false;
   bool has_telephone_keyframes = false;
   bool has_fill = false;
+  const bool has_title_graphics = std::any_of(snapshot.titles.begin(), snapshot.titles.end(), [](const auto& title) {
+    return title.preset() != domain::TitlePreset::Classic || !title.secondary_text().empty() ||
+           title.accent_rgba() != 0x59D9FFFFu || title.motion() != domain::TitleMotion{};
+  });
   const bool has_dip_to_black = std::any_of(snapshot.transitions.begin(), snapshot.transitions.end(),
       [](const auto& transition) { return transition.type == domain::TransitionType::DipToBlack; });
   for (const auto& track : snapshot.timeline.tracks()) {
@@ -260,7 +264,7 @@ std::string ProjectCodec::encode(const ProjectSnapshot& snapshot) {
     }
   }
   // Version 4 adds clip fades; every file that does not need a newer feature keeps its old version.
-  const int version = has_dip_to_black ? 16 : has_fill ? 15 : has_telephone_keyframes ? 14 : has_audio_effect_order ? 13
+  const int version = has_title_graphics ? 17 : has_dip_to_black ? 16 : has_fill ? 15 : has_telephone_keyframes ? 14 : has_audio_effect_order ? 13
       : has_underwater_keyframes ? 12 : has_underwater ? 11 : has_telephone ? 10 : has_subtitles ? 9
       : has_distant_music_keyframes ? 8 : has_distant_music ? 7 : needs_v6_layout ? 6 : needs_v5 ? 5
       : needs_v4 ? 4 : has_titles ? 3 : 2;
@@ -454,6 +458,16 @@ std::string ProjectCodec::encode(const ProjectSnapshot& snapshot) {
       output << "TITLE_POS " << title.id().value() << ' ' << title.position()->x_permille << ' '
              << title.position()->y_permille << "\n";
     }
+    if (title.preset() != domain::TitlePreset::Classic || !title.secondary_text().empty() ||
+        title.accent_rgba() != 0x59D9FFFFu || title.motion() != domain::TitleMotion{}) {
+      output << "TITLE_GRAPHICS " << title.id().value() << ' ' << static_cast<int>(title.preset()) << ' '
+             << title.accent_rgba() << ' ' << quote(title.secondary_text()) << ' '
+             << static_cast<int>(title.motion().in) << ' ' << static_cast<int>(title.motion().out) << ' ';
+      append_time(output, title.motion().in_duration);
+      output << ' ';
+      append_time(output, title.motion().out_duration);
+      output << "\n";
+    }
   }
 
   for (const auto& subtitle : snapshot.subtitles) {
@@ -498,6 +512,7 @@ ProjectRestoreState ProjectCodec::decode(std::string_view bytes) {
   bool version14 = false;
   bool version15 = false;
   bool version16 = false;
+  bool version17 = false;
   bool allocator = false;
   bool ended = false;
   enum class Section { Header, Timeline, Tracks, VideoTrack, VisualTracks, Assets, Clips, Transitions, Titles, Subtitles, Allocator, End };
@@ -532,11 +547,12 @@ ProjectRestoreState ProjectCodec::decode(std::string_view bytes) {
 
     try {
       if (tokens[0].text == "PULSAR_PROJECT") {
-        if (header || tokens.size() != 2 || (tokens[1].text != "1" && tokens[1].text != "2" && tokens[1].text != "3" && tokens[1].text != "4" && tokens[1].text != "5" && tokens[1].text != "6" && tokens[1].text != "7" && tokens[1].text != "8" && tokens[1].text != "9" && tokens[1].text != "10" && tokens[1].text != "11" && tokens[1].text != "12" && tokens[1].text != "13" && tokens[1].text != "14" && tokens[1].text != "15" && tokens[1].text != "16")) {
+        if (header || tokens.size() != 2 || (tokens[1].text != "1" && tokens[1].text != "2" && tokens[1].text != "3" && tokens[1].text != "4" && tokens[1].text != "5" && tokens[1].text != "6" && tokens[1].text != "7" && tokens[1].text != "8" && tokens[1].text != "9" && tokens[1].text != "10" && tokens[1].text != "11" && tokens[1].text != "12" && tokens[1].text != "13" && tokens[1].text != "14" && tokens[1].text != "15" && tokens[1].text != "16" && tokens[1].text != "17")) {
           parse_fail(line_number, "invalid header/version");
         }
         header = true;
-        version16 = tokens[1].text == "16";
+        version17 = tokens[1].text == "17";
+        version16 = tokens[1].text == "16" || version17;
         version15 = tokens[1].text == "15" || version16;
         version14 = tokens[1].text == "14" || version15;
         version13 = tokens[1].text == "13" || version14;
@@ -961,6 +977,31 @@ ProjectRestoreState ProjectCodec::decode(std::string_view bytes) {
         if (found == state.titles.end()) parse_fail(line_number, "invalid TITLE_POS value");
         try {
           *found = found->with_position(domain::TitlePosition{x, y});
+        } catch (const std::exception& error) {
+          parse_fail(line_number, error.what());
+        }
+      } else if (tokens[0].text == "TITLE_GRAPHICS") {
+        if (!version17 || section != Section::Titles || tokens.size() != 13 || !tokens[4].quoted) {
+          parse_fail(line_number, "invalid TITLE_GRAPHICS");
+        }
+        std::size_t i = 1;
+        const auto title_id = domain::TitleId{unsigned_number(tokens[i++], line_number, "title id")};
+        const auto preset = unsigned_number(tokens[i++], line_number, "title preset");
+        const auto accent = unsigned_number(tokens[i++], line_number, "title accent");
+        const auto secondary = tokens[i++].text;
+        const auto in_animation = unsigned_number(tokens[i++], line_number, "title in animation");
+        const auto out_animation = unsigned_number(tokens[i++], line_number, "title out animation");
+        const auto in_duration = media_time(tokens, i, line_number, "title in duration");
+        const auto out_duration = media_time(tokens, i, line_number, "title out duration");
+        const auto found = std::find_if(state.titles.begin(), state.titles.end(),
+                                        [title_id](const auto& item) { return item.id() == title_id; });
+        if (found == state.titles.end() || preset > 4 || accent > 0xFFFFFFFFull ||
+            in_animation > 5 || out_animation > 5) parse_fail(line_number, "invalid TITLE_GRAPHICS value");
+        try {
+          *found = found->with_graphics(static_cast<domain::TitlePreset>(preset), secondary,
+                                        static_cast<std::uint32_t>(accent))
+                       .with_motion({static_cast<domain::TitleAnimation>(in_animation),
+                                     static_cast<domain::TitleAnimation>(out_animation), in_duration, out_duration});
         } catch (const std::exception& error) {
           parse_fail(line_number, error.what());
         }

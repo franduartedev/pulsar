@@ -3495,6 +3495,13 @@ QVariantMap DesktopController::selectedTitle() const {
   map.insert("shadow", title->shadow());
   map.insert("background", static_cast<int>(title->background()));
   map.insert("opacity", title->opacity_percent());
+  map.insert("preset", static_cast<int>(title->preset()));
+  map.insert("secondary", QString::fromUtf8(title->secondary_text().data(), static_cast<qsizetype>(title->secondary_text().size())));
+  map.insert("accent", QStringLiteral("#%1").arg(title->accent_rgba() >> 8, 6, 16, QLatin1Char('0')).toUpper());
+  map.insert("inAnimation", static_cast<int>(title->motion().in));
+  map.insert("outAnimation", static_cast<int>(title->motion().out));
+  map.insert("inSeconds", static_cast<double>(title->motion().in_duration));
+  map.insert("outSeconds", static_cast<double>(title->motion().out_duration));
   map.insert("hasPosition", title->position().has_value());
   // The visible block in permille of the frame, so the Viewer can draw its drag handle exactly
   // where the compositor puts it (one layout pass, only when the selection or the title changes).
@@ -3547,9 +3554,13 @@ void DesktopController::commitTitle(pulsar::domain::Title title) {
 }
 
 void DesktopController::addTitle() {
+  addTitlePreset(static_cast<int>(pulsar::domain::TitlePreset::Classic));
+}
+
+void DesktopController::addTitlePreset(int preset) {
   if (!active_session_) return;
   try {
-    (void)active_session_->add_title_at_playhead();
+    (void)active_session_->add_title_at_playhead(static_cast<pulsar::domain::TitlePreset>(std::clamp(preset, 0, 4)));
     clearError();
     clearProgram(has_video_media_ ? "loading" : "empty");
     publishTimeline();
@@ -3623,6 +3634,32 @@ void DesktopController::setSelectedTitleLook(int background, int opacity_percent
   const int opacity = std::clamp(opacity_percent, pulsar::domain::Title::minimum_opacity_percent, pulsar::domain::Title::maximum_opacity_percent);
   if (box == title->background() && opacity == title->opacity_percent()) return;
   commitTitle(title->with_look(box, opacity));
+}
+
+void DesktopController::setSelectedTitleGraphics(int preset, const QString& secondary, const QString& accent) {
+  if (!active_session_ || !active_session_->selected_title()) return;
+  const auto* title = active_session_->document().find_title(*active_session_->selected_title());
+  if (title == nullptr) return;
+  const QColor parsed{accent};
+  const std::uint32_t rgba = parsed.isValid() ? (static_cast<std::uint32_t>(parsed.red()) << 24) |
+      (static_cast<std::uint32_t>(parsed.green()) << 16) | (static_cast<std::uint32_t>(parsed.blue()) << 8) | 0xFFu : title->accent_rgba();
+  const auto bytes = secondary.toUtf8();
+  std::string text{bytes.constData(), static_cast<std::size_t>(bytes.size())};
+  if (text.size() > pulsar::domain::Title::maximum_text_bytes) text.resize(pulsar::domain::Title::maximum_text_bytes);
+  const auto kind = static_cast<pulsar::domain::TitlePreset>(std::clamp(preset, 0, 4));
+  if (kind != title->preset() || text != title->secondary_text() || rgba != title->accent_rgba())
+    commitTitle(title->with_graphics(kind, std::move(text), rgba));
+}
+
+void DesktopController::setSelectedTitleMotion(int in_animation, int out_animation, double in_seconds, double out_seconds) {
+  if (!active_session_ || !active_session_->selected_title() || !std::isfinite(in_seconds) || !std::isfinite(out_seconds)) return;
+  const auto* title = active_session_->document().find_title(*active_session_->selected_title());
+  if (title == nullptr) return;
+  const auto duration = [](double seconds) { return pulsar::domain::MediaTime{
+      static_cast<std::int64_t>(std::llround(std::clamp(seconds, 0.0, 30.0) * 1000.0)), pulsar::domain::Rational{1, 1000}}; };
+  const pulsar::domain::TitleMotion motion{static_cast<pulsar::domain::TitleAnimation>(std::clamp(in_animation, 0, 5)),
+      static_cast<pulsar::domain::TitleAnimation>(std::clamp(out_animation, 0, 5)), duration(in_seconds), duration(out_seconds)};
+  if (motion != title->motion()) commitTitle(title->with_motion(motion));
 }
 
 // Candidate edges for title snapping: zero, the playhead, every video/audio clip edge and the

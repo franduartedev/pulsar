@@ -30,6 +30,22 @@ struct TitleRaster {
   std::vector<std::uint8_t> premultiplied_rgba;  // width * height * 4, tightly packed
 };
 
+struct TitleAnimationState {
+  double opacity{1.0};
+  double scale{1.0};
+  int translate_x{0};
+  int translate_y{0};
+};
+
+// Deterministic motion state at a timeline instant. The returned state is
+// independent of preview playback and is reused unchanged by export.
+[[nodiscard]] TitleAnimationState evaluate_title_animation(const domain::Title& title,
+                                                            domain::MediaTime time,
+                                                            int canvas_width, int canvas_height);
+// Applies opacity, translation and a constrained scale to a cached raster.
+[[nodiscard]] TitleRaster transform_title_raster(const TitleRaster& raster,
+                                                 TitleAnimationState state);
+
 // Port: turns a title into pixels for a canvas of a given size. The Qt/font implementation
 // lives in the desktop adapter; preview and export use the SAME implementation and the same
 // compositor below, so what you see is what is exported.
@@ -70,6 +86,7 @@ private:
   std::list<Entry> cache_;  // most recent first
   std::uint64_t raster_count_{0};
   std::uint64_t blend_count_{0};
+  std::uint64_t transform_count_{0};
 };
 
 // ---- Letterbox geometry shared by export and preview -----------------------------------

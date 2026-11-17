@@ -391,8 +391,9 @@ public:
   Q_INVOKABLE void flushRecovery() { recovery_.flush(); }
   [[nodiscard]] qulonglong recoveryWriteCount() const { return recovery_.writes_completed(); }
   [[nodiscard]] QString recoveryDirectory() const { return QString::fromStdString(recovery_.store().directory().string()); }
-  // ---- Titles v0: static text over the video (see docs/release for scope) -------------------
+  // ---- Titles and motion graphics -------------------------------------------------------------
   Q_INVOKABLE void addTitle();                         // at the playhead
+  Q_INVOKABLE void addTitlePreset(int preset);          // 0 classic, 1 hero, 2 lower third, 3 stat, 4 chapter
   Q_INVOKABLE void selectTitle(const QString& key);
   Q_INVOKABLE void deleteSelectedTitle();
   Q_INVOKABLE void setSelectedTitleText(const QString& text);
@@ -401,6 +402,8 @@ public:
   Q_INVOKABLE void setSelectedTitlePosition(int x_permille, int y_permille);   // block centre, permille of the frame
   Q_INVOKABLE void resetSelectedTitlePosition();                                // back to the alignment presets
   Q_INVOKABLE void setSelectedTitleLook(int background, int opacity_percent);   // 0 none / 1 dark / 2 light box
+  Q_INVOKABLE void setSelectedTitleGraphics(int preset, const QString& secondary, const QString& accent);
+  Q_INVOKABLE void setSelectedTitleMotion(int in_animation, int out_animation, double in_seconds, double out_seconds);
   Q_INVOKABLE QVariantMap previewTitleMove(const QString& key, double press, double current, double width);
   Q_INVOKABLE void moveTitle(const QString& key, double press, double current, double width);
   Q_INVOKABLE QVariantMap previewTitleTrim(const QString& key, bool trim_start, double pixel, double width);

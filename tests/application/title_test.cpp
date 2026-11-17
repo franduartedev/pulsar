@@ -310,6 +310,37 @@ void title_position_rules_and_persistence() {
   assert(application::ProjectCodec::encode(simple.snapshot()).rfind("PULSAR_PROJECT 3\n", 0) == 0);
 }
 
+void title_motion_and_graphics_persistence() {
+  const domain::TitleMotion motion{domain::TitleAnimation::Fade, domain::TitleAnimation::SlideFromRight,
+                                   ms(350), ms(250)};
+  const Title title{TitleId{1}, "ZONALERO", TimeRange{secs(1), secs(3)}, 100, 0xFFFFFFFFu,
+                    domain::TitleHAlign::Center, domain::TitleVAlign::Middle, true,
+                    domain::TitleBackground::None, 100, std::nullopt,
+                    domain::TitlePreset::Hero, "DEVLOG 003 — EN DESARROLLO", 0x59D9FFFFu, motion};
+  assert(title.look_key() == title.with_motion({}).look_key()); // motion does not invalidate the cached appearance
+  const auto first = composition::evaluate_title_animation(title, secs(1), 1920, 1080);
+  const auto middle = composition::evaluate_title_animation(title, ms(1500), 1920, 1080);
+  const auto last = composition::evaluate_title_animation(title, ms(2900), 1920, 1080);
+  assert(first.opacity == 0.0 && middle.opacity == 1.0 && last.translate_x > 0);
+  // Short titles proportionally share their available interval; no negative or discontinuous phase.
+  const Title short_title = title.with_range(TimeRange{secs(1), ms(1200)});
+  const auto short_middle = composition::evaluate_title_animation(short_title, ms(1100), 1920, 1080);
+  assert(short_middle.opacity >= 0.0 && short_middle.opacity <= 1.0);
+
+  application::ProjectDocument document;
+  application::CommandProcessor processor{document};
+  const auto media = processor.import_asset("v.mp4", Probe{320, 180, 10});
+  (void)processor.add_clip(media, TimeRange{MediaTime::zero(), secs(10)}, MediaTime::zero());
+  (void)processor.add_title(title);
+  const auto bytes = application::ProjectCodec::encode(document.snapshot());
+  assert(bytes.rfind("PULSAR_PROJECT 17\n", 0) == 0 && bytes.find("TITLE_GRAPHICS 1 1") != std::string::npos);
+  const auto restored = application::ProjectDocument::restore(application::ProjectCodec::decode(bytes));
+  assert(restored.titles()[0].preset() == domain::TitlePreset::Hero);
+  assert(restored.titles()[0].secondary_text() == "DEVLOG 003 — EN DESARROLLO");
+  assert(restored.titles()[0].motion() == motion);
+  assert(application::ProjectCodec::encode(restored.snapshot()) == bytes);
+}
+
 void export_preset_sizing() {
   using application::exporting::ExportPlan;
   using application::exporting::ExportProfile;
@@ -381,6 +412,7 @@ int main() {
   compositor_blend_cache_and_failure();
   title_look_rules_and_persistence();
   title_position_rules_and_persistence();
+  title_motion_and_graphics_persistence();
   export_preset_sizing();
   fit_geometry_cases();
   return 0;

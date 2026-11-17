@@ -597,7 +597,7 @@ void EditorSession::select_title(std::optional<domain::TitleId> title) {
   }
 }
 
-domain::TitleId EditorSession::add_title_at_playhead() {
+domain::TitleId EditorSession::add_title_at_playhead(domain::TitlePreset preset) {
   const auto total = timeline_duration();
   const auto start = playback_position();
   if (total <= domain::MediaTime::zero() || start >= total) {
@@ -613,7 +613,36 @@ domain::TitleId EditorSession::add_title_at_playhead() {
     throw TitleException{TitleError::NoSpace, "no room for a title here"};
   }
   const auto id = document_.next_title_id();
-  const auto created = processor_.add_title(domain::Title{id, "Título", domain::TimeRange{start, end}});
+  domain::Title title{id, "Título", domain::TimeRange{start, end}};
+  const domain::TitleMotion soft_reveal{domain::TitleAnimation::ScaleReveal, domain::TitleAnimation::Fade,
+                                        domain::MediaTime{35, domain::Rational{1, 100}},
+                                        domain::MediaTime{25, domain::Rational{1, 100}}};
+  switch (preset) {
+    case domain::TitlePreset::Classic: break;
+    case domain::TitlePreset::Hero:
+      title = title.with_text("TÍTULO").with_style(105, 0xFFFFFFFFu, domain::TitleHAlign::Center,
+          domain::TitleVAlign::Middle, true).with_graphics(preset, "SUBTÍTULO", 0x59D9FFFFu).with_motion(soft_reveal);
+      break;
+    case domain::TitlePreset::LowerThird:
+      title = title.with_text("NOMBRE").with_style(58, 0xFFFFFFFFu, domain::TitleHAlign::Left,
+          domain::TitleVAlign::Bottom, true).with_look(domain::TitleBackground::Dark, 100)
+          .with_graphics(preset, "ROL / DESCRIPCIÓN", 0x59D9FFFFu)
+          .with_motion({domain::TitleAnimation::SlideFromLeft, domain::TitleAnimation::SlideFromLeft,
+                        domain::MediaTime{35, domain::Rational{1, 100}}, domain::MediaTime{25, domain::Rational{1, 100}}});
+      break;
+    case domain::TitlePreset::StatCard:
+      title = title.with_text("00:00.000").with_style(88, 0xFFFFFFFFu, domain::TitleHAlign::Left,
+          domain::TitleVAlign::Bottom, true).with_look(domain::TitleBackground::Dark, 100)
+          .with_graphics(preset, "ETIQUETA", 0x59D9FFFFu).with_motion(soft_reveal);
+      break;
+    case domain::TitlePreset::ChapterLocation:
+      title = title.with_text("CAPÍTULO").with_style(78, 0xFFFFFFFFu, domain::TitleHAlign::Left,
+          domain::TitleVAlign::Middle, true).with_graphics(preset, "UBICACIÓN", 0x59D9FFFFu)
+          .with_motion({domain::TitleAnimation::Fade, domain::TitleAnimation::Fade,
+                        domain::MediaTime{35, domain::Rational{1, 100}}, domain::MediaTime{25, domain::Rational{1, 100}}});
+      break;
+  }
+  const auto created = processor_.add_title(std::move(title));
   selected_title_ = created;
   selected_clip_.reset();
   synchronize_document_state();

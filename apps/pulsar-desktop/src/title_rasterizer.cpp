@@ -5,6 +5,7 @@
 #include <QColor>
 #include <QFont>
 #include <QFontDatabase>
+#include <QFontMetricsF>
 #include <QImage>
 #include <QMutex>
 #include <QMutexLocker>
@@ -53,6 +54,94 @@ std::optional<pulsar::application::composition::TitleRaster> QtTitleRasterizer::
   font.setWeight(QFont::Bold);
   font.setHintingPreference(QFont::PreferNoHinting);   // same outlines at every resolution
   font.setStyleStrategy(QFont::PreferAntialias);
+
+  // Presets remain one raster and one title object. Their text and editorial
+  // shapes are drawn here once; frame-time motion is applied later by the
+  // shared compositor, preserving preview/export parity and cacheability.
+  if (title.preset() != pulsar::domain::TitlePreset::Classic) {
+    const QString primary = QString::fromUtf8(title.text().data(), static_cast<qsizetype>(title.text().size()));
+    const QString secondary = QString::fromUtf8(title.secondary_text().data(), static_cast<qsizetype>(title.secondary_text().size()));
+    const int safe_x = std::max(12, static_cast<int>(std::lround(canvas_width * 0.06)));
+    const int safe_y = std::max(12, static_cast<int>(std::lround(canvas_height * 0.07)));
+    const bool hero = title.preset() == pulsar::domain::TitlePreset::Hero;
+    const bool card = title.preset() == pulsar::domain::TitlePreset::LowerThird ||
+                      title.preset() == pulsar::domain::TitlePreset::StatCard;
+    const int max_width = std::max(48, static_cast<int>(canvas_width * (hero ? 0.86 : card ? 0.72 : 0.82)));
+    QFont secondary_font{font};
+    secondary_font.setPixelSize(std::max(10, static_cast<int>(std::lround(font_px * (hero ? 0.30 : 0.42)))));
+    secondary_font.setWeight(QFont::DemiBold);
+    QImage measure_image{1, 1, QImage::Format_ARGB32_Premultiplied};
+    QPainter measure{&measure_image};
+    measure.setFont(font);
+    const QRectF primary_bounds = measure.boundingRect(QRectF{0, 0, max_width, 100000}, Qt::TextWordWrap, primary);
+    measure.setFont(secondary_font);
+    const QRectF secondary_bounds = secondary.isEmpty() ? QRectF{} :
+        measure.boundingRect(QRectF{0, 0, max_width, 100000}, Qt::TextWordWrap, secondary);
+    measure.end();
+    const int pad_x = std::max(10, static_cast<int>(std::lround(font_px * (card ? 0.48 : 0.16))));
+    const int pad_y = std::max(8, static_cast<int>(std::lround(font_px * (card ? 0.34 : 0.14))));
+    const int accent_h = std::max(3, static_cast<int>(std::lround(font_px * 0.075)));
+    const int gap = secondary.isEmpty() ? 0 : std::max(4, static_cast<int>(std::lround(font_px * 0.14)));
+    const int content_w = std::max(static_cast<int>(std::ceil(primary_bounds.width())), static_cast<int>(std::ceil(secondary_bounds.width())));
+    const int content_h = static_cast<int>(std::ceil(primary_bounds.height() + secondary_bounds.height())) + gap;
+    const int shadow_pad = title.shadow() ? std::max(2, static_cast<int>(std::lround(font_px * 0.06))) : 0;
+    const int image_w = std::min(canvas_width, content_w + 2 * (pad_x + shadow_pad));
+    const int image_h = content_h + 2 * (pad_y + shadow_pad) + accent_h + std::max(3, gap);
+    if (image_w <= 0 || image_h <= 0 || static_cast<long long>(image_w) * image_h > 64LL * 1024 * 1024) return std::nullopt;
+    QImage image{image_w, image_h, QImage::Format_RGBA8888_Premultiplied};
+    image.fill(Qt::transparent);
+    QPainter painter{&image};
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    painter.setRenderHint(QPainter::TextAntialiasing, true);
+    painter.setOpacity(title.opacity_percent() / 100.0);
+    const QRectF visible{static_cast<double>(shadow_pad), static_cast<double>(shadow_pad),
+                         static_cast<double>(image_w - 2 * shadow_pad), static_cast<double>(image_h - 2 * shadow_pad)};
+    if (card || title.background() != pulsar::domain::TitleBackground::None) {
+      const bool light = title.background() == pulsar::domain::TitleBackground::Light;
+      painter.setPen(Qt::NoPen);
+      painter.setBrush(light ? QColor{255, 255, 255, 220} : QColor{8, 14, 25, card ? 205 : 165});
+      painter.drawRoundedRect(visible, font_px * 0.18, font_px * 0.18);
+    }
+    const auto accent = title.accent_rgba();
+    const QColor accent_color{static_cast<int>((accent >> 24) & 0xFF), static_cast<int>((accent >> 16) & 0xFF),
+                              static_cast<int>((accent >> 8) & 0xFF), static_cast<int>(accent & 0xFF)};
+    const double line_w = hero ? std::min<double>(content_w * 0.28, font_px * 3.0) : image_w - 2.0 * (pad_x + shadow_pad);
+    const double line_x = hero ? (image_w - line_w) / 2.0 : pad_x + shadow_pad;
+    painter.setPen(Qt::NoPen); painter.setBrush(accent_color);
+    painter.drawRoundedRect(QRectF{line_x, pad_y + shadow_pad, line_w, accent_h}, accent_h / 2.0, accent_h / 2.0);
+    const int flags = (hero ? Qt::AlignHCenter : Qt::AlignLeft) | Qt::TextWordWrap;
+    const QRectF primary_rect{static_cast<double>(pad_x + shadow_pad), static_cast<double>(pad_y + shadow_pad + accent_h + gap),
+                              static_cast<double>(image_w - 2 * (pad_x + shadow_pad)), primary_bounds.height() + 3};
+    if (title.shadow()) {
+      painter.setFont(font); painter.setPen(QColor{0, 0, 0, 170});
+      painter.drawText(primary_rect.translated(shadow_pad, shadow_pad), flags, primary);
+    }
+    const auto rgba = title.color_rgba();
+    painter.setFont(font); painter.setPen(QColor{static_cast<int>((rgba >> 24) & 0xFF), static_cast<int>((rgba >> 16) & 0xFF),
+                                                 static_cast<int>((rgba >> 8) & 0xFF), static_cast<int>(rgba & 0xFF)});
+    painter.drawText(primary_rect, flags, primary);
+    if (!secondary.isEmpty()) {
+      const QRectF secondary_rect{primary_rect.left(), primary_rect.bottom() + gap,
+                                  primary_rect.width(), secondary_bounds.height() + 3};
+      painter.setFont(secondary_font); painter.setPen(card ? accent_color : QColor{220, 230, 240, 230});
+      painter.drawText(secondary_rect, flags, secondary);
+    }
+    painter.end();
+    const int full_w = image_w - 2 * shadow_pad, full_h = image_h - 2 * shadow_pad;
+    int box_x = title.horizontal() == TitleHAlign::Left ? safe_x : title.horizontal() == TitleHAlign::Right ? canvas_width - safe_x - full_w : (canvas_width - full_w) / 2;
+    int box_y = title.vertical() == TitleVAlign::Top ? safe_y : title.vertical() == TitleVAlign::Middle ? (canvas_height - full_h) / 2 : canvas_height - safe_y - full_h;
+    if (const auto& free = title.position()) {
+      box_x = std::clamp(static_cast<int>(std::lround(free->x_permille / 1000.0 * canvas_width - full_w / 2.0)), 0, std::max(0, canvas_width - full_w));
+      box_y = std::clamp(static_cast<int>(std::lround(free->y_permille / 1000.0 * canvas_height - full_h / 2.0)), 0, std::max(0, canvas_height - full_h));
+    }
+    if (block != nullptr) *block = QRect{box_x, box_y, full_w, full_h};
+    pulsar::application::composition::TitleRaster raster;
+    raster.x = box_x - shadow_pad; raster.y = box_y - shadow_pad; raster.width = image_w; raster.height = image_h;
+    raster.premultiplied_rgba.resize(static_cast<std::size_t>(image_w) * image_h * 4);
+    for (int y = 0; y < image_h; ++y) std::copy_n(image.constScanLine(y), static_cast<std::size_t>(image_w) * 4,
+        raster.premultiplied_rgba.data() + static_cast<std::size_t>(y) * image_w * 4);
+    return raster;
+  }
 
   const QString text = QString::fromUtf8(title.text().data(), static_cast<qsizetype>(title.text().size()));
   const int side_margin = static_cast<int>(std::lround(canvas_width * 0.05));

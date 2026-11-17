@@ -161,6 +161,8 @@ Panel {
             ToolButton { glyph: "trash"; text: pane.compactToolbar ? "" : "Borrar"; tip: "Borrar (Supr)"; enabled: controller.selectedClipKey.length > 0 || controller.selectedTitleKey.length > 0; onClicked: controller.deleteSelectedClip() }
             ToolButton { glyph: "duplicate"; text: pane.compactToolbar ? "" : "Duplicar"; tip: "Duplicar el clip o título seleccionado, justo después (Ctrl+D)"; enabled: controller.canDuplicate; onClicked: controller.duplicateSelected() }
             ToolButton { glyph: "title"; text: pane.compactToolbar ? "" : "Título"; tip: "Agregar un título en el cabezal (T)"; enabled: controller.hasMedia; onClicked: controller.addTitle() }
+            ToolButton { glyph: "title"; text: pane.compactToolbar ? "" : "Hero"; tip: "Agregar Hero Title"; enabled: controller.hasMedia; onClicked: controller.addTitlePreset(1) }
+            ToolButton { glyph: "title"; text: pane.compactToolbar ? "" : "Lower"; tip: "Agregar Lower Third"; enabled: controller.hasMedia; onClicked: controller.addTitlePreset(2) }
             Rectangle { anchors.verticalCenter: parent.verticalCenter; width: 1; height: 16; color: Theme.borderStrong }
             ToolButton { glyph: "magnet"; text: pane.compactToolbar ? "" : "Snap"; toggle: true; tip: controller.snapEnabled ? "Imán activado: se ajusta a bordes y cabezal (N)" : "Imán desactivado (N)"; checked: controller.snapEnabled; onClicked: controller.snapEnabled = !controller.snapEnabled }
             Rectangle { anchors.verticalCenter: parent.verticalCenter; width: 1; height: 16; color: Theme.borderStrong }

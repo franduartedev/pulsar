@@ -276,6 +276,19 @@ Panel {
             }
 
             // ---- TÍTULO ------------------------------------------------------
+            InspectorSection {
+                visible: inspector.currentTab === 0 && !inspector.titleSelected
+                first: true; heading: "TÍTULOS Y GRÁFICOS"
+                Text { width: parent.width; wrapMode: Text.WordWrap; text: "Agregá un rótulo en el cabezal. Todo se edita después en este Inspector."; color: Theme.textSecondary; font.pixelSize: Theme.fontSizeS }
+                Flow {
+                    width: parent.width; spacing: Theme.spaceS
+                    PButton { width: 96; height: Theme.controlHeightSmall; text: "Clásico"; enabled: controller.hasMedia; onClicked: controller.addTitlePreset(0) }
+                    PButton { width: 96; height: Theme.controlHeightSmall; text: "Hero Title"; enabled: controller.hasMedia; onClicked: controller.addTitlePreset(1) }
+                    PButton { width: 96; height: Theme.controlHeightSmall; text: "Lower Third"; enabled: controller.hasMedia; onClicked: controller.addTitlePreset(2) }
+                    PButton { width: 96; height: Theme.controlHeightSmall; text: "Stat Card"; enabled: controller.hasMedia; onClicked: controller.addTitlePreset(3) }
+                    PButton { width: 112; height: Theme.controlHeightSmall; text: "Chapter / Location"; enabled: controller.hasMedia; onClicked: controller.addTitlePreset(4) }
+                }
+            }
             Column {
                 id: titleSection
                 visible: inspector.currentTab === 0 && inspector.titleSelected
@@ -286,7 +299,7 @@ Panel {
                 function cur(key, fallback) { return info && info[key] !== undefined ? info[key] : fallback }
 
                 InspectorSection {
-                    first: true; heading: "TEXTO"
+                    first: true; heading: "CONTENIDO"
                     Rectangle {
                         width: parent.width; height: 70
                         radius: Theme.radiusM; color: Theme.bgInput
@@ -313,6 +326,33 @@ Panel {
                         }
                     }
                     Text { width: parent.width; text: "Ctrl+Enter aplica el texto"; color: Theme.textMuted; font.pixelSize: Theme.fontSizeXS }
+                    Rectangle {
+                        width: parent.width; height: 52; radius: Theme.radiusM; color: Theme.bgInput
+                        border.width: 1; border.color: secondaryEdit.activeFocus ? Theme.focus : Theme.borderStrong
+                        TextEdit {
+                            id: secondaryEdit; anchors.fill: parent; anchors.margins: 8; wrapMode: TextEdit.Wrap
+                            color: Theme.textPrimary; selectionColor: Theme.accent; selectedTextColor: Theme.textOnAccent
+                            font.pixelSize: Theme.fontSizeS; text: titleSection.cur("secondary", "")
+                            onActiveFocusChanged: if (!activeFocus) controller.setSelectedTitleGraphics(titleSection.cur("preset", 0), text, titleSection.cur("accent", "#59D9FF"))
+                        }
+                    }
+                    Text { width: parent.width; text: "Texto secundario (subtítulo, rol o etiqueta)"; color: Theme.textMuted; font.pixelSize: Theme.fontSizeXS }
+                }
+
+                InspectorSection {
+                    heading: "DISEÑO"
+                    FieldRow {
+                        label: "Estilo"
+                        Segmented { width: 210; model: ["Clásico", "Hero", "Lower", "Stat", "Capítulo"]; current: titleSection.cur("preset", 0)
+                            onActivated: function(index) { controller.setSelectedTitleGraphics(index, titleSection.cur("secondary", ""), titleSection.cur("accent", "#59D9FF")) } }
+                    }
+                    FieldRow {
+                        label: "Acento"
+                        Repeater { model: ["#59D9FF", "#FFD84D", "#FF5A5A", "#6BE38B", "#FFFFFF"]
+                            delegate: Rectangle { width: 22; height: 22; radius: 11; color: modelData; border.width: titleSection.cur("accent", "") === modelData ? 2 : 1; border.color: Theme.borderStrong
+                                MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: controller.setSelectedTitleGraphics(titleSection.cur("preset", 0), titleSection.cur("secondary", ""), modelData) } }
+                        }
+                    }
                 }
 
                 InspectorSection {
@@ -520,6 +560,31 @@ Panel {
                     width: parent.width; height: Theme.controlHeightSmall
                     text: controller.selectedClipHasTransition ? "Quitar fundido cruzado" : "Agregar fundido cruzado"
                     onClicked: controller.selectedClipHasTransition ? controller.removeSelectedTransition() : controller.addCrossDissolve()
+                }
+                InspectorSection {
+                    heading: "ANIMACIÓN"
+                    FieldRow {
+                        label: "Entrada"
+                        Segmented { width: 210; model: ["Sin", "Fade", "←", "→", "↑", "Escala"]; current: titleSection.cur("inAnimation", 0)
+                            onActivated: function(index) { controller.setSelectedTitleMotion(index, titleSection.cur("outAnimation", 0), titleSection.cur("inSeconds", 0.35), titleSection.cur("outSeconds", 0.25)) } }
+                    }
+                    FieldRow {
+                        label: "Salida"
+                        Segmented { width: 210; model: ["Sin", "Fade", "←", "→", "↓", "Escala"]; current: titleSection.cur("outAnimation", 0)
+                            onActivated: function(index) { controller.setSelectedTitleMotion(titleSection.cur("inAnimation", 0), index, titleSection.cur("inSeconds", 0.35), titleSection.cur("outSeconds", 0.25)) } }
+                    }
+                    FieldRow {
+                        label: "Entrada"
+                        Stepper { valueText: Number(titleSection.cur("inSeconds", 0)).toFixed(2) + " s"
+                            onDecrement: controller.setSelectedTitleMotion(titleSection.info.inAnimation, titleSection.info.outAnimation, Math.max(0, titleSection.info.inSeconds - 0.05), titleSection.info.outSeconds)
+                            onIncrement: controller.setSelectedTitleMotion(titleSection.info.inAnimation, titleSection.info.outAnimation, titleSection.info.inSeconds + 0.05, titleSection.info.outSeconds) }
+                    }
+                    FieldRow {
+                        label: "Salida"
+                        Stepper { valueText: Number(titleSection.cur("outSeconds", 0)).toFixed(2) + " s"
+                            onDecrement: controller.setSelectedTitleMotion(titleSection.info.inAnimation, titleSection.info.outAnimation, titleSection.info.inSeconds, Math.max(0, titleSection.info.outSeconds - 0.05))
+                            onIncrement: controller.setSelectedTitleMotion(titleSection.info.inAnimation, titleSection.info.outAnimation, titleSection.info.inSeconds, titleSection.info.outSeconds + 0.05) }
+                    }
                 }
                 Row {
                     visible: !controller.selectedClipHasTransition

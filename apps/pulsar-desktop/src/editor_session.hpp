@@ -286,12 +286,12 @@ public:
   [[nodiscard]] domain::ClipId split_selected_at_playhead();
   void delete_selected();
 
-  // ---- Titles (static text over the video; one title track, titles never overlap) -------
+  // ---- Titles (one title track, titles never overlap) ------------------------------------
   [[nodiscard]] const std::vector<domain::Title>& titles() const noexcept { return document_.titles(); }
   [[nodiscard]] std::optional<domain::TitleId> selected_title() const noexcept { return selected_title_; }
   void select_title(std::optional<domain::TitleId> title);   // selecting a title deselects the clip
   // New title at the playhead: up to 3 s, shortened to the free room and to the end of the video.
-  domain::TitleId add_title_at_playhead();
+  domain::TitleId add_title_at_playhead(domain::TitlePreset preset = domain::TitlePreset::Classic);
   void replace_title(domain::Title title);                    // text / time / style: ONE undo step
   void delete_selected_title();
   [[nodiscard]] const std::vector<application::SubtitleCue>& subtitles() const noexcept {
