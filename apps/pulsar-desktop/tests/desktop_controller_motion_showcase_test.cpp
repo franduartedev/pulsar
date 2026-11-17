@@ -80,6 +80,14 @@ int main(int argc, char** argv) {
   const auto c = controller.agentAddClip(a_id, video_track, 7.5, 0.0, 4.0, &problem);
   const auto d = controller.agentAddClip(a_id, video_track, 11.5, 0.0, 4.0, &problem);
   REQUIRE(3, b && c && d);
+  // The new showcase deliberately opts into Fill for its horizontal technical
+  // fixtures before the portrait export. This demonstrates editorial crop
+  // control without silently changing old projects, whose default is Contain.
+  for (const auto& clip : {QString::number(first_clip), QString::number(*b), QString::number(*c), QString::number(*d)}) {
+    controller.selectTimelineClip(clip);
+    controller.setSelectedClipFitMode(QStringLiteral("fill"));
+    REQUIRE(3, controller.selectedClipFitMode() == QStringLiteral("fill"));
+  }
   controller.selectTimelineClip(QString::number(first_clip)); controller.addCrossDissolve();
   REQUIRE(4, controller.selectedTransitionType() == "crossfade");
   controller.selectTimelineClip(QString::number(*c)); controller.addDipToBlack();
@@ -140,6 +148,7 @@ int main(int argc, char** argv) {
            << "Media: labelled repository fixtures e6_video_a/b/rational; no unverified ZONALERO footage was substituted.\n"
            << "Presets: Classic, Hero, Lower Third, Stat Card, Chapter/Location.\n"
            << "Transitions: Crossfade at 4s; Dip to Black at 7.5s.\n"
+           << "Portrait framing: fixture clips explicitly set to Fill; existing projects remain Contain by default.\n"
            << "Validation: controller timeline seeks, preview captures, save/reopen, 16:9 and 9:16 exports.\n\nSHA256\n";
     write_checksum(report, destination / project.filename());
     write_checksum(report, destination / landscape.filename());

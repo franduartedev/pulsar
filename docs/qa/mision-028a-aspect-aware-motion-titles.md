@@ -32,7 +32,10 @@ compositor para ambos caminos.
 ## Evidencia esperada
 
 La prueba `pulsar.desktop.motion_showcase` regenera los MP4 16:9 y 9:16 y las
-diez capturas de presets en los artefactos `pulsar-*-motion-titles-qa`.
+diez capturas de presets en los artefactos `pulsar-*-motion-titles-qa`. Para
+el MP4 vertical, el fixture activa explícitamente `Fill` sobre sus cuatro
+clips horizontales: prueba el encuadre sin barras y su persistencia, sin
+modificar el valor por defecto `Contain` de proyectos existentes.
 Comparar sus PNG `preset-*-settled.png` con la evidencia de MISIÓN 027 antes
 de aprobar visualmente: el texto no debe recortarse y el secundario debe
 conservar legibilidad sobre fondo claro y oscuro. La CI confirma regresiones
