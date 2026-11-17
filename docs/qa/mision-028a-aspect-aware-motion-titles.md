@@ -41,9 +41,31 @@ de aprobar visualmente: el texto no debe recortarse y el secundario debe
 conservar legibilidad sobre fondo claro y oscuro. La CI confirma regresiones
 técnicas; no reemplaza esta revisión humana.
 
+## Resultado de validación final
+
+El commit funcional validado es `605c7bb`.
+
+- Linux CI: [44080310719](https://github.com/franduartedev/pulsar/actions/runs/44080310719) — **SUCCESS**. Incluye build, suite, captura de escritorio, showcase y paquete.
+- Windows CI: [44080316019](https://github.com/franduartedev/pulsar/actions/runs/44080316019) — **SUCCESS**. Incluye build MSVC, suite, bundle, smoke test, Agent Bridge y showcase.
+
+Artefactos descargados:
+
+| Plataforma | Directorio | MP4 16:9 SHA-256 | MP4 9:16 SHA-256 |
+| --- | --- | --- | --- |
+| Linux | `artifacts/motion-titles-028a-linux-44080310719/` | `961577a582a331c0b5dfe77264d66bff4e26b6d51675d03366010b9cb49036ca` | `3825e39d124c1d92a65e69338ddb9eb0b134a945cdb346d43c30fe502857a311` |
+| Windows | `artifacts/motion-titles-028a-windows-44080316019/` | `bb1a5f7660bbd45acd5e56ce1f7f9bd61a9aeb4545d838aee73c6721d3e93957` | `96938d78a6fdb793ac1c0b4d5ff30be2cf17d3edc39a03ac2d2ee8bbb11eb27d` |
+
+Revisión visual humana sobre los frames Linux: respecto del baseline 027,
+`ZONALERO` queda completo en 9:16, el subtítulo tiene una placa de contraste
+y el export de fixture con `Fill` elimina las bandas negras. La evidencia usa
+fixtures `e6_*` etiquetados del repositorio; no se declara como metraje
+ZONALERO verificado.
+
 ## Limitaciones pendientes
 
 - La placa de contraste es fija y deliberadamente conservadora; una futura
   medición dinámica de luminancia por fotograma no forma parte de 028A.
 - `Fill` usa el recorte y los controles Pos X/Y existentes; no añade
   keyframes. Eso queda reservado para MISIÓN 028B.
+- El runner Windows no tiene endpoint de audio habilitado; esa limitación fue
+  informada por CI y no afecta la validación de títulos o encuadre.
