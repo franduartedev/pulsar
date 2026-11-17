@@ -9,6 +9,7 @@
 #include <cassert>
 #include <array>
 #include <cmath>
+#include <cstdio>
 #include <map>
 #include <memory>
 
@@ -197,8 +198,12 @@ void transition_boundaries_short_clips_and_vertical_canvas_are_deterministic() {
 } // namespace
 
 int main() {
-  cross_dissolve_is_explicit_persistent_and_undoable();
-  invalid_transition_is_rejected_atomically();
-  dip_to_black_is_persistent_and_reaches_black_at_edit();
-  transition_boundaries_short_clips_and_vertical_canvas_are_deterministic();
+  try { cross_dissolve_is_explicit_persistent_and_undoable(); }
+  catch (const std::exception& error) { std::fprintf(stderr, "cross dissolve: %s\n", error.what()); return 1; }
+  try { invalid_transition_is_rejected_atomically(); }
+  catch (const std::exception& error) { std::fprintf(stderr, "invalid transition: %s\n", error.what()); return 1; }
+  try { dip_to_black_is_persistent_and_reaches_black_at_edit(); }
+  catch (const std::exception& error) { std::fprintf(stderr, "dip to black: %s\n", error.what()); return 1; }
+  try { transition_boundaries_short_clips_and_vertical_canvas_are_deterministic(); }
+  catch (const std::exception& error) { std::fprintf(stderr, "transition boundaries: %s\n", error.what()); return 1; }
 }
