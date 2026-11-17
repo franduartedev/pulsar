@@ -129,6 +129,7 @@ jobs:
           PULSAR_OVERLAY_EVIDENCE_DIR: ${{ runner.temp }}/pulsar-overlay-qa
           PULSAR_SOCIAL_EVIDENCE_DIR: ${{ runner.temp }}/pulsar-social-qa
           PULSAR_TRANSITION_EVIDENCE_DIR: ${{ runner.temp }}/pulsar-transition-qa
+          PULSAR_MOTION_TITLES_EVIDENCE_DIR: ${{ runner.temp }}/pulsar-motion-titles-qa
         run: ctest --test-dir build -C Release --output-on-failure
 
       # Packaging must not depend on the test gate: a runnable .exe is
@@ -356,6 +357,14 @@ jobs:
           name: pulsar-windows-transition-qa
           if-no-files-found: warn
           path: ${{ runner.temp }}/pulsar-transition-qa/
+
+      - name: Upload Motion Titles showcase evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pulsar-windows-motion-titles-qa
+          if-no-files-found: warn
+          path: ${{ runner.temp }}/pulsar-motion-titles-qa/
 
       - name: Upload Windows QA smoke evidence
         if: always()
