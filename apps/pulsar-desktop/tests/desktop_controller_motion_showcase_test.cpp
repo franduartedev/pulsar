@@ -67,16 +67,18 @@ int main(int argc, char** argv) {
                         QString::fromStdString((fixtures / "e6_video_rational.mp4").string())});
   REQUIRE(2, wait_until([&] { return controller.mediaAssets()->rowCount() == 3 && !controller.busy(); }));
 
-  // Four sequential clips create a 16 s real-video fixture timeline. The first
+  // Four sequential clips create a 15.5 s real-video fixture timeline. The first
   // and third joins receive the two transition types used in production.
   const auto track = controller.agentTimelineState().front().toMap();
   const auto video_track = track.value("id").toULongLong();
   const auto first_clip = track.value("clips").toList().front().toMap().value("id").toULongLong();
   QString problem;
   const auto a_id = asset_id(controller, "e6_video_a.mp4").toULongLong();
-  const auto b = controller.agentAddClip(a_id, video_track, 4.0, 0.5, 4.0, &problem);
-  const auto c = controller.agentAddClip(a_id, video_track, 8.0, 0.0, 4.0, &problem);
-  const auto d = controller.agentAddClip(a_id, video_track, 12.0, 0.0, 4.0, &problem);
+  // e6_video_a is exactly four seconds. Starting this copy at 0.5 s leaves
+  // 3.5 s of source audio/video, so never promise an out-of-range sample.
+  const auto b = controller.agentAddClip(a_id, video_track, 4.0, 0.5, 3.5, &problem);
+  const auto c = controller.agentAddClip(a_id, video_track, 7.5, 0.0, 4.0, &problem);
+  const auto d = controller.agentAddClip(a_id, video_track, 11.5, 0.0, 4.0, &problem);
   REQUIRE(3, b && c && d);
   controller.selectTimelineClip(QString::number(first_clip)); controller.addCrossDissolve();
   REQUIRE(4, controller.selectedTransitionType() == "crossfade");
@@ -137,7 +139,7 @@ int main(int argc, char** argv) {
     report << "MISIÓN 027 Motion Graphics Showcase\n"
            << "Media: labelled repository fixtures e6_video_a/b/rational; no unverified ZONALERO footage was substituted.\n"
            << "Presets: Classic, Hero, Lower Third, Stat Card, Chapter/Location.\n"
-           << "Transitions: Crossfade at 4s; Dip to Black at 8s.\n"
+           << "Transitions: Crossfade at 4s; Dip to Black at 7.5s.\n"
            << "Validation: controller timeline seeks, preview captures, save/reopen, 16:9 and 9:16 exports.\n\nSHA256\n";
     write_checksum(report, destination / project.filename());
     write_checksum(report, destination / landscape.filename());
