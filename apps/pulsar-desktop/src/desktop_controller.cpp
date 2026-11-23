@@ -2193,27 +2193,52 @@ void DesktopController::removeSelectedDistantMusicGainKeyframe(int index) {
 double DesktopController::selectedClipPosX() const {
   if (!active_session_ || !active_session_->selected_clip()) return 0.0;
   const auto* clip = active_session_->document().timeline().find_clip(*active_session_->selected_clip());
-  return clip ? clip->visual_transform().position_x : 0.0;
+  if (clip == nullptr) return 0.0;
+  const auto position = active_session_->playback_position();
+  return clip->timeline_range().contains(position)
+      ? pulsar::domain::evaluate_visual_transform(clip->visual_transform(),
+          secondsAsDouble(position - clip->timeline_range().start())).position_x
+      : clip->visual_transform().position_x;
 }
 double DesktopController::selectedClipPosY() const {
   if (!active_session_ || !active_session_->selected_clip()) return 0.0;
   const auto* clip = active_session_->document().timeline().find_clip(*active_session_->selected_clip());
-  return clip ? clip->visual_transform().position_y : 0.0;
+  if (clip == nullptr) return 0.0;
+  const auto position = active_session_->playback_position();
+  return clip->timeline_range().contains(position)
+      ? pulsar::domain::evaluate_visual_transform(clip->visual_transform(),
+          secondsAsDouble(position - clip->timeline_range().start())).position_y
+      : clip->visual_transform().position_y;
 }
 double DesktopController::selectedClipScale() const {
   if (!active_session_ || !active_session_->selected_clip()) return 1.0;
   const auto* clip = active_session_->document().timeline().find_clip(*active_session_->selected_clip());
-  return clip ? clip->visual_transform().scale : 1.0;
+  if (clip == nullptr) return 1.0;
+  const auto position = active_session_->playback_position();
+  return clip->timeline_range().contains(position)
+      ? pulsar::domain::evaluate_visual_transform(clip->visual_transform(),
+          secondsAsDouble(position - clip->timeline_range().start())).scale
+      : clip->visual_transform().scale;
 }
 double DesktopController::selectedClipRotation() const {
   if (!active_session_ || !active_session_->selected_clip()) return 0.0;
   const auto* clip = active_session_->document().timeline().find_clip(*active_session_->selected_clip());
-  return clip ? clip->visual_transform().rotation_degrees : 0.0;
+  if (clip == nullptr) return 0.0;
+  const auto position = active_session_->playback_position();
+  return clip->timeline_range().contains(position)
+      ? pulsar::domain::evaluate_visual_transform(clip->visual_transform(),
+          secondsAsDouble(position - clip->timeline_range().start())).rotation_degrees
+      : clip->visual_transform().rotation_degrees;
 }
 double DesktopController::selectedClipOpacity() const {
   if (!active_session_ || !active_session_->selected_clip()) return 1.0;
   const auto* clip = active_session_->document().timeline().find_clip(*active_session_->selected_clip());
-  return clip ? clip->visual_transform().opacity : 1.0;
+  if (clip == nullptr) return 1.0;
+  const auto position = active_session_->playback_position();
+  return clip->timeline_range().contains(position)
+      ? pulsar::domain::evaluate_visual_transform(clip->visual_transform(),
+          secondsAsDouble(position - clip->timeline_range().start())).opacity
+      : clip->visual_transform().opacity;
 }
 QVariantList DesktopController::selectedClipVisualKeyframes() const {
   QVariantList result;
@@ -2245,7 +2270,12 @@ QVariantMap DesktopController::selectedClipVisualGeometry() const {
   const auto asset = active_session_->document().find_asset(clip->media_id());
   if (!asset || !asset->has_video()) return result;
   const auto& canvas = *active_session_->document().canvas();
-  const auto& transform = clip->visual_transform();
+  auto transform = clip->visual_transform();
+  const auto position = active_session_->playback_position();
+  if (clip->timeline_range().contains(position)) {
+    transform = pulsar::domain::evaluate_visual_transform(transform,
+        secondsAsDouble(position - clip->timeline_range().start()));
+  }
   const auto geometry = pulsar::application::composition::visual_layer_geometry(
       asset->metadata().width, asset->metadata().height, canvas.width, canvas.height, transform);
   result.insert(QStringLiteral("centerX"), geometry.center_x / canvas.width);
@@ -2282,11 +2312,31 @@ void DesktopController::setSelectedClipTransform(double pos_x, double pos_y, dou
   const auto* current = active_session_->document().timeline().find_clip(
       *active_session_->selected_clip());
   auto transform = current ? current->visual_transform() : pulsar::domain::VisualTransform{};
-  transform.position_x = pos_x;
-  transform.position_y = pos_y;
-  transform.scale = scale;
-  transform.rotation_degrees = rotation_degrees;
-  transform.opacity = opacity;
+  // Once a clip is animated, direct inspector edits are local to the
+  // playhead: they create/replace an explicit keyframe instead of silently
+  // changing an unused base value.
+  const bool animated_on_screen = current != nullptr && !transform.keyframes.empty() &&
+      current->timeline_range().contains(active_session_->playback_position());
+  if (animated_on_screen) {
+    const double time = secondsAsDouble(active_session_->playback_position() - current->timeline_range().start());
+    pulsar::domain::VisualTransformKeyframe frame{time, pos_x, pos_y, scale, rotation_degrees,
+        opacity, pulsar::domain::KeyframeInterpolation::Linear};
+    const auto existing = std::find_if(transform.keyframes.begin(), transform.keyframes.end(),
+        [time](const auto& item) { return std::abs(item.time_seconds - time) < 0.0001; });
+    if (existing != transform.keyframes.end()) {
+      frame.interpolation = existing->interpolation;
+      *existing = frame;
+    } else {
+      transform.keyframes.insert(std::upper_bound(transform.keyframes.begin(), transform.keyframes.end(), time,
+          [](double value, const auto& item) { return value < item.time_seconds; }), frame);
+    }
+  } else {
+    transform.position_x = pos_x;
+    transform.position_y = pos_y;
+    transform.scale = scale;
+    transform.rotation_degrees = rotation_degrees;
+    transform.opacity = opacity;
+  }
   try {
     active_session_->set_clip_visual_transform(
         *active_session_->selected_clip(),
@@ -2349,6 +2399,21 @@ void DesktopController::setSelectedClipVisualKeyframe(int interpolation) {
   } catch (const std::exception& error) {
     logCause("visual keyframe edit failed", error);
     setError(QStringLiteral("El keyframe visual no es válido."));
+  }
+}
+void DesktopController::setSelectedClipVisualKeyframeInterpolation(int index, int interpolation) {
+  if (!active_session_ || !active_session_->selected_clip() || interpolation < 0 || interpolation > 2) return;
+  const auto* clip = active_session_->document().timeline().find_clip(*active_session_->selected_clip());
+  if (clip == nullptr || index < 0 || static_cast<std::size_t>(index) >= clip->visual_transform().keyframes.size()) return;
+  auto transform = clip->visual_transform();
+  transform.keyframes[static_cast<std::size_t>(index)].interpolation =
+      static_cast<pulsar::domain::KeyframeInterpolation>(interpolation);
+  try {
+    active_session_->set_clip_visual_transform(*active_session_->selected_clip(), transform);
+    clearError(); clearProgram(has_video_media_ ? "loading" : "empty"); publishTimeline();
+  } catch (const std::exception& error) {
+    logCause("visual keyframe interpolation edit failed", error);
+    setError(QStringLiteral("La interpolación del keyframe no es válida."));
   }
 }
 void DesktopController::removeSelectedClipVisualKeyframe(int index) {

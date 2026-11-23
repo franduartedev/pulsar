@@ -362,6 +362,8 @@ public:
                                               double rotation_degrees, double opacity);
   // Captures/replaces a transform keyframe at the selected clip-local playhead.
   Q_INVOKABLE void setSelectedClipVisualKeyframe(int interpolation);
+  // Changes the outgoing interpolation of an existing visual keyframe.
+  Q_INVOKABLE void setSelectedClipVisualKeyframeInterpolation(int index, int interpolation);
   Q_INVOKABLE void removeSelectedClipVisualKeyframe(int index);
   // Editorial framing mode: "contain" (Ajustar) or "fill" (Rellenar).
   Q_INVOKABLE void setSelectedClipFitMode(const QString& mode);

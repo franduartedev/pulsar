@@ -11,6 +11,7 @@ Panel {
     property string selRange: ""
     property bool detailsExpanded: false
     property int currentTab: 0 // 0 video, 1 audio, 2 effects
+    property int selectedVisualKeyframe: -1
 
     function setFx(gain, duration, startCutoff, endCutoff, reverb, curve, enabled) {
         controller.setSelectedDistantMusic(gain, duration, startCutoff, endCutoff, reverb, curve, enabled)
@@ -123,6 +124,7 @@ Panel {
         if (contextLabel === "AUDIO") currentTab = 1
         else if (contextLabel.length > 0 && currentTab !== 2) currentTab = 0
     }
+    onClipSelectedChanged: selectedVisualKeyframe = -1
 
     Rectangle {
         id: contextChip
@@ -437,6 +439,31 @@ Panel {
                         }
                     }
                 }
+                InspectorSection {
+                    heading: "ANIMACIÓN"
+                    FieldRow {
+                        label: "Entrada"
+                        Segmented { width: 210; model: ["Sin", "Fade", "←", "→", "↑", "Escala"]; current: titleSection.cur("inAnimation", 0)
+                            onActivated: function(index) { controller.setSelectedTitleMotion(index, titleSection.cur("outAnimation", 0), titleSection.cur("inSeconds", 0.35), titleSection.cur("outSeconds", 0.25)) } }
+                    }
+                    FieldRow {
+                        label: "Salida"
+                        Segmented { width: 210; model: ["Sin", "Fade", "←", "→", "↓", "Escala"]; current: titleSection.cur("outAnimation", 0)
+                            onActivated: function(index) { controller.setSelectedTitleMotion(titleSection.cur("inAnimation", 0), index, titleSection.cur("inSeconds", 0.35), titleSection.cur("outSeconds", 0.25)) } }
+                    }
+                    FieldRow {
+                        label: "Entrada"
+                        Stepper { valueText: Number(titleSection.cur("inSeconds", 0)).toFixed(2) + " s"
+                            onDecrement: controller.setSelectedTitleMotion(titleSection.info.inAnimation, titleSection.info.outAnimation, Math.max(0, titleSection.info.inSeconds - 0.05), titleSection.info.outSeconds)
+                            onIncrement: controller.setSelectedTitleMotion(titleSection.info.inAnimation, titleSection.info.outAnimation, titleSection.info.inSeconds + 0.05, titleSection.info.outSeconds) }
+                    }
+                    FieldRow {
+                        label: "Salida"
+                        Stepper { valueText: Number(titleSection.cur("outSeconds", 0)).toFixed(2) + " s"
+                            onDecrement: controller.setSelectedTitleMotion(titleSection.info.inAnimation, titleSection.info.outAnimation, titleSection.info.inSeconds, Math.max(0, titleSection.info.outSeconds - 0.05))
+                            onIncrement: controller.setSelectedTitleMotion(titleSection.info.inAnimation, titleSection.info.outAnimation, titleSection.info.inSeconds, titleSection.info.outSeconds + 0.05) }
+                    }
+                }
                 Text { width: parent.width; wrapMode: Text.WordWrap; text: "Mové o recortá el título en su pista. Ctrl+D lo duplica."; color: Theme.textMuted; font.pixelSize: Theme.fontSizeXS }
             }
 
@@ -555,21 +582,72 @@ Panel {
                         onIncrement: controller.setSelectedClipTransform(controller.selectedClipPosX, controller.selectedClipPosY, controller.selectedClipScale, controller.selectedClipRotation, Math.min(1, controller.selectedClipOpacity + 0.05))
                     }
                 }
-                PButton {
-                    width: parent.width; height: Theme.controlHeightSmall
-                    text: "Agregar keyframe visual (lineal)"
-                    enabled: controller.selectedClipOnScreen
-                    onClicked: controller.setSelectedClipVisualKeyframe(1)
+                PButton { width: parent.width; height: Theme.controlHeightSmall; text: "Restablecer transformación y animación"; onClicked: controller.resetSelectedClipTransform() }
+                Text { width: parent.width; wrapMode: Text.WordWrap; text: "Estos valores son controles de precisión. La posición usa el ancho y alto del lienzo; el giro está en grados."; color: Theme.textMuted; font.pixelSize: Theme.fontSizeXS }
+            }
+
+            InspectorSection {
+                visible: inspector.currentTab === 0 && inspector.clipSelected && controller.selectedClipKind !== "audio"
+                heading: "ANIMACIÓN · KEYFRAMES"
+                Row {
+                    width: parent.width; spacing: Theme.spaceS
+                    PButton {
+                        width: (parent.width - Theme.spaceS) * 0.62; height: Theme.controlHeightSmall
+                        primary: true
+                        text: controller.selectedClipVisualKeyframes.length === 0 ? "Crear primer keyframe" : "Agregar / actualizar en el cabezal"
+                        enabled: controller.selectedClipOnScreen
+                        onClicked: controller.setSelectedClipVisualKeyframe(1)
+                    }
+                    PButton {
+                        width: (parent.width - Theme.spaceS) * 0.38; height: Theme.controlHeightSmall
+                        text: "Suave"
+                        enabled: controller.selectedClipOnScreen
+                        onClicked: controller.setSelectedClipVisualKeyframe(2)
+                    }
                 }
                 Text {
                     width: parent.width; wrapMode: Text.WordWrap
                     text: controller.selectedClipVisualKeyframes.length === 0
-                        ? "Creá un keyframe en el cabezal actual para animar posición, escala, giro y opacidad."
-                        : controller.selectedClipVisualKeyframes.length + " keyframe(s) visual(es). La interpolación se evalúa igual en preview y export."
+                        ? "Creá valores en dos instantes del clip. Posición, escala, giro y opacidad se interpolan en preview y export."
+                        : controller.selectedClipVisualKeyframes.length + " keyframes · editar controles sobre un clip animado crea una clave en el cabezal."
                     color: Theme.textMuted; font.pixelSize: Theme.fontSizeXS
                 }
-                PButton { width: parent.width; height: Theme.controlHeightSmall; text: "Restablecer"; onClicked: controller.resetSelectedClipTransform() }
-                Text { width: parent.width; wrapMode: Text.WordWrap; text: "Estos valores son controles de precisión. La posición usa el ancho y alto del lienzo; el giro está en grados."; color: Theme.textMuted; font.pixelSize: Theme.fontSizeXS }
+                Repeater {
+                    model: controller.selectedClipVisualKeyframes
+                    delegate: Rectangle {
+                        required property var modelData
+                        required property int index
+                        width: parent.width; height: keyframeDetails.visible ? 76 : 38
+                        radius: Theme.radiusM
+                        color: inspector.selectedVisualKeyframe === index ? Theme.accentDim : (keyframeMouse.containsMouse ? Theme.bgHover : Theme.bgInput)
+                        border.width: 1
+                        border.color: inspector.selectedVisualKeyframe === index ? Theme.accent : Theme.borderStrong
+                        Behavior on height { NumberAnimation { duration: Theme.motionFast } }
+                        Row {
+                            z: 1
+                            anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top
+                            anchors.margins: Theme.spaceS; height: 22; spacing: Theme.spaceS
+                            Text { width: 62; anchors.verticalCenter: parent.verticalCenter; text: Number(modelData.time).toFixed(2) + " s"; color: Theme.textPrimary; font.family: Theme.mono; font.pixelSize: Theme.fontSizeS; font.bold: true }
+                            Text { width: parent.width - 62 - 28 - 2 * Theme.spaceS; anchors.verticalCenter: parent.verticalCenter; elide: Text.ElideRight; text: "X " + Number(modelData.x).toFixed(2) + " · Y " + Number(modelData.y).toFixed(2) + " · " + Number(modelData.scale).toFixed(2) + "× · " + Math.round(Number(modelData.rotation)) + "°"; color: Theme.textSecondary; font.pixelSize: Theme.fontSizeXS }
+                            PButton { width: 24; height: 22; text: "×"; onClicked: { controller.removeSelectedClipVisualKeyframe(index); inspector.selectedVisualKeyframe = -1 } }
+                        }
+                        MouseArea { id: keyframeMouse; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: inspector.selectedVisualKeyframe = inspector.selectedVisualKeyframe === index ? -1 : index }
+                        Row {
+                            id: keyframeDetails
+                            z: 1
+                            visible: inspector.selectedVisualKeyframe === index
+                            anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom
+                            anchors.margins: Theme.spaceS; height: 24; spacing: Theme.spaceS
+                            Text { width: 76; anchors.verticalCenter: parent.verticalCenter; text: "Salida"; color: Theme.textMuted; font.pixelSize: Theme.fontSizeXS }
+                            Segmented {
+                                width: parent.width - 76 - Theme.spaceS
+                                model: ["Mantener", "Lineal", "Suave"]
+                                current: Number(modelData.interpolation)
+                                onActivated: function(choice) { controller.setSelectedClipVisualKeyframeInterpolation(index, choice) }
+                            }
+                        }
+                    }
+                }
             }
 
             InspectorSection {
@@ -579,31 +657,6 @@ Panel {
                     width: parent.width; height: Theme.controlHeightSmall
                     text: controller.selectedClipHasTransition ? "Quitar fundido cruzado" : "Agregar fundido cruzado"
                     onClicked: controller.selectedClipHasTransition ? controller.removeSelectedTransition() : controller.addCrossDissolve()
-                }
-                InspectorSection {
-                    heading: "ANIMACIÓN"
-                    FieldRow {
-                        label: "Entrada"
-                        Segmented { width: 210; model: ["Sin", "Fade", "←", "→", "↑", "Escala"]; current: titleSection.cur("inAnimation", 0)
-                            onActivated: function(index) { controller.setSelectedTitleMotion(index, titleSection.cur("outAnimation", 0), titleSection.cur("inSeconds", 0.35), titleSection.cur("outSeconds", 0.25)) } }
-                    }
-                    FieldRow {
-                        label: "Salida"
-                        Segmented { width: 210; model: ["Sin", "Fade", "←", "→", "↓", "Escala"]; current: titleSection.cur("outAnimation", 0)
-                            onActivated: function(index) { controller.setSelectedTitleMotion(titleSection.cur("inAnimation", 0), index, titleSection.cur("inSeconds", 0.35), titleSection.cur("outSeconds", 0.25)) } }
-                    }
-                    FieldRow {
-                        label: "Entrada"
-                        Stepper { valueText: Number(titleSection.cur("inSeconds", 0)).toFixed(2) + " s"
-                            onDecrement: controller.setSelectedTitleMotion(titleSection.info.inAnimation, titleSection.info.outAnimation, Math.max(0, titleSection.info.inSeconds - 0.05), titleSection.info.outSeconds)
-                            onIncrement: controller.setSelectedTitleMotion(titleSection.info.inAnimation, titleSection.info.outAnimation, titleSection.info.inSeconds + 0.05, titleSection.info.outSeconds) }
-                    }
-                    FieldRow {
-                        label: "Salida"
-                        Stepper { valueText: Number(titleSection.cur("outSeconds", 0)).toFixed(2) + " s"
-                            onDecrement: controller.setSelectedTitleMotion(titleSection.info.inAnimation, titleSection.info.outAnimation, titleSection.info.inSeconds, Math.max(0, titleSection.info.outSeconds - 0.05))
-                            onIncrement: controller.setSelectedTitleMotion(titleSection.info.inAnimation, titleSection.info.outAnimation, titleSection.info.inSeconds, titleSection.info.outSeconds + 0.05) }
-                    }
                 }
                 Row {
                     visible: !controller.selectedClipHasTransition

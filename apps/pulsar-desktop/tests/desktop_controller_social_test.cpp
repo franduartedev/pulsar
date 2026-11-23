@@ -107,6 +107,20 @@ int main(int argc, char** argv) {
   controller.redoEdit();
   REQUIRE(10, std::abs(controller.selectedClipPosX() - 0.12) < 1e-8);
 
+  // Animated transforms are edited at the playhead, not into an unused base
+  // transform. The inspector therefore reports the evaluated value.
+  controller.seekToStart();
+  controller.setSelectedClipVisualKeyframe(0);
+  controller.seekNormalized(0.5);
+  controller.setSelectedClipTransform(-0.20, 0.10, 0.80, 25.0, 0.70);
+  REQUIRE(101, controller.selectedClipVisualKeyframes().size() == 2 &&
+                   std::abs(controller.selectedClipPosX() + 0.20) < 1e-8 &&
+                   std::abs(controller.selectedClipScale() - 0.80) < 1e-8);
+  controller.setSelectedClipVisualKeyframeInterpolation(1, 2);
+  REQUIRE(102, controller.selectedClipVisualKeyframes().at(1).toMap().value(QStringLiteral("interpolation")).toInt() == 2);
+  controller.removeSelectedClipVisualKeyframe(1);
+  REQUIRE(103, controller.selectedClipVisualKeyframes().size() == 1);
+
   controller.insertAssetAsOverlay(asset_id(controller, QStringLiteral("still_alpha.png")));
   REQUIRE(11, controller.selectedClipIsOverlay());
   controller.setSelectedClipTransform(0.0, -0.38, 1.0, 0.0, 0.65);
