@@ -849,6 +849,11 @@ void EditorSession::replace_subtitles(std::vector<application::SubtitleCue> subt
   synchronize_document_state();
 }
 
+void EditorSession::replace_markers(std::vector<application::TimelineMarker> markers) {
+  processor_.replace_markers(std::move(markers));
+  synchronize_document_state();
+}
+
 void EditorSession::duplicate_selected() {
   if (selected_title_.has_value()) {
     const auto* title = document_.find_title(*selected_title_);

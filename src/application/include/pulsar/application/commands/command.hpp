@@ -156,6 +156,10 @@ struct ReplaceSubtitlesCommand {
   std::vector<SubtitleCue> subtitles;
 };
 
+struct ReplaceMarkersCommand {
+  std::vector<TimelineMarker> markers;
+};
+
 struct AddTransitionCommand { domain::Transition transition; };
 struct RemoveTransitionCommand { domain::Transition transition; };
 
@@ -172,8 +176,8 @@ using Command = std::variant<AddTrackCommand, RemoveTrackCommand, RestoreEmptyVi
                              SetClipVisualTransformCommand, RestoreClipCommand,
                               RestoreSplitCommand, ImportAssetCommand, RemoveAssetCommand,
                               ReplaceAssetCommand,
-                              AddTitleCommand, RemoveTitleCommand, ReplaceTitleCommand,
-                              ReplaceSubtitlesCommand,
+                               AddTitleCommand, RemoveTitleCommand, ReplaceTitleCommand,
+                               ReplaceSubtitlesCommand, ReplaceMarkersCommand,
                               AddTransitionCommand, RemoveTransitionCommand>;
 
 } // namespace pulsar::application

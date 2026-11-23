@@ -163,6 +163,7 @@ Panel {
             ToolButton { glyph: "title"; text: pane.compactToolbar ? "" : "Título"; tip: "Agregar un título en el cabezal (T)"; enabled: controller.hasMedia; onClicked: controller.addTitle() }
             ToolButton { glyph: "title"; text: pane.compactToolbar ? "" : "Hero"; tip: "Agregar Hero Title"; enabled: controller.hasMedia; onClicked: controller.addTitlePreset(1) }
             ToolButton { glyph: "title"; text: pane.compactToolbar ? "" : "Lower"; tip: "Agregar Lower Third"; enabled: controller.hasMedia; onClicked: controller.addTitlePreset(2) }
+            ToolButton { glyph: "title"; text: pane.compactToolbar ? "" : "Marcador"; tip: "Agregar marcador en el cabezal (Shift+M)"; enabled: controller.hasMedia; onClicked: controller.addTimelineMarker() }
             Rectangle { anchors.verticalCenter: parent.verticalCenter; width: 1; height: 16; color: Theme.borderStrong }
             ToolButton { glyph: "magnet"; text: pane.compactToolbar ? "" : "Snap"; toggle: true; tip: controller.snapEnabled ? "Imán activado: se ajusta a bordes y cabezal (N)" : "Imán desactivado (N)"; checked: controller.snapEnabled; onClicked: controller.snapEnabled = !controller.snapEnabled }
             Rectangle { anchors.verticalCenter: parent.verticalCenter; width: 1; height: 16; color: Theme.borderStrong }
@@ -222,6 +223,31 @@ Panel {
                 height: ruler.height
                 Rectangle { anchors.bottom: parent.bottom; width: 1; height: modelData.major ? 10 : 5; color: Theme.textMuted; opacity: modelData.major ? 0.9 : 0.5 }
                 Text { visible: modelData.major; anchors.left: parent.left; anchors.leftMargin: 8; anchors.top: parent.top; anchors.topMargin: 5; text: modelData.label; color: Theme.textSecondary; font.family: Theme.mono; font.pixelSize: Theme.fontSizeXS }
+            }
+        }
+        // Editorial markers remain timeline-only: they are intentionally absent
+        // from the viewer/export pipeline and stay readable at every zoom level.
+        Repeater {
+            model: controller.timelineMarkers
+            delegate: Item {
+                x: pane.gutterWidth + modelData.progress * pane.timelineWidth - 5
+                y: 0; width: 11; height: ruler.height; z: 3
+                Rectangle { x: 4; y: 7; width: 2; height: parent.height - 7; color: Theme.focus }
+                Rectangle { x: 1; y: 2; width: 8; height: 8; rotation: 45; color: Theme.focus }
+                MouseArea {
+                    id: markerMouse; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                    acceptedButtons: Qt.LeftButton | Qt.RightButton
+                    onClicked: function(mouse) {
+                        if (mouse.button === Qt.RightButton) controller.removeTimelineMarker(index)
+                        else controller.seekTimelineAt((modelData.progress * pane.timelineWidth), pane.timelineWidth)
+                    }
+                }
+                Rectangle {
+                    visible: markerMouse.containsMouse; z: 10; y: ruler.height + 2
+                    width: markerHint.implicitWidth + 12; height: 20; radius: Theme.radiusS
+                    color: Theme.bgElevated; border.color: Theme.borderStrong
+                    Text { id: markerHint; anchors.centerIn: parent; text: (modelData.label.length > 0 ? modelData.label : "Marcador") + " · clic der. elimina"; color: Theme.textPrimary; font.pixelSize: Theme.fontSizeXS }
+                }
             }
         }
         Rectangle { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; height: 1; color: Theme.borderSubtle }

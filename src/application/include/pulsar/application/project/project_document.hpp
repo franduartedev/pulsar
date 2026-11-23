@@ -37,6 +37,7 @@ public:
   [[nodiscard]] const std::vector<domain::Title>& titles() const noexcept { return titles_; }
   [[nodiscard]] const std::vector<domain::Transition>& transitions() const noexcept { return transitions_; }
   [[nodiscard]] const std::vector<SubtitleCue>& subtitles() const noexcept { return subtitles_; }
+  [[nodiscard]] const std::vector<TimelineMarker>& markers() const noexcept { return markers_; }
   [[nodiscard]] const domain::Title* find_title(domain::TitleId id) const noexcept;
   [[nodiscard]] domain::TitleId next_title_id() const { return allocator_.next_title(); }
 
@@ -96,6 +97,7 @@ private:
   void remove_transition_value(const domain::Transition& transition);
   void validate_transition(const domain::Transition& transition) const;
   void replace_subtitles_value(const std::vector<SubtitleCue>& subtitles);
+  void replace_markers_value(const std::vector<TimelineMarker>& markers);
   void ensure_clip_has_no_transition(domain::ClipId clip_id) const;
   void validate_clip_for_track(domain::TrackId track_id, const domain::Clip& clip) const;
   [[nodiscard]] domain::Timeline& timeline_mutable() noexcept { return timeline_; }
@@ -116,6 +118,7 @@ private:
   std::vector<domain::Title> titles_;
   std::vector<domain::Transition> transitions_;
   std::vector<SubtitleCue> subtitles_;
+  std::vector<TimelineMarker> markers_;
   std::uint64_t asset_revision_{0};
   HistoryStateId current_history_state_id_{1};
   HistoryStateId saved_history_state_id_{1};

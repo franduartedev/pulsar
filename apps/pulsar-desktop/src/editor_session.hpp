@@ -298,6 +298,10 @@ public:
     return document_.subtitles();
   }
   void replace_subtitles(std::vector<application::SubtitleCue> subtitles);
+  [[nodiscard]] const std::vector<application::TimelineMarker>& markers() const noexcept {
+    return document_.markers();
+  }
+  void replace_markers(std::vector<application::TimelineMarker> markers);
   // "Eliminar y cerrar hueco": removes the selected clip (t0..t1) and moves EVERY clip of
   // any track that starts at or after t1 earlier by exactly t1 - t0. Clips that start
   // before t1 stay, nothing is trimmed, nothing may overlap afterwards (otherwise

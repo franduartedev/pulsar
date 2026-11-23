@@ -29,6 +29,7 @@ struct ProjectRestoreState {
   std::optional<ProjectCanvas> canvas{};
   std::vector<domain::Transition> transitions{};
   std::vector<SubtitleCue> subtitles{};
+  std::vector<TimelineMarker> markers{};
 };
 
 } // namespace pulsar::application

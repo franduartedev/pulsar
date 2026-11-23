@@ -211,6 +211,7 @@ ProjectDocument ProjectDocument::restore(const ProjectRestoreState& state) {
   restored.assets_ = state.assets;
   restored.transitions_ = state.transitions;
   restored.replace_subtitles_value(state.subtitles);
+  restored.replace_markers_value(state.markers);
   restored.canvas_ = state.canvas ? state.canvas : legacy_project_canvas(restored.snapshot());
   restored.allocator_.state = state.allocator_state;
   for (const auto& transition : restored.transitions_) restored.validate_transition(transition);
@@ -304,6 +305,18 @@ void ProjectDocument::replace_subtitles_value(const std::vector<SubtitleCue>& su
     }
   }
   subtitles_ = subtitles;
+}
+
+void ProjectDocument::replace_markers_value(const std::vector<TimelineMarker>& markers) {
+  if (markers.size() > 10'000) throw std::invalid_argument{"too many timeline markers"};
+  for (std::size_t index = 0; index < markers.size(); ++index) {
+    const auto& marker = markers[index];
+    if (marker.time < domain::MediaTime::zero() || marker.label.size() > 512 ||
+        (index > 0 && marker.time < markers[index - 1].time)) {
+      throw std::invalid_argument{"invalid timeline marker"};
+    }
+  }
+  markers_ = markers;
 }
 
 void ProjectDocument::replace_title_value(const domain::Title& title) {
@@ -437,7 +450,7 @@ void ProjectDocument::validate_clip_for_track(domain::TrackId track_id,
 ProjectSnapshot ProjectDocument::snapshot() const {
   return ProjectSnapshot{timeline_, assets_, video_track_id_, allocator_.state,
                          current_history_state_id_, saved_history_state_id_, next_history_state_id_,
-                         document_generation_, titles_, visual_track_ids_, canvas_, transitions_, subtitles_};
+                          document_generation_, titles_, visual_track_ids_, canvas_, transitions_, subtitles_, markers_};
 }
 
 void ProjectDocument::ensure_new_edit_possible() const {

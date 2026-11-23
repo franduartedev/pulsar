@@ -126,6 +126,11 @@ void CommandProcessor::replace_subtitles(std::vector<SubtitleCue> subtitles) {
   execute(ReplaceSubtitlesCommand{std::move(subtitles)});
 }
 
+void CommandProcessor::replace_markers(std::vector<TimelineMarker> markers) {
+  if (markers == document_.markers()) return;
+  execute(ReplaceMarkersCommand{std::move(markers)});
+}
+
 void CommandProcessor::add_transition(domain::Transition transition) {
   execute(AddTransitionCommand{std::move(transition)});
 }
@@ -561,6 +566,8 @@ void CommandProcessor::apply(ProjectDocument& document, const Command& command, 
           document.replace_title_value(concrete_command.title);
         } else if constexpr (std::is_same_v<CommandType, ReplaceSubtitlesCommand>) {
           document.replace_subtitles_value(concrete_command.subtitles);
+        } else if constexpr (std::is_same_v<CommandType, ReplaceMarkersCommand>) {
+          document.replace_markers_value(concrete_command.markers);
         } else if constexpr (std::is_same_v<CommandType, AddTransitionCommand>) {
           document.add_transition_value(concrete_command.transition);
         } else if constexpr (std::is_same_v<CommandType, RemoveTransitionCommand>) {
@@ -638,6 +645,8 @@ Command CommandProcessor::build_inverse(const ProjectDocument& document, const C
           return ReplaceTitleCommand{*existing};
         } else if constexpr (std::is_same_v<CommandType, ReplaceSubtitlesCommand>) {
           return ReplaceSubtitlesCommand{document.subtitles()};
+        } else if constexpr (std::is_same_v<CommandType, ReplaceMarkersCommand>) {
+          return ReplaceMarkersCommand{document.markers()};
         } else if constexpr (std::is_same_v<CommandType, AddTransitionCommand>) {
           return RemoveTransitionCommand{concrete_command.transition};
         } else if constexpr (std::is_same_v<CommandType, RemoveTransitionCommand>) {

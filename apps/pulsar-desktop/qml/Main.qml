@@ -128,6 +128,7 @@ Window {
     Shortcut { sequence: ","; enabled: !root.shortcutsBlocked; onActivated: controller.stepFrame(-1) }
     Shortcut { sequence: "."; enabled: !root.shortcutsBlocked; onActivated: controller.stepFrame(1) }
     Shortcut { sequence: "M"; enabled: !root.shortcutsBlocked; onActivated: controller.toggleSelectedClipMute() }
+    Shortcut { sequence: "Shift+M"; enabled: !root.shortcutsBlocked; onActivated: controller.addTimelineMarker() }
     Shortcut { sequence: "Shift+Delete"; enabled: !root.shortcutsBlocked; onActivated: controller.rippleDeleteSelectedClip() }
     Shortcut { sequence: "Q"; enabled: !root.shortcutsBlocked; onActivated: controller.trimSelectedStartToPlayhead() }
     Shortcut { sequence: "W"; enabled: !root.shortcutsBlocked; onActivated: controller.trimSelectedEndToPlayhead() }

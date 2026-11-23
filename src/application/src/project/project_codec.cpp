@@ -266,7 +266,7 @@ std::string ProjectCodec::encode(const ProjectSnapshot& snapshot) {
     }
   }
   // Version 4 adds clip fades; every file that does not need a newer feature keeps its old version.
-  const int version = has_visual_keyframes ? 18 : has_title_graphics ? 17 : has_dip_to_black ? 16 : has_fill ? 15 : has_telephone_keyframes ? 14 : has_audio_effect_order ? 13
+  const int version = !snapshot.markers.empty() ? 19 : has_visual_keyframes ? 18 : has_title_graphics ? 17 : has_dip_to_black ? 16 : has_fill ? 15 : has_telephone_keyframes ? 14 : has_audio_effect_order ? 13
       : has_underwater_keyframes ? 12 : has_underwater ? 11 : has_telephone ? 10 : has_subtitles ? 9
       : has_distant_music_keyframes ? 8 : has_distant_music ? 7 : needs_v6_layout ? 6 : needs_v5 ? 5
       : needs_v4 ? 4 : has_titles ? 3 : 2;
@@ -275,7 +275,7 @@ std::string ProjectCodec::encode(const ProjectSnapshot& snapshot) {
   // that section for these versions.
   const bool needs_v6 = needs_v6_layout || version >= 6;
   const std::size_t record_count = 1 + 1 + snapshot.timeline.tracks().size() + 1 +
-                                    snapshot.assets.size() + snapshot.titles.size() + snapshot.subtitles.size() + snapshot.transitions.size() +
+                                     snapshot.assets.size() + snapshot.titles.size() + snapshot.subtitles.size() + snapshot.markers.size() + snapshot.transitions.size() +
                                     (needs_v6 ? 1 + (snapshot.canvas ? 1 : 0) : 0);
   std::size_t clip_count = 0;
   for (const auto& track : snapshot.timeline.tracks()) clip_count += track.clips().size();
@@ -489,6 +489,12 @@ std::string ProjectCodec::encode(const ProjectSnapshot& snapshot) {
     output << ' ' << quote(subtitle.text) << "\n";
   }
 
+  for (const auto& marker : snapshot.markers) {
+    output << "MARKER ";
+    append_time(output, marker.time);
+    output << ' ' << quote(marker.label) << "\n";
+  }
+
   output << "ALLOCATOR " << snapshot.allocator_state.next_media_id << ' '
          << snapshot.allocator_state.next_clip_id << ' '
          << snapshot.allocator_state.next_timeline_id << ' '
@@ -525,9 +531,10 @@ ProjectRestoreState ProjectCodec::decode(std::string_view bytes) {
   bool version16 = false;
   bool version17 = false;
   bool version18 = false;
+  bool version19 = false;
   bool allocator = false;
   bool ended = false;
-  enum class Section { Header, Timeline, Tracks, VideoTrack, VisualTracks, Assets, Clips, Transitions, Titles, Subtitles, Allocator, End };
+  enum class Section { Header, Timeline, Tracks, VideoTrack, VisualTracks, Assets, Clips, Transitions, Titles, Subtitles, Markers, Allocator, End };
   Section section = Section::Header;
   std::size_t line_number = 0;
   std::size_t records = 0;
@@ -559,11 +566,12 @@ ProjectRestoreState ProjectCodec::decode(std::string_view bytes) {
 
     try {
       if (tokens[0].text == "PULSAR_PROJECT") {
-        if (header || tokens.size() != 2 || (tokens[1].text != "1" && tokens[1].text != "2" && tokens[1].text != "3" && tokens[1].text != "4" && tokens[1].text != "5" && tokens[1].text != "6" && tokens[1].text != "7" && tokens[1].text != "8" && tokens[1].text != "9" && tokens[1].text != "10" && tokens[1].text != "11" && tokens[1].text != "12" && tokens[1].text != "13" && tokens[1].text != "14" && tokens[1].text != "15" && tokens[1].text != "16" && tokens[1].text != "17" && tokens[1].text != "18")) {
+        if (header || tokens.size() != 2 || (tokens[1].text != "1" && tokens[1].text != "2" && tokens[1].text != "3" && tokens[1].text != "4" && tokens[1].text != "5" && tokens[1].text != "6" && tokens[1].text != "7" && tokens[1].text != "8" && tokens[1].text != "9" && tokens[1].text != "10" && tokens[1].text != "11" && tokens[1].text != "12" && tokens[1].text != "13" && tokens[1].text != "14" && tokens[1].text != "15" && tokens[1].text != "16" && tokens[1].text != "17" && tokens[1].text != "18" && tokens[1].text != "19")) {
           parse_fail(line_number, "invalid header/version");
         }
         header = true;
-        version18 = tokens[1].text == "18";
+        version19 = tokens[1].text == "19";
+        version18 = tokens[1].text == "18" || version19;
         version17 = tokens[1].text == "17" || version18;
         version16 = tokens[1].text == "16" || version17;
         version15 = tokens[1].text == "15" || version16;
@@ -1066,9 +1074,24 @@ ProjectRestoreState ProjectCodec::decode(std::string_view bytes) {
           parse_fail(line_number, error.what());
         }
         section = Section::Subtitles;
+      } else if (tokens[0].text == "MARKER") {
+        if (!version19 || (section != Section::Assets && section != Section::Clips &&
+            section != Section::Transitions && section != Section::Titles &&
+            section != Section::Subtitles && section != Section::Markers) ||
+            tokens.size() != 5 || !tokens[4].quoted) {
+          parse_fail(line_number, "invalid MARKER");
+        }
+        std::size_t i = 1;
+        const auto time = media_time(tokens, i, line_number, "marker time");
+        try {
+          state.markers.push_back(TimelineMarker{time, tokens[i].text});
+        } catch (const std::exception& error) {
+          parse_fail(line_number, error.what());
+        }
+        section = Section::Markers;
       } else if (tokens[0].text == "ALLOCATOR") {
         if (allocator || !video_track || (section != Section::Clips && section != Section::Assets &&
-            section != Section::Transitions && section != Section::Titles && section != Section::Subtitles) ||
+             section != Section::Transitions && section != Section::Titles && section != Section::Subtitles && section != Section::Markers) ||
             (tokens.size() != 5 && tokens.size() != 6)) parse_fail(line_number, "invalid ALLOCATOR");
         if (tokens.size() == 6) state.allocator_state.next_title_id = unsigned_number(tokens[5], line_number, "next title id");
         state.allocator_state.next_media_id = unsigned_number(tokens[1], line_number, "next media id");

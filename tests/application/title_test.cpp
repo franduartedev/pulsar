@@ -402,10 +402,29 @@ void output_stage_properties() {
   assert(std::fabs((just_above - kOutputKnee) - 1e-4F) < 2e-6F);
 }
 
+void timeline_markers_persist_and_undo() {
+  application::ProjectDocument document;
+  application::CommandProcessor processor{document};
+  const std::vector<application::TimelineMarker> markers{
+      {ms(500), "Primera nota"}, {secs(2), "Aprobación"}};
+  processor.replace_markers(markers);
+  assert(document.markers() == markers);
+  processor.undo();
+  assert(document.markers().empty());
+  processor.redo();
+  assert(document.markers() == markers);
+  const auto bytes = application::ProjectCodec::encode(document.snapshot());
+  assert(bytes.rfind("PULSAR_PROJECT 19\n", 0) == 0);
+  const auto restored = application::ProjectDocument::restore(application::ProjectCodec::decode(bytes));
+  assert(restored.markers() == markers);
+  assert(application::ProjectCodec::encode(restored.snapshot()) == bytes);
+}
+
 } // namespace
 
 int main() {
   output_stage_properties();
+  timeline_markers_persist_and_undo();
   title_domain_rules();
   title_commands_undo_redo_and_overlap();
   title_project_file_round_trip();

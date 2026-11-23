@@ -1,6 +1,7 @@
 #pragma once
 
 #include <pulsar/application/project/media_asset.hpp>
+#include <pulsar/application/project/timeline_marker.hpp>
 #include <pulsar/application/subtitle/srt.hpp>
 #include <pulsar/domain/ids/ids.hpp>
 #include <pulsar/domain/timeline/timeline.hpp>
@@ -52,6 +53,7 @@ struct ProjectSnapshot {
   std::optional<ProjectCanvas> canvas{};
   std::vector<domain::Transition> transitions{};
   std::vector<SubtitleCue> subtitles{};
+  std::vector<TimelineMarker> markers{};
 };
 
 // Throws on incomplete, duplicate, non-video, or missing-primary stack entries.

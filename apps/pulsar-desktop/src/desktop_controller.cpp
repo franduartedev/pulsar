@@ -681,6 +681,18 @@ void DesktopController::publishTimeline() {
   }
   timeline_model_.refresh(*active_session_, *timeline_view_start_, *timeline_view_duration_, thumbnailLookup());
   title_model_.refresh(active_session_->titles(), active_session_->selected_title(), *timeline_view_start_, *timeline_view_duration_);
+  timeline_markers_.clear();
+  int marker_index = 0;
+  for (const auto& marker : active_session_->markers()) {
+    if (marker.time >= *timeline_view_start_ && marker.time <= *timeline_view_start_ + *timeline_view_duration_) {
+      QVariantMap value;
+      value.insert("progress", timelinePixelAt(marker.time, 1.0));
+      value.insert("label", QString::fromStdString(marker.label));
+      value.insert("markerIndex", marker_index);
+      timeline_markers_.push_back(value);
+    }
+    ++marker_index;
+  }
   // Do not hold a media decoder open while the caller is still completing a
   // project switch or file operation. The queued request runs once the Qt
   // event loop regains control, after the current operation can release paths.
@@ -3690,6 +3702,44 @@ void DesktopController::commitTitle(pulsar::domain::Title title) {
 
 void DesktopController::addTitle() {
   addTitlePreset(static_cast<int>(pulsar::domain::TitlePreset::Classic));
+}
+
+void DesktopController::addTimelineMarker() {
+  if (!active_session_) return;
+  try {
+    auto markers = active_session_->markers();
+    const auto time = active_session_->playback_position();
+    const auto duplicate = std::find_if(markers.begin(), markers.end(), [&](const auto& marker) {
+      return marker.time == time;
+    });
+    if (duplicate != markers.end()) return;
+    markers.push_back({time, "Marcador"});
+    std::sort(markers.begin(), markers.end(), [](const auto& left, const auto& right) {
+      return left.time < right.time;
+    });
+    active_session_->replace_markers(std::move(markers));
+    clearError();
+    publishTimeline();
+  } catch (const std::exception& error) {
+    logCause("add timeline marker failed", error);
+    setError(QStringLiteral("No se pudo agregar el marcador."));
+  }
+}
+
+void DesktopController::removeTimelineMarker(int index) {
+  if (!active_session_ || index < 0 || index >= timeline_markers_.size()) return;
+  auto markers = active_session_->markers();
+  const auto marker_index = timeline_markers_.at(index).toMap().value("markerIndex").toInt();
+  if (marker_index < 0 || marker_index >= static_cast<int>(markers.size())) return;
+  try {
+    markers.erase(markers.begin() + marker_index);
+    active_session_->replace_markers(std::move(markers));
+    clearError();
+    publishTimeline();
+  } catch (const std::exception& error) {
+    logCause("remove timeline marker failed", error);
+    setError(QStringLiteral("No se pudo eliminar el marcador."));
+  }
 }
 
 void DesktopController::addTitlePreset(int preset) {

@@ -91,6 +91,7 @@ class DesktopController final : public QObject {
   Q_PROPERTY(QVariantList timelineTracks READ timelineTracks NOTIFY timelineChanged)
   Q_PROPERTY(QString timelineDurationText READ timelineDurationText NOTIFY timelineChanged)
   Q_PROPERTY(QVariantList timelineRulerTicks READ timelineRulerTicks NOTIFY timelineChanged)
+  Q_PROPERTY(QVariantList timelineMarkers READ timelineMarkers NOTIFY timelineChanged)
   Q_PROPERTY(double timelinePlayheadProgress READ timelinePlayheadProgress NOTIFY timelinePlayheadChanged)
   Q_PROPERTY(double timelineZoom READ timelineZoom NOTIFY timelineViewChanged)
   Q_PROPERTY(double timelineScroll READ timelineScroll NOTIFY timelineViewChanged)
@@ -214,6 +215,7 @@ public:
   [[nodiscard]] QVariantList timelineTracks() const { return timeline_tracks_; }
   [[nodiscard]] QString timelineDurationText() const { return timeline_duration_text_; }
   [[nodiscard]] QVariantList timelineRulerTicks() const { return timeline_ruler_ticks_; }
+  [[nodiscard]] QVariantList timelineMarkers() const { return timeline_markers_; }
   [[nodiscard]] double timelinePlayheadProgress() const { return timeline_playhead_progress_; }
   [[nodiscard]] double timelineZoom() const { return timeline_zoom_; }
   [[nodiscard]] double timelineScroll() const { return timeline_scroll_; }
@@ -403,6 +405,8 @@ public:
   [[nodiscard]] QString recoveryDirectory() const { return QString::fromStdString(recovery_.store().directory().string()); }
   // ---- Titles and motion graphics -------------------------------------------------------------
   Q_INVOKABLE void addTitle();                         // at the playhead
+  Q_INVOKABLE void addTimelineMarker();                // at the playhead
+  Q_INVOKABLE void removeTimelineMarker(int index);
   Q_INVOKABLE void addTitlePreset(int preset);          // 0 classic, 1 hero, 2 lower third, 3 stat, 4 chapter
   Q_INVOKABLE void selectTitle(const QString& key);
   Q_INVOKABLE void deleteSelectedTitle();
@@ -599,7 +603,7 @@ private:
   std::uint64_t analysis_generation_{0};
   std::atomic_bool export_cancel_requested_{false};
   std::uint64_t export_generation_{0};
-  QString status_{"Vacío"}; QString technical_status_{"Preview CPU"}; QString media_name_; QString metadata_; QString error_message_; QString preview_source_; QString viewer_state_{"empty"}; QString position_text_{"00:00:00.000"}; QString duration_text_{"--:--:--.---"}; QString debug_metrics_; QVariantList timeline_ruler_ticks_; QVariantList timeline_tracks_; QString timeline_duration_text_{"00:00:00.000"}; QString selected_clip_key_; QString selected_visual_track_key_;
+  QString status_{"Vacío"}; QString technical_status_{"Preview CPU"}; QString media_name_; QString metadata_; QString error_message_; QString preview_source_; QString viewer_state_{"empty"}; QString position_text_{"00:00:00.000"}; QString duration_text_{"--:--:--.---"}; QString debug_metrics_; QVariantList timeline_ruler_ticks_; QVariantList timeline_markers_; QVariantList timeline_tracks_; QString timeline_duration_text_{"00:00:00.000"}; QString selected_clip_key_; QString selected_visual_track_key_;
   TimelineClipListModel timeline_model_;
   // Clip thumbnails (decoration): one bounded cache + one worker; see thumbnail_service.hpp.
   std::shared_ptr<ThumbnailCache> thumb_cache_{std::make_shared<ThumbnailCache>()};
