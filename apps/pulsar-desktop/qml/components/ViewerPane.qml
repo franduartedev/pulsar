@@ -79,6 +79,31 @@ Item {
             visible: controller.previewSource.length > 0 && width > 0 && height > 0
         }
 
+        // Delivery guides are display-only. They share the exact canvas rect
+        // with the preview, so switching 16:9/9:16/1:1/4:5 never changes a
+        // title, a clip transform, or the exported image.
+        Item {
+            id: safeGuides
+            objectName: "viewerSafeGuides"
+            z: 10
+            x: interactionOverlay.canvasX; y: interactionOverlay.canvasY
+            width: interactionOverlay.canvasWidth; height: interactionOverlay.canvasHeight
+            visible: controller.safeGuidesEnabled && width > 0 && height > 0
+            Rectangle { anchors.fill: parent; color: "transparent"; border.width: 1; border.color: "#73D8FF" }
+            Rectangle {
+                x: parent.width * 0.05; y: parent.height * 0.05
+                width: parent.width * 0.90; height: parent.height * 0.90
+                color: "transparent"; border.width: 1; border.color: "#73D8FF"; opacity: 0.8
+            }
+            Rectangle {
+                x: parent.width * 0.10; y: parent.height * 0.10
+                width: parent.width * 0.80; height: parent.height * 0.80
+                color: "transparent"; border.width: 1; border.color: Theme.accent; opacity: 0.9
+            }
+            Text { x: 6; y: 5; text: "ACCIÓN 5%"; color: "#73D8FF"; font.pixelSize: Theme.fontSizeXS; font.bold: true }
+            Text { x: 6; y: 19; text: "TÍTULO 10%"; color: Theme.accent; font.pixelSize: Theme.fontSizeXS; font.bold: true }
+        }
+
         // Stable interaction surface. It owns the pointer grab independently of
         // the asynchronously replaced frame/texture. All gesture geometry is
         // snapshotted in this item's coordinate system at press time.

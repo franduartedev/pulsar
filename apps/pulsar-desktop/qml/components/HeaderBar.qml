@@ -71,6 +71,11 @@ Rectangle {
             PButton { flat: true; text: "4:5"; checked: controller.canvasPreset === "portrait45"
                 onClicked: controller.setCanvasPreset("portrait45") }
         }
+        PButton {
+            visible: header.width >= 1100
+            flat: true; text: "Guías"; checked: controller.safeGuidesEnabled
+            onClicked: controller.setSafeGuidesEnabled(!controller.safeGuidesEnabled)
+        }
         Item { width: Theme.spaceM; height: 1 }
         PButton { text: "Cancelar"; visible: controller.exportRunning; onClicked: controller.cancelExport() }
         PButton {

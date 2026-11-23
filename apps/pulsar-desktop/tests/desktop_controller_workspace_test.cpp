@@ -120,7 +120,15 @@ int main(int argc, char** argv) {
 
   auto* overlay = find_quick_item(viewer, QStringLiteral("viewerInteractionOverlay"));
   auto* frame = find_quick_item(viewer, QStringLiteral("viewerFrame"));
-  REQUIRE(12, overlay != nullptr && frame != nullptr && viewer->width() > 0);
+  auto* safe_guides = find_quick_item(viewer, QStringLiteral("viewerSafeGuides"));
+  REQUIRE(12, overlay != nullptr && frame != nullptr && safe_guides != nullptr && viewer->width() > 0);
+  REQUIRE(120, !safe_guides->isVisible());
+  controller.setSafeGuidesEnabled(true);
+  QTest::qWait(20);
+  REQUIRE(121, safe_guides->isVisible() && std::abs(safe_guides->x() - prop_real(overlay, "canvasX")) < 0.01 &&
+                   std::abs(safe_guides->width() - prop_real(overlay, "canvasWidth")) < 0.01);
+  controller.setSafeGuidesEnabled(false);
+  REQUIRE(122, !safe_guides->isVisible());
 
   const double canvas_aspect = controller.viewerCanvasAspectRatio();
   REQUIRE(13, std::abs(canvas_aspect - 16.0 / 9.0) < 0.01);

@@ -136,6 +136,7 @@ class DesktopController final : public QObject {
   Q_PROPERTY(double viewerCanvasAspectRatio READ viewerCanvasAspectRatio NOTIFY mediaChanged)
   Q_PROPERTY(int viewerCanvasPixelWidth READ viewerCanvasPixelWidth NOTIFY mediaChanged)
   Q_PROPERTY(int viewerCanvasPixelHeight READ viewerCanvasPixelHeight NOTIFY mediaChanged)
+  Q_PROPERTY(bool safeGuidesEnabled READ safeGuidesEnabled WRITE setSafeGuidesEnabled NOTIFY safeGuidesChanged)
   Q_PROPERTY(bool selectedClipOnScreen READ selectedClipOnScreen NOTIFY selectedClipOnScreenChanged)
   Q_PROPERTY(bool selectedClipHasTransition READ selectedClipHasTransition NOTIFY timelineChanged)
   Q_PROPERTY(QString selectedTransitionType READ selectedTransitionType NOTIFY timelineChanged)
@@ -260,6 +261,7 @@ public:
   [[nodiscard]] double viewerCanvasAspectRatio() const;
   [[nodiscard]] int viewerCanvasPixelWidth() const;
   [[nodiscard]] int viewerCanvasPixelHeight() const;
+  [[nodiscard]] bool safeGuidesEnabled() const noexcept { return safe_guides_enabled_; }
   [[nodiscard]] bool selectedClipOnScreen() const;
   [[nodiscard]] bool selectedClipHasTransition() const { return active_session_ && active_session_->selected_clip_has_transition(); }
   [[nodiscard]] QString selectedTransitionType() const;
@@ -296,6 +298,7 @@ public:
   Q_INVOKABLE void openPaths(const QStringList& paths);
   Q_INVOKABLE void relinkAsset(const QString& media_id, const QString& path);
   Q_INVOKABLE void setCanvasPreset(const QString& preset);
+  Q_INVOKABLE void setSafeGuidesEnabled(bool enabled);
   Q_INVOKABLE void openUrls(const QList<QUrl>& urls);
   Q_INVOKABLE void cancelImport();
   Q_INVOKABLE void importRequested();
@@ -482,7 +485,7 @@ signals:
   void exportRunningChanged(); void exportProgressChanged(); void exportStatusChanged();
   void exportDestinationChanged();
   void projectDirtyChanged(); void activeProjectPathChanged();
-  void diagnosticsChanged(); void timelineChanged(); void timelinePlayheadChanged(); void timelineViewChanged(); void snapEnabledChanged(); void recoveryChanged(); void importProgressChanged(); void waveformPolicyChanged(); void editActionStateChanged(); void focusImportPathRequested();
+  void diagnosticsChanged(); void timelineChanged(); void timelinePlayheadChanged(); void timelineViewChanged(); void snapEnabledChanged(); void safeGuidesChanged(); void recoveryChanged(); void importProgressChanged(); void waveformPolicyChanged(); void editActionStateChanged(); void focusImportPathRequested();
   void soundLibraryChanged(); void assetsChanged();
   void analysisChanged();
 private:
@@ -629,6 +632,7 @@ private:
   std::uint64_t asset_model_epoch_{0};
   std::uint64_t asset_model_revision_{~std::uint64_t{0}};
   double timeline_playhead_progress_{0.0}; double progress_{0.0}; double export_progress_{0.0}; bool has_media_{false}; bool has_video_media_{false}; bool playing_{false}; bool busy_{false}; bool export_running_{false}; bool preview_late_{false}; bool published_project_dirty_{false};
+  bool safe_guides_enabled_{false};
   QString export_status_{""}; QString export_destination_;
   QVariantList pulse_map_;
   QVariantList scene_cards_;

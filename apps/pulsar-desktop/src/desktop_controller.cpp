@@ -1375,6 +1375,11 @@ void DesktopController::insertAssetAsOverlay(const QString& media_id) {
     setError(QStringLiteral("No se pudo agregar el overlay PNG."));
   }
 }
+void DesktopController::setSafeGuidesEnabled(bool enabled) {
+  if (safe_guides_enabled_ == enabled) return;
+  safe_guides_enabled_ = enabled;
+  emit safeGuidesChanged();
+}
 QString DesktopController::canvasPreset() const {
   if (!active_session_) return QString();
   const auto canvas = active_session_->document().canvas();
