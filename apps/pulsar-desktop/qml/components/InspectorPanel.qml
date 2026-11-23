@@ -555,6 +555,19 @@ Panel {
                         onIncrement: controller.setSelectedClipTransform(controller.selectedClipPosX, controller.selectedClipPosY, controller.selectedClipScale, controller.selectedClipRotation, Math.min(1, controller.selectedClipOpacity + 0.05))
                     }
                 }
+                PButton {
+                    width: parent.width; height: Theme.controlHeightSmall
+                    text: "Agregar keyframe visual (lineal)"
+                    enabled: controller.selectedClipOnScreen
+                    onClicked: controller.setSelectedClipVisualKeyframe(1)
+                }
+                Text {
+                    width: parent.width; wrapMode: Text.WordWrap
+                    text: controller.selectedClipVisualKeyframes.length === 0
+                        ? "Creá un keyframe en el cabezal actual para animar posición, escala, giro y opacidad."
+                        : controller.selectedClipVisualKeyframes.length + " keyframe(s) visual(es). La interpolación se evalúa igual en preview y export."
+                    color: Theme.textMuted; font.pixelSize: Theme.fontSizeXS
+                }
                 PButton { width: parent.width; height: Theme.controlHeightSmall; text: "Restablecer"; onClicked: controller.resetSelectedClipTransform() }
                 Text { width: parent.width; wrapMode: Text.WordWrap; text: "Estos valores son controles de precisión. La posición usa el ancho y alto del lienzo; el giro está en grados."; color: Theme.textMuted; font.pixelSize: Theme.fontSizeXS }
             }

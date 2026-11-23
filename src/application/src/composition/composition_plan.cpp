@@ -84,7 +84,9 @@ CompositionPlan evaluate_composition_plan(const ProjectSnapshot& snapshot,
       throw CompositionPlanError{CompositionPlanErrorCode::MissingMedia,
                                  "transition references missing incoming media"};
     }
-    auto transform = incoming->visual_transform();
+    // During incoming pre-roll the clip-local visual animation is held at its
+    // first value; regular layers were already resolved at their local time.
+    auto transform = domain::evaluate_visual_transform(incoming->visual_transform(), 0.0);
     const double progress = static_cast<double>(timeline_position - start) /
                             static_cast<double>(transition.duration);
     transform.opacity *= std::clamp(progress, 0.0, 1.0);

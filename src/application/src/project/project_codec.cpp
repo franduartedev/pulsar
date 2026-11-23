@@ -217,6 +217,7 @@ std::string ProjectCodec::encode(const ProjectSnapshot& snapshot) {
   bool has_audio_effect_order = false;
   bool has_telephone_keyframes = false;
   bool has_fill = false;
+  bool has_visual_keyframes = false;
   const bool has_title_graphics = std::any_of(snapshot.titles.begin(), snapshot.titles.end(), [](const auto& title) {
     return title.preset() != domain::TitlePreset::Classic || !title.secondary_text().empty() ||
            title.accent_rgba() != 0x59D9FFFFu || title.motion() != domain::TitleMotion{};
@@ -228,6 +229,7 @@ std::string ProjectCodec::encode(const ProjectSnapshot& snapshot) {
     for (const auto& clip : track.clips()) {
       if (!clip.visual_transform().is_default()) has_visual_transforms = true;
       if (clip.visual_transform().fit != domain::VisualFit::Contain) has_fill = true;
+      if (!clip.visual_transform().keyframes.empty()) has_visual_keyframes = true;
       if (clip.distant_music().enabled) has_distant_music = true;
       if (clip.distant_music().enabled && !clip.distant_music().gain_keyframes.empty()) {
         has_distant_music_keyframes = true;
@@ -264,7 +266,7 @@ std::string ProjectCodec::encode(const ProjectSnapshot& snapshot) {
     }
   }
   // Version 4 adds clip fades; every file that does not need a newer feature keeps its old version.
-  const int version = has_title_graphics ? 17 : has_dip_to_black ? 16 : has_fill ? 15 : has_telephone_keyframes ? 14 : has_audio_effect_order ? 13
+  const int version = has_visual_keyframes ? 18 : has_title_graphics ? 17 : has_dip_to_black ? 16 : has_fill ? 15 : has_telephone_keyframes ? 14 : has_audio_effect_order ? 13
       : has_underwater_keyframes ? 12 : has_underwater ? 11 : has_telephone ? 10 : has_subtitles ? 9
       : has_distant_music_keyframes ? 8 : has_distant_music ? 7 : needs_v6_layout ? 6 : needs_v5 ? 5
       : needs_v4 ? 4 : has_titles ? 3 : 2;
@@ -389,6 +391,15 @@ std::string ProjectCodec::encode(const ProjectSnapshot& snapshot) {
                << transform.position_y << ' ' << transform.scale << ' '
                << transform.rotation_degrees << ' ' << transform.opacity;
         if (transform.fit == domain::VisualFit::Fill) output << " FIT_FILL";
+        if (!transform.keyframes.empty()) {
+          output << " CLIP_VISUAL_KEYFRAMES " << transform.keyframes.size();
+          for (const auto& keyframe : transform.keyframes) {
+            output << ' ' << keyframe.time_seconds << ' ' << keyframe.position_x << ' '
+                   << keyframe.position_y << ' ' << keyframe.scale << ' '
+                   << keyframe.rotation_degrees << ' ' << keyframe.opacity << ' '
+                   << static_cast<int>(keyframe.interpolation);
+          }
+        }
       }
       if (clip.distant_music().enabled) {
         const auto& fx = clip.distant_music();
@@ -513,6 +524,7 @@ ProjectRestoreState ProjectCodec::decode(std::string_view bytes) {
   bool version15 = false;
   bool version16 = false;
   bool version17 = false;
+  bool version18 = false;
   bool allocator = false;
   bool ended = false;
   enum class Section { Header, Timeline, Tracks, VideoTrack, VisualTracks, Assets, Clips, Transitions, Titles, Subtitles, Allocator, End };
@@ -547,11 +559,12 @@ ProjectRestoreState ProjectCodec::decode(std::string_view bytes) {
 
     try {
       if (tokens[0].text == "PULSAR_PROJECT") {
-        if (header || tokens.size() != 2 || (tokens[1].text != "1" && tokens[1].text != "2" && tokens[1].text != "3" && tokens[1].text != "4" && tokens[1].text != "5" && tokens[1].text != "6" && tokens[1].text != "7" && tokens[1].text != "8" && tokens[1].text != "9" && tokens[1].text != "10" && tokens[1].text != "11" && tokens[1].text != "12" && tokens[1].text != "13" && tokens[1].text != "14" && tokens[1].text != "15" && tokens[1].text != "16" && tokens[1].text != "17")) {
+        if (header || tokens.size() != 2 || (tokens[1].text != "1" && tokens[1].text != "2" && tokens[1].text != "3" && tokens[1].text != "4" && tokens[1].text != "5" && tokens[1].text != "6" && tokens[1].text != "7" && tokens[1].text != "8" && tokens[1].text != "9" && tokens[1].text != "10" && tokens[1].text != "11" && tokens[1].text != "12" && tokens[1].text != "13" && tokens[1].text != "14" && tokens[1].text != "15" && tokens[1].text != "16" && tokens[1].text != "17" && tokens[1].text != "18")) {
           parse_fail(line_number, "invalid header/version");
         }
         header = true;
-        version17 = tokens[1].text == "17";
+        version18 = tokens[1].text == "18";
+        version17 = tokens[1].text == "17" || version18;
         version16 = tokens[1].text == "16" || version17;
         version15 = tokens[1].text == "15" || version16;
         version14 = tokens[1].text == "14" || version15;
@@ -743,6 +756,7 @@ ProjectRestoreState ProjectCodec::decode(std::string_view bytes) {
         bool saw_audio = false;
         bool saw_fade = false;
         bool saw_transform = false;
+        bool saw_visual_keyframes = false;
         domain::DistantMusicSettings distant_music;
         bool saw_distant_music = false;
         domain::TelephoneSettings telephone;
@@ -777,6 +791,29 @@ ProjectRestoreState ProjectCodec::decode(std::string_view bytes) {
             if (version15 && i < tokens.size() && !tokens[i].quoted && tokens[i].text == "FIT_FILL") {
               visual_transform.fit = domain::VisualFit::Fill;
               ++i;
+            }
+          } else if (version18 && !tokens[i].quoted && tokens[i].text == "CLIP_VISUAL_KEYFRAMES" &&
+                     saw_transform && !saw_visual_keyframes) {
+            saw_visual_keyframes = true;
+            ++i;
+            if (i >= tokens.size()) parse_fail(line_number, "invalid visual keyframe count");
+            const auto count = unsigned_number(tokens[i++], line_number, "visual keyframe count");
+            if (count > 128 || i + count * 7 > tokens.size()) {
+              parse_fail(line_number, "invalid visual transform keyframes");
+            }
+            visual_transform.keyframes.reserve(static_cast<std::size_t>(count));
+            for (std::uint64_t keyframe = 0; keyframe < count; ++keyframe) {
+              domain::VisualTransformKeyframe value;
+              value.time_seconds = double_number(tokens[i++], line_number, "visual keyframe time");
+              value.position_x = double_number(tokens[i++], line_number, "visual keyframe position x");
+              value.position_y = double_number(tokens[i++], line_number, "visual keyframe position y");
+              value.scale = double_number(tokens[i++], line_number, "visual keyframe scale");
+              value.rotation_degrees = double_number(tokens[i++], line_number, "visual keyframe rotation");
+              value.opacity = double_number(tokens[i++], line_number, "visual keyframe opacity");
+              const auto interpolation = unsigned_number(tokens[i++], line_number, "visual keyframe interpolation");
+              if (interpolation > 2) parse_fail(line_number, "invalid visual keyframe interpolation");
+              value.interpolation = static_cast<domain::KeyframeInterpolation>(interpolation);
+              visual_transform.keyframes.push_back(value);
             }
           } else if (version7 && !tokens[i].quoted && tokens[i].text == "CLIP_DISTANT_MUSIC" && !saw_distant_music) {
             saw_distant_music = true;

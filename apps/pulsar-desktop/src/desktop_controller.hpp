@@ -129,6 +129,7 @@ class DesktopController final : public QObject {
   Q_PROPERTY(double selectedClipScale READ selectedClipScale NOTIFY timelineChanged)
   Q_PROPERTY(double selectedClipRotation READ selectedClipRotation NOTIFY timelineChanged)
   Q_PROPERTY(double selectedClipOpacity READ selectedClipOpacity NOTIFY timelineChanged)
+  Q_PROPERTY(QVariantList selectedClipVisualKeyframes READ selectedClipVisualKeyframes NOTIFY timelineChanged)
   Q_PROPERTY(QString selectedClipFitMode READ selectedClipFitMode NOTIFY timelineChanged)
   Q_PROPERTY(QVariantMap selectedClipVisualGeometry READ selectedClipVisualGeometry NOTIFY timelineChanged)
   Q_PROPERTY(QString canvasPreset READ canvasPreset NOTIFY mediaChanged)
@@ -252,6 +253,7 @@ public:
   [[nodiscard]] double selectedClipScale() const;
   [[nodiscard]] double selectedClipRotation() const;
   [[nodiscard]] double selectedClipOpacity() const;
+  [[nodiscard]] QVariantList selectedClipVisualKeyframes() const;
   [[nodiscard]] QString selectedClipFitMode() const;
   [[nodiscard]] QVariantMap selectedClipVisualGeometry() const;
   [[nodiscard]] QString canvasPreset() const;
@@ -357,7 +359,10 @@ public:
                                                        double value, int interpolation);
   Q_INVOKABLE void removeSelectedDistantMusicGainKeyframe(int index);
   Q_INVOKABLE void setSelectedClipTransform(double pos_x, double pos_y, double scale,
-                                             double rotation_degrees, double opacity);
+                                              double rotation_degrees, double opacity);
+  // Captures/replaces a transform keyframe at the selected clip-local playhead.
+  Q_INVOKABLE void setSelectedClipVisualKeyframe(int interpolation);
+  Q_INVOKABLE void removeSelectedClipVisualKeyframe(int index);
   // Editorial framing mode: "contain" (Ajustar) or "fill" (Rellenar).
   Q_INVOKABLE void setSelectedClipFitMode(const QString& mode);
   Q_INVOKABLE void resetSelectedClipTransform();

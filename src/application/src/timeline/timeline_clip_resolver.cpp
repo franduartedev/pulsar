@@ -85,7 +85,9 @@ TimelineResolveOutcome resolve_clip_at(const ProjectSnapshot& snapshot,
                         timeline_position - timeline_range.start(), source_range,
                         domain::MediaTime::zero(), clip->audio_gain_db(), clip->muted(),
                         asset->video_stream_index(),
-                        asset->source_locator(), std::move(audio), clip->visual_transform()};
+                         asset->source_locator(), std::move(audio),
+                         domain::evaluate_visual_transform(clip->visual_transform(),
+                                                           static_cast<double>(timeline_position - timeline_range.start()))};
   resolved.source_time = clip_source_position(resolved, timeline_position);
   return resolved;
 }
@@ -105,7 +107,8 @@ std::optional<ResolvedClip> resolve_clip_by_id(const ProjectDocument& document,
   ResolvedClip resolved{clip->id(), clip->media_id(), timeline_range.start(), timeline_range,
                         domain::MediaTime::zero(), source_range, source_range.start(),
                         clip->audio_gain_db(), clip->muted(), asset->video_stream_index(),
-                        asset->source_locator(), std::move(audio), clip->visual_transform()};
+                         asset->source_locator(), std::move(audio),
+                         domain::evaluate_visual_transform(clip->visual_transform(), 0.0)};
   return resolved;
 }
 

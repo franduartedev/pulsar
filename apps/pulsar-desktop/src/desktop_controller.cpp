@@ -2215,6 +2215,20 @@ double DesktopController::selectedClipOpacity() const {
   const auto* clip = active_session_->document().timeline().find_clip(*active_session_->selected_clip());
   return clip ? clip->visual_transform().opacity : 1.0;
 }
+QVariantList DesktopController::selectedClipVisualKeyframes() const {
+  QVariantList result;
+  if (!active_session_ || !active_session_->selected_clip()) return result;
+  const auto* clip = active_session_->document().timeline().find_clip(*active_session_->selected_clip());
+  if (clip == nullptr) return result;
+  for (const auto& keyframe : clip->visual_transform().keyframes) {
+    result.push_back(QVariantMap{{QStringLiteral("time"), keyframe.time_seconds},
+        {QStringLiteral("x"), keyframe.position_x}, {QStringLiteral("y"), keyframe.position_y},
+        {QStringLiteral("scale"), keyframe.scale}, {QStringLiteral("rotation"), keyframe.rotation_degrees},
+        {QStringLiteral("opacity"), keyframe.opacity},
+        {QStringLiteral("interpolation"), static_cast<int>(keyframe.interpolation)}});
+  }
+  return result;
+}
 QString DesktopController::selectedClipFitMode() const {
   if (!active_session_ || !active_session_->selected_clip()) return QStringLiteral("contain");
   const auto* clip = active_session_->document().timeline().find_clip(*active_session_->selected_clip());
@@ -2267,11 +2281,16 @@ void DesktopController::setSelectedClipTransform(double pos_x, double pos_y, dou
   if (!active_session_ || !active_session_->selected_clip()) return;
   const auto* current = active_session_->document().timeline().find_clip(
       *active_session_->selected_clip());
-  const auto fit = current ? current->visual_transform().fit : pulsar::domain::VisualFit::Contain;
+  auto transform = current ? current->visual_transform() : pulsar::domain::VisualTransform{};
+  transform.position_x = pos_x;
+  transform.position_y = pos_y;
+  transform.scale = scale;
+  transform.rotation_degrees = rotation_degrees;
+  transform.opacity = opacity;
   try {
     active_session_->set_clip_visual_transform(
         *active_session_->selected_clip(),
-        pulsar::domain::VisualTransform{pos_x, pos_y, scale, rotation_degrees, opacity, fit});
+        transform);
 #ifndef NDEBUG
     qInfo().noquote() << "preview_pipeline transform_commit projectRevision="
                       << active_session_->document().document_generation();
@@ -2305,6 +2324,47 @@ void DesktopController::setSelectedClipFitMode(const QString& mode) {
     setError(QStringLiteral("No se pudo cambiar el modo de encuadre."));
   }
 }
+void DesktopController::setSelectedClipVisualKeyframe(int interpolation) {
+  if (!active_session_ || !active_session_->selected_clip() || interpolation < 0 || interpolation > 2) return;
+  const auto* clip = active_session_->document().timeline().find_clip(*active_session_->selected_clip());
+  if (clip == nullptr) return;
+  const double time = secondsAsDouble(active_session_->playback_position() - clip->timeline_range().start());
+  if (time < 0.0 || time > secondsAsDouble(clip->duration())) {
+    setError(QStringLiteral("El cabezal debe estar dentro del clip para crear un keyframe."));
+    return;
+  }
+  auto transform = clip->visual_transform();
+  const auto evaluated = pulsar::domain::evaluate_visual_transform(transform, time);
+  pulsar::domain::VisualTransformKeyframe frame{time, evaluated.position_x, evaluated.position_y,
+      evaluated.scale, evaluated.rotation_degrees, evaluated.opacity,
+      static_cast<pulsar::domain::KeyframeInterpolation>(interpolation)};
+  const auto existing = std::find_if(transform.keyframes.begin(), transform.keyframes.end(),
+      [time](const auto& item) { return std::abs(item.time_seconds - time) < 0.0001; });
+  if (existing != transform.keyframes.end()) *existing = frame;
+  else transform.keyframes.insert(std::upper_bound(transform.keyframes.begin(), transform.keyframes.end(), time,
+      [](double value, const auto& item) { return value < item.time_seconds; }), frame);
+  try {
+    active_session_->set_clip_visual_transform(*active_session_->selected_clip(), transform);
+    clearError(); clearProgram(has_video_media_ ? "loading" : "empty"); publishTimeline();
+  } catch (const std::exception& error) {
+    logCause("visual keyframe edit failed", error);
+    setError(QStringLiteral("El keyframe visual no es válido."));
+  }
+}
+void DesktopController::removeSelectedClipVisualKeyframe(int index) {
+  if (!active_session_ || !active_session_->selected_clip()) return;
+  const auto* clip = active_session_->document().timeline().find_clip(*active_session_->selected_clip());
+  if (clip == nullptr || index < 0 || static_cast<std::size_t>(index) >= clip->visual_transform().keyframes.size()) return;
+  auto transform = clip->visual_transform();
+  transform.keyframes.erase(transform.keyframes.begin() + index);
+  try {
+    active_session_->set_clip_visual_transform(*active_session_->selected_clip(), transform);
+    clearError(); clearProgram(has_video_media_ ? "loading" : "empty"); publishTimeline();
+  } catch (const std::exception& error) {
+    logCause("visual keyframe removal failed", error);
+    setError(QStringLiteral("No se pudo quitar el keyframe visual."));
+  }
+}
 void DesktopController::resetSelectedClipTransform() {
   if (!active_session_ || !active_session_->selected_clip()) return;
   const auto* clip = active_session_->document().timeline().find_clip(*active_session_->selected_clip());
@@ -2334,10 +2394,15 @@ void DesktopController::updateSelectedClipTransform(double pos_x, double pos_y, 
   if (!active_session_ || !active_session_->selected_clip()) return;
   const auto* current = active_session_->document().timeline().find_clip(
       *active_session_->selected_clip());
-  const auto fit = current ? current->visual_transform().fit : pulsar::domain::VisualFit::Contain;
+  auto transform = current ? current->visual_transform() : pulsar::domain::VisualTransform{};
+  transform.position_x = pos_x;
+  transform.position_y = pos_y;
+  transform.scale = scale;
+  transform.rotation_degrees = rotation_degrees;
+  transform.opacity = opacity;
   try {
     active_session_->update_clip_visual_transform(
-        pulsar::domain::VisualTransform{pos_x, pos_y, scale, rotation_degrees, opacity, fit});
+        transform);
 #ifndef NDEBUG
     qInfo().noquote() << "preview_pipeline transform_update projectRevision="
                       << active_session_->document().document_generation();

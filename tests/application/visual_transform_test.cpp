@@ -128,6 +128,34 @@ void defaults_reject_bad_values() {
   }
 }
 
+void visual_keyframes_evaluate_and_roundtrip() {
+  domain::VisualTransform animated;
+  animated.keyframes = {
+      {0.0, -0.5, 0.0, 0.5, 0.0, 0.2, domain::KeyframeInterpolation::Smooth},
+      {2.0, 0.5, 0.25, 1.0, 90.0, 1.0, domain::KeyframeInterpolation::Hold},
+      {3.0, -0.25, 0.0, 0.75, 180.0, 0.6, domain::KeyframeInterpolation::Linear}};
+  domain::validate_visual_transform(animated);
+  const auto midpoint = domain::evaluate_visual_transform(animated, 1.0);
+  assert(std::abs(midpoint.position_x) < 0.00001); // smoothstep(0.5) == 0.5
+  assert(std::abs(midpoint.rotation_degrees - 45.0) < 0.00001);
+  const auto held = domain::evaluate_visual_transform(animated, 2.5);
+  assert(held.position_x == 0.5 && held.rotation_degrees == 90.0);
+
+  application::ProjectDocument document;
+  application::CommandProcessor processor{document};
+  Probe probe;
+  const auto media = processor.import_asset("video.mp4", probe);
+  const auto clip = processor.add_clip(media, domain::TimeRange{{0, {1, 1}}, {10, {1, 1}}}, {0, {1, 1}});
+  processor.set_clip_visual_transform(clip, animated);
+  const auto snapshot = document.snapshot();
+  const auto context = application::VisualRenderContext::build(snapshot);
+  const auto plan = application::evaluate_composition_plan(snapshot, context, domain::MediaTime{1, {1, 1}});
+  assert(plan.layers.size() == 1 && std::abs(plan.layers.front().transform.position_x) < 0.00001);
+  const auto bytes = application::ProjectCodec::encode(document.snapshot());
+  const auto restored = application::ProjectDocument::restore(application::ProjectCodec::decode(bytes));
+  assert(restored.timeline().find_clip(clip)->visual_transform() == animated);
+}
+
 void transform_units_are_canvas_relative() {
   auto canvas = comp::black_surface(4, 2);
   auto fitted = patterned_2x2();
@@ -427,6 +455,7 @@ void scaled_and_translated_layers_composite_in_order() {
 
 int main() {
   defaults_reject_bad_values();
+  visual_keyframes_evaluate_and_roundtrip();
   transform_units_are_canvas_relative();
   rotation_180_swaps_corners_exactly();
   opacity_blends_over_lower_layer();
