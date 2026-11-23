@@ -10,14 +10,51 @@
 #include <sstream>
 #include <system_error>
 
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
 namespace fs = std::filesystem;
+
+namespace {
+
+// std::filesystem::rename does not promise replacement semantics on Windows.
+// Recovery metadata must advance on every autosave, or a later normal save can
+// incorrectly look older than the recovery snapshot.
+bool replace_atomically(const fs::path& temporary, const fs::path& destination,
+                        std::error_code& error) noexcept {
+#ifdef _WIN32
+  if (MoveFileExW(temporary.c_str(), destination.c_str(),
+                  MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0) {
+    error.clear();
+    return true;
+  }
+  error = std::error_code{static_cast<int>(GetLastError()), std::system_category()};
+  return false;
+#else
+  fs::rename(temporary, destination, error);
+  return !error;
+#endif
+}
+
+} // namespace
 
 fs::path RecoveryStore::default_directory() {
   if (const char* override_dir = std::getenv("PULSAR_RECOVERY_DIR"); override_dir != nullptr && *override_dir != '\0') {
     return fs::path{override_dir};
   }
+#ifdef _WIN32
+  if (const char* app_data = std::getenv("LOCALAPPDATA"); app_data != nullptr && *app_data != '\0') {
+    return fs::path{app_data} / "PULSAR" / "recovery";
+  }
+#elif defined(__APPLE__)
+  if (const char* home = std::getenv("HOME"); home != nullptr && *home != '\0') {
+    return fs::path{home} / "Library" / "Application Support" / "PULSAR" / "recovery";
+  }
+#else
   if (const char* xdg = std::getenv("XDG_DATA_HOME"); xdg != nullptr && *xdg != '\0') return fs::path{xdg} / "PULSAR" / "recovery";
   if (const char* home = std::getenv("HOME"); home != nullptr && *home != '\0') return fs::path{home} / ".local" / "share" / "PULSAR" / "recovery";
+#endif
   return fs::temp_directory_path() / "PULSAR" / "recovery";
 }
 
@@ -37,8 +74,10 @@ bool RecoveryStore::write(const pulsar::application::ProjectSnapshot& snapshot, 
       out.flush();
       if (!out) { fs::remove(temporary, error); return false; }
     }
-    fs::rename(temporary, meta_path(), error);
-    if (error) { fs::remove(temporary, error); return false; }
+    if (!replace_atomically(temporary, meta_path(), error)) {
+      fs::remove(temporary, error);
+      return false;
+    }
     return true;
   } catch (...) {
     return false;

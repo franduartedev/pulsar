@@ -21,7 +21,7 @@ public:
   };
 
   explicit RecoveryStore(std::filesystem::path directory) : directory_{std::move(directory)} {}
-  // $PULSAR_RECOVERY_DIR, else <XDG data home or ~/.local/share>/PULSAR/recovery.
+  // $PULSAR_RECOVERY_DIR, else the operating system's per-user app-data folder.
   [[nodiscard]] static std::filesystem::path default_directory();
 
   // Atomic and exception free: false when the folder is unusable (the app carries on).
